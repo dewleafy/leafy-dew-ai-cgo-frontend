@@ -1,0 +1,86 @@
+export type AnyRecord = Record<string, unknown>;
+
+export type ApiRows<T> = {
+  ok?: boolean;
+  sellerId?: string;
+  count?: number;
+  rows?: T[];
+};
+
+export type Recommendation = {
+  id: string;
+  entityValue?: string | null;
+  recommendationType?: string;
+  recommendedAction?: string;
+  priorityLabel?: string;
+  confidenceLabel?: string;
+  riskLevel?: string;
+  reason?: string;
+  status?: string;
+  userNote?: string | null;
+  profitEvidence?: AnyRecord;
+};
+
+export type ProductPassport = {
+  id: string;
+  productName?: string;
+  sku?: string | null;
+  asin?: string | null;
+  category?: string | null;
+  status?: string;
+};
+
+export type ProductEconomics = {
+  id: string;
+  productName?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  sellingPrice?: number | string | null;
+  targetProfit?: number | string | null;
+  targetAcos?: number | string | null;
+  profitStatus?: string | null;
+};
+
+export type Experiment = {
+  id: string;
+  experimentName?: string;
+  experimentType?: string;
+  status?: string;
+  priority?: string;
+  hypothesis?: string | null;
+  expectedResult?: string | null;
+  successMetric?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+};
+
+export type ActivityLog = {
+  id: string;
+  createdAt?: string;
+  eventType?: string;
+  entityType?: string | null;
+  entityLabel?: string | null;
+  action?: string;
+  status?: string;
+  message?: string | null;
+  userNote?: string | null;
+};
+
+export type AutomationSettings = {
+  mode?: string;
+  maxDailyRecommendations?: number;
+  targetAcosDefault?: number;
+  minProfitLowPrice?: number;
+  minProfitMidPrice?: number;
+  allowAutoNegative?: boolean;
+  allowAutoBidChange?: boolean;
+  allowAutoBudgetChange?: boolean;
+  allowAutoKeywordAdd?: boolean;
+  allowAutoProductTargetAdd?: boolean;
+  allowAutoListingChange?: boolean;
+  allowAutoPriceChange?: boolean;
+  approvalRequiredForTier2?: boolean;
+  approvalRequiredForTier3?: boolean;
+  shadowModeDays?: number;
+  notes?: string | null;
+};
