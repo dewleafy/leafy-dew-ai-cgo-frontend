@@ -156,6 +156,11 @@
   gap: 18px;
 }
 
+.dashboard-grid.today {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
 .summary-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -250,6 +255,45 @@
   color: #244332;
   background: #edf7ef;
   border-color: #cce5d0;
+}
+
+.status-card h3 {
+  margin: 0 0 12px;
+  color: #1b2a22;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.status-card p,
+.warning-card p,
+.section-note,
+.action-card p {
+  color: #3f5148;
+  line-height: 1.45;
+}
+
+.section-note {
+  margin: 12px 0 0;
+  font-size: 14px;
+}
+
+.warning-card {
+  border: 1px solid #f0b8a8;
+  background: #fff0ed;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.action-list {
+  display: grid;
+  gap: 12px;
+}
+
+.action-card {
+  border: 1px solid #e3ebdf;
+  background: #fbfdf9;
+  border-radius: 12px;
+  padding: 14px;
 }
 
 .button-row {

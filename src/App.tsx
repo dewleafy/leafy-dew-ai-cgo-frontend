@@ -127,7 +127,7 @@ function LoadingBlock() {
 }
 
 function ErrorBlock() {
-  return <div className="soft-state error-state">Unable to load this section.</div>;
+  return <div className="soft-state error-state">Could not load this section. Backend may still be deploying.</div>;
 }
 
 function EmptyBlock({ text = "No rows yet." }: { text?: string }) {
@@ -151,16 +151,6 @@ function MetricRow({ label, value }: { label: string; value: ReactNode }) {
     <div className="metric-row">
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
-  );
-}
-
-function TaskRow({ label, count, tone }: { label: string; count: number; tone: string }) {
-  return (
-    <div className="task-row">
-      <span className={`task-dot dot-${tone}`} />
-      <span>{label}</span>
-      <strong>{count}</strong>
     </div>
   );
 }
@@ -310,84 +300,146 @@ function App() {
 
 function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
   const ceo = useApi<AnyRecord>(() => getJson(`/api/ceo-report/daily?sellerId=${SELLER_ID}&days=30`));
-  const learning = useApi<AnyRecord>(() => getJson(`/api/learning-summary?sellerId=${SELLER_ID}&days=30`));
-  const productReadiness = useApi<AnyRecord>(() => getJson(`/api/product-passports/readiness/summary?sellerId=${SELLER_ID}`));
-  const listingReadiness = useApi<AnyRecord>(() => getJson(`/api/listing-readiness?sellerId=${SELLER_ID}`));
-  const settings = useApi<AnyRecord>(() => getJson(`/api/automation-settings?sellerId=${SELLER_ID}`));
+  const amazonStatus = useApi<AnyRecord>(() => getJson(`/api/amazon-sp/status?sellerId=${SELLER_ID}`));
+  const recommendations = useApi<ApiRows<Recommendation>>(() => getJson(`/api/recommendations?sellerId=${SELLER_ID}&status=NEW`));
+  const reportJobs = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/amazon-sp/report-jobs?sellerId=${SELLER_ID}`));
 
-  const learningSummary = recordOf(learning.data?.summary);
-  const productSummary = recordOf(productReadiness.data?.summary);
-  const listingSummary = recordOf(listingReadiness.data?.summary);
+  const ceoReport = ceo.data ?? {};
   const executiveSummary = recordOf(ceo.data?.executiveSummary);
-  const ppcSnapshot = recordOf(ceo.data?.ppcSnapshot);
-  const nextBestAction = recordOf(ceo.data?.nextBestAction);
-  const automation = recordOf(settings.data?.settings);
-  const productUpdates = readNumber(productSummary.needsFixCount) + readNumber(productSummary.missingEconomicsCount);
-  const listingsNeedAttention = readNumber(listingSummary.needsFixCount) + readNumber(listingSummary.poorCount);
+  const profitGuardrail = recordOf(ceo.data?.profitGuardrail);
+  const amazonSales = recordOf(ceo.data?.amazonSalesSummary);
+  const topActions = arrayOf(ceo.data?.todayTopActions).slice(0, 3);
+  const pendingApprovalCount = Array.isArray(ceo.data?.pendingApprovals)
+    ? arrayOf(ceo.data?.pendingApprovals).length
+    : rowsOf<Recommendation>(recommendations.data).length;
+  const latestReportJob = rowsOf<AnyRecord>(reportJobs.data)[0];
+  const profitStatus = executiveSummary.profitStatus ?? ceoReport.profitStatus ?? profitGuardrail.profitStatus;
+  const profitDataStatus = profitGuardrail.profitDataStatus;
+  const showProfitSafetyWarning = profitStatus === "NEEDS_COST_DATA" || profitDataStatus === "MISSING_COST_DATA";
 
   return (
     <div className="page">
       <div className="page-title">
-        <h1>Good morning, Founder 👋</h1>
-        <p>Here&apos;s your daily focus.</p>
+        <h1>Today Dashboard</h1>
+        <p>Founder-simple operating view. Shadow mode stays approval-first.</p>
       </div>
-      <div className="dashboard-grid simple">
-        <Card title="Daily Tasks">
-          {learning.error || productReadiness.error || listingReadiness.error ? <ErrorBlock /> : null}
-          {learning.loading || productReadiness.loading || listingReadiness.loading ? (
+      <div className="dashboard-grid today">
+        <Card title="CEO Status">
+          {ceo.error ? <ErrorBlock /> : null}
+          {ceo.loading ? (
             <LoadingBlock />
           ) : (
-            <div className="task-list">
-              <TaskRow label="Recommendations to Review" count={readNumber(learningSummary.newRecommendationCount)} tone="green" />
-              <TaskRow label="Experiments to Check" count={readNumber(learningSummary.activeExperimentCount)} tone="blue" />
-              <TaskRow label="Outcomes Need More Data" count={readNumber(learningSummary.needsMoreDataCount)} tone="amber" />
-              <TaskRow label="Product Passport Updates" count={productUpdates} tone="pink" />
-              <TaskRow label="Listings Need Attention" count={listingsNeedAttention} tone="red" />
+            <div className="status-card">
+              <h3>{formatEmpty(ceoReport.headline ?? executiveSummary.headline)}</h3>
+              <div className="badge-row">
+                <StatusBadge value={ceoReport.businessStatus ?? executiveSummary.businessStatus} />
+                <StatusBadge value={profitStatus} />
+              </div>
+              <p>{formatEmpty(ceoReport.oneLineAdvice ?? executiveSummary.oneLineAdvice)}</p>
             </div>
           )}
         </Card>
 
-        <Card title="Daily Summary">
+        <Card title="Amazon Sales Summary">
           {ceo.error ? <ErrorBlock /> : null}
           {ceo.loading ? (
             <LoadingBlock />
           ) : (
             <div>
-              <MetricRow label="Business Status" value={<StatusBadge value={executiveSummary.businessStatus} />} />
-              <MetricRow label="Profit Status" value={<StatusBadge value={executiveSummary.profitStatus} />} />
-              <MetricRow label="Total Spend" value={formatMoney(ppcSnapshot.cost)} />
-              <MetricRow label="Total Sales" value={formatMoney(ppcSnapshot.sales)} />
-              <MetricRow label="ACOS Overall" value={formatPercent(ppcSnapshot.acos)} />
-              <MetricRow label="Orders" value={formatEmpty(ppcSnapshot.orders)} />
-              <MetricRow label="Next Best Action" value={formatEmpty(nextBestAction.title)} />
+              <MetricRow label="Confirmed Sales" value={formatMoney(amazonSales.confirmedSales)} />
+              <MetricRow label="Confirmed Orders" value={formatEmpty(amazonSales.confirmedOrders)} />
+              <MetricRow label="Confirmed Units" value={formatEmpty(amazonSales.confirmedUnits)} />
+              <MetricRow label="Pending Sales" value={formatMoney(amazonSales.pendingSales)} />
+              <MetricRow label="Cancelled Sales" value={formatMoney(amazonSales.cancelledSales)} />
+              <MetricRow label="Raw Sales" value={formatMoney(amazonSales.rawSales)} />
+              <p className="section-note">
+                {formatEmpty(amazonSales.statusNote) === "???"
+                  ? "Confirmed sales exclude cancelled and pending orders."
+                  : formatEmpty(amazonSales.statusNote)}
+              </p>
             </div>
           )}
         </Card>
 
-        <Card title="Safety Status">
-          {settings.error ? <ErrorBlock /> : null}
-          {settings.loading ? (
+        <Card title="Profit Safety">
+          {ceo.error ? <ErrorBlock /> : null}
+          {ceo.loading ? (
+            <LoadingBlock />
+          ) : showProfitSafetyWarning ? (
+            <div className="warning-card">
+              <StatusBadge value="NEEDS COST DATA" />
+              <p>Product cost data is missing. Add landed cost before approving PPC scaling or growth actions.</p>
+            </div>
+          ) : (
+            <div>
+              <MetricRow label="Profit Status" value={<StatusBadge value={profitStatus} />} />
+              <MetricRow label="Profit Data" value={<StatusBadge value={profitDataStatus ?? "AVAILABLE"} />} />
+              <p className="section-note">Growth actions remain approval-first in shadow mode.</p>
+            </div>
+          )}
+        </Card>
+
+        <Card title="Sync Status">
+          {amazonStatus.error ? <ErrorBlock /> : null}
+          {amazonStatus.loading ? (
             <LoadingBlock />
           ) : (
             <div>
-              <MetricRow label="Automation Mode" value={<StatusBadge value={automation.mode ?? "SHADOW"} />} />
-              <MetricRow label="Risky Automation" value={<StatusBadge value="OFF" />} />
-              <MetricRow label="Approval Tier 2" value="Required" />
-              <MetricRow label="Approval Tier 3" value="Required" />
-              <MetricRow label="Shadow Mode Days" value={formatEmpty(automation.shadowModeDays)} />
+              <MetricRow label="Connected" value={<StatusBadge value={amazonStatus.data?.connected ? "CONNECTED" : "DISCONNECTED"} />} />
+              <MetricRow label="Listing Count" value={formatEmpty(amazonStatus.data?.listingCount)} />
+              <MetricRow label="Order Count" value={formatEmpty(amazonStatus.data?.orderCount)} />
+              <MetricRow label="Last Listings Sync" value={formatEmpty(amazonStatus.data?.lastListingsSyncAt)} />
+              <MetricRow label="Last Orders Sync" value={formatEmpty(amazonStatus.data?.lastOrdersSyncAt)} />
+              <MetricRow label="Last Error" value={formatEmpty(amazonStatus.data?.lastError)} />
+              {reportJobs.loading || reportJobs.error || !latestReportJob ? null : (
+                <MetricRow label="Latest Report Job" value={<StatusBadge value={latestReportJob.status} />} />
+              )}
+            </div>
+          )}
+        </Card>
+
+        <Card title="Today Top 3 Actions">
+          {ceo.error ? <ErrorBlock /> : null}
+          {ceo.loading ? (
+            <LoadingBlock />
+          ) : topActions.length === 0 ? (
+            <EmptyBlock text="No urgent shadow-mode actions today." />
+          ) : (
+            <div className="action-list">
+              {topActions.map((item, index) => (
+                <article className="action-card" key={String(item.id ?? item.entityValue ?? index)}>
+                  <div className="item-top">
+                    <strong>{formatEmpty(item.recommendedAction)}</strong>
+                    <StatusBadge value={item.priorityLabel} />
+                  </div>
+                  <MetricRow label="Entity" value={formatEmpty(item.entityValue)} />
+                  <div className="badge-row">
+                    <StatusBadge value={item.confidenceLabel} />
+                    <StatusBadge value={item.riskLevel} />
+                  </div>
+                  <p>{formatEmpty(item.reason)}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card title="Approval Queue">
+          {recommendations.error && ceo.error ? <ErrorBlock /> : null}
+          {recommendations.loading && ceo.loading ? (
+            <LoadingBlock />
+          ) : (
+            <div>
+              <MetricRow label="Pending Approvals" value={pendingApprovalCount} />
+              <p className="section-note">Review before any Amazon action. Shadow mode does not execute changes.</p>
+              <button type="button" onClick={() => setActiveTab("Approval Center")}>Review Pending Approvals</button>
             </div>
           )}
         </Card>
       </div>
-      <div className="advice-box">
-        {formatEmpty(executiveSummary.oneLineAdvice) === "—"
-          ? "Review today's tasks and keep automation in shadow mode."
-          : formatEmpty(executiveSummary.oneLineAdvice)}
-      </div>
       <div className="button-row">
         <button type="button" onClick={() => setActiveTab("CEO Report")}>View Full CEO Report</button>
-        <button type="button" onClick={() => setActiveTab("Approval Center")}>Go to Approval Center</button>
-        <button type="button" onClick={() => setActiveTab("Learning")}>View Learning</button>
+        <button type="button" onClick={() => setActiveTab("Product Economics")}>Add Cost Data</button>
       </div>
     </div>
   );
