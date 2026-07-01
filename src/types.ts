@@ -27,12 +27,46 @@ export type ProductPassport = {
   sku?: string | null;
   asin?: string | null;
   category?: string | null;
+  subCategory?: string | null;
+  productType?: string | null;
+  sellingPrice?: number | string | null;
+  weight?: string | null;
   status?: string;
+};
+
+export type CostCompletionQueueItem = {
+  id: string;
+  key?: string;
+  sku?: string | null;
+  asin?: string | null;
+  productName?: string | null;
+  subCategory?: string | null;
+  sellingPrice?: number | string | null;
+  costStatus?: string | null;
+  missingFields?: string[] | string | null;
+  profitStatus?: string | null;
+  profitDataStatus?: string | null;
+  targetAcos?: number | string | null;
+  marketplaceId?: string | null;
+  fulfillmentType?: string | null;
+  productType?: string | null;
+  weightKg?: number | string | null;
+  volumeCuFt?: number | string | null;
+  economics?: ProductEconomics | null;
+};
+
+export type AmazonSpListing = CostCompletionQueueItem & {
+  listingStatus?: string | null;
+  fulfillmentChannel?: string | null;
+  price?: number | string | null;
 };
 
 export type ProductEconomics = {
   id: string;
+  marketplaceId?: string | null;
   productName?: string | null;
+  subCategory?: string | null;
+  productType?: string | null;
   sku?: string | null;
   asin?: string | null;
   sellingPrice?: number | string | null;
@@ -44,8 +78,24 @@ export type ProductEconomics = {
   referralFee?: number | string | null;
   amazonFeeEstimate?: number | string | null;
   closingFee?: number | string | null;
+  shippingFee?: number | string | null;
+  pickAndPackFee?: number | string | null;
+  storageFee?: number | string | null;
   otherCostPerUnit?: number | string | null;
+  otherFees?: number | string | null;
+  referralFeePercent?: number | string | null;
+  totalAmazonFees?: number | string | null;
+  gstOnAmazonFees?: number | string | null;
+  grossProfit?: number | string | null;
+  netProfit?: number | string | null;
+  profitMargin?: number | string | null;
+  feeRulesVersion?: string | null;
   requiredProfit?: number | string | null;
+  fulfillmentType?: string | null;
+  shippingRegion?: string | null;
+  categoryException?: string | null;
+  weightKg?: number | string | null;
+  volumeCuFt?: number | string | null;
   targetProfit?: number | string | null;
   nonAdCost?: number | string | null;
   maxAllowableAdSpend?: number | string | null;

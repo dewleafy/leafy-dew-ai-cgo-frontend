@@ -436,6 +436,17 @@ td {
   grid-column: 1 / -1;
 }
 
+.readonly-field div {
+  min-height: 43px;
+  box-sizing: border-box;
+  border: 1px solid #dbe6d8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f5f8f3;
+  color: #26312c;
+  font-weight: 700;
+}
+
 .cost-form-actions {
   display: flex;
   align-items: center;
@@ -523,6 +534,12 @@ textarea {
 }
 
 .detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.calculated-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 18px;

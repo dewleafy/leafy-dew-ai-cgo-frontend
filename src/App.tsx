@@ -6,6 +6,7 @@ import type {
   ActivityLog,
   AnyRecord,
   ApiRows,
+  CostCompletionQueueItem,
   Experiment,
   ProductEconomics,
   ProductPassport,
@@ -114,7 +115,7 @@ function StatusBadge({ value }: { value: unknown }) {
   const label = formatEmpty(value).toUpperCase();
   const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE"].includes(label)
     ? "good"
-    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL"].includes(label)
+    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL", "INCOMPLETE", "NEEDS_INPUT", "SUBCATEGORY MISSING"].includes(label)
       ? "watch"
       : ["RISK", "ERROR", "FAILED", "REJECTED", "POOR", "BLOCKED"].includes(label)
         ? "risk"
@@ -126,8 +127,8 @@ function LoadingBlock() {
   return <div className="soft-state">Loading...</div>;
 }
 
-function ErrorBlock() {
-  return <div className="soft-state error-state">Could not load this section. Backend may still be deploying.</div>;
+function ErrorBlock({ text = "Could not load this section. Backend may still be deploying." }: { text?: string }) {
+  return <div className="soft-state error-state">{text}</div>;
 }
 
 function EmptyBlock({ text = "No rows yet." }: { text?: string }) {
@@ -170,6 +171,15 @@ function TextInput({
     <label className="field">
       <span>{label}</span>
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <label className="field readonly-field">
+      <span>{label}</span>
+      <div>{value}</div>
     </label>
   );
 }
@@ -285,7 +295,7 @@ function App() {
 
         {activeTab === "Today Dashboard" && <TodayDashboard setActiveTab={setActiveTab} />}
         {activeTab === "Product Passport" && <ProductPassportPage />}
-        {activeTab === "Product Economics" && <ProductEconomicsPage />}
+        {activeTab === "Product Economics" && <CostCompletionQueuePage />}
         {activeTab === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setActiveTab} />}
         {activeTab === "Approval Center" && <ApprovalCenterPage />}
         {activeTab === "CEO Report" && <CeoReportPage />}
@@ -316,7 +326,7 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const profitStatus = executiveSummary.profitStatus ?? ceoReport.profitStatus ?? profitGuardrail.profitStatus;
   const profitDataStatus = profitGuardrail.profitDataStatus;
   const showProfitSafetyWarning =
-    profitStatus === "NEEDS_COST_DATA" || profitDataStatus === "MISSING_COST_DATA" || profitDataStatus === "PARTIAL";
+    profitStatus === "NEEDS_COST_DATA" || profitDataStatus === "MISSING_COST_DATA" || profitDataStatus === "PARTIAL" || !profitDataStatus;
 
   return (
     <div className="page">
@@ -370,7 +380,7 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
             <div className="warning-card">
               <StatusBadge value="NEEDS_COST_DATA" />
               <p>Product cost data is missing. Add landed cost before approving PPC scaling or growth actions.</p>
-              <button type="button" onClick={() => setActiveTab("Product Economics")}>Add Product Costs</button>
+              <button type="button" onClick={() => setActiveTab("Product Economics")}>Complete Product Costs</button>
             </div>
           ) : (
             <div>
@@ -441,7 +451,7 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
       </div>
       <div className="button-row">
         <button type="button" onClick={() => setActiveTab("CEO Report")}>View Full CEO Report</button>
-        <button type="button" onClick={() => setActiveTab("Product Economics")}>Add Product Costs</button>
+        <button type="button" onClick={() => setActiveTab("Product Economics")}>Complete Product Costs</button>
       </div>
     </div>
   );
@@ -574,63 +584,168 @@ function ReadinessDetail({ data }: { data: AnyRecord }) {
   );
 }
 
-function ProductEconomicsPage() {
+const referralFeeSubcategories = [
+  "Mattresses",
+  "Rugs and Doormats",
+  "Clocks",
+  "Wall Art",
+  "Home - Fragrance & Candles",
+  "Bedsheets, Blankets and covers",
+  "Home furnishing",
+  "Containers, Boxes, Bottles",
+  "Home improvement - Accessories",
+  "Home Storage",
+  "Curtains and Accessories",
+  "Cushion Covers",
+  "Indoor Lighting",
+  "Indoor Lighting - Others",
+  "LED Bulbs and Battens",
+  "Wall Paints and Tools",
+  "Craft materials",
+  "Safes and Lockers",
+  "Home Decor Products",
+  "Home - Other Products",
+  "Home improvement - Other Products",
+  "Kitchen - Glassware & Ceramicware",
+  "Cookware, Tableware & Dinnerware"
+];
+
+function readFirst(source: unknown, keys: string[]): unknown {
+  const root = recordOf(source);
+  for (const key of keys) {
+    const value = key.split(".").reduce<unknown>((current, part) => recordOf(current)[part], root);
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return undefined;
+}
+
+function queueMissingFields(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => formatEmpty(item)).join(", ");
+  return formatEmpty(value);
+}
+
+function CostCompletionQueuePage() {
+  const queue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const queueRows = useMemo(() => {
+    const directRows = rowsOf<CostCompletionQueueItem>(queue.data);
+    if (directRows.length > 0) return directRows;
+    const dataRecord = recordOf(queue.data);
+    return arrayOf(dataRecord.queue ?? dataRecord.items ?? dataRecord.products) as CostCompletionQueueItem[];
+  }, [queue.data]);
+  const economicsRows = rowsOf<ProductEconomics>(economics.data);
+  const economicsBySku = useMemo(() => new Map(economicsRows.filter((row) => row.sku).map((row) => [String(row.sku), row])), [economicsRows]);
+  const economicsByAsin = useMemo(() => new Map(economicsRows.filter((row) => row.asin).map((row) => [String(row.asin), row])), [economicsRows]);
 
-  const rows = rowsOf<ProductEconomics>(economics.data);
+  const products = useMemo(() => queueRows.map((item, index) => {
+    const raw = item as unknown as AnyRecord;
+    const sku = String(readFirst(raw, ["sku", "sellerSku"]) ?? "");
+    const asin = String(readFirst(raw, ["asin"]) ?? "");
+    const economicsRow = item.economics ?? (sku ? economicsBySku.get(sku) : undefined) ?? (asin ? economicsByAsin.get(asin) : undefined) ?? null;
+    const key = String(readFirst(raw, ["key", "id"]) ?? (sku ? `sku:${sku}` : asin ? `asin:${asin}` : `row:${index}`));
 
+    return {
+      key,
+      sku,
+      asin,
+      productName: String(readFirst(raw, ["productName", "product_name", "title"]) ?? economicsRow?.productName ?? ""),
+      subCategory: String(readFirst(raw, ["subCategory", "sub_category"]) ?? economicsRow?.subCategory ?? ""),
+      sellingPrice: readFirst(raw, ["sellingPrice", "price"]) ?? economicsRow?.sellingPrice,
+      costStatus: String(readFirst(raw, ["costStatus", "status", "profitDataStatus"]) ?? economicsRow?.profitDataStatus ?? "NEEDS_INPUT"),
+      missingFields: readFirst(raw, ["missingFields", "missing_fields"]) ?? [],
+      profitStatus: String(readFirst(raw, ["profitStatus"]) ?? economicsRow?.profitStatus ?? ""),
+      targetAcos: readFirst(raw, ["targetAcos"]) ?? economicsRow?.targetAcos,
+      fulfillmentType: String(readFirst(raw, ["fulfillmentType", "fulfillmentChannel"]) ?? economicsRow?.fulfillmentType ?? ""),
+      productType: String(readFirst(raw, ["productType"]) ?? economicsRow?.productType ?? ""),
+      weightKg: readFirst(raw, ["weightKg"]) ?? economicsRow?.weightKg,
+      volumeCuFt: readFirst(raw, ["volumeCuFt"]) ?? economicsRow?.volumeCuFt,
+      marketplaceId: String(readFirst(raw, ["marketplaceId"]) ?? economicsRow?.marketplaceId ?? ""),
+      economics: economicsRow
+    };
+  }), [economicsByAsin, economicsBySku, queueRows]);
+
+  const [selectedKey, setSelectedKey] = useState("");
   const [form, setForm] = useState({
-    sellerId: SELLER_ID,
-    sku: "",
-    asin: "",
     sellingPrice: "",
     buyingCost: "",
-    packagingCost: "",
-    shippingCost: "",
-    referralFee: "",
-    closingFee: "",
     requiredProfit: "",
+    fulfillmentType: "FC",
+    productType: "Standard",
+    weightKg: "",
+    volumeCuFt: "",
+    otherFees: "",
+    shippingRegion: "National",
+    categoryException: "No",
+    subCategory: "",
     notes: ""
   });
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [calculatedResult, setCalculatedResult] = useState<AnyRecord | null>(null);
+  const selectedProduct = products.find((product) => product.key === selectedKey) ?? null;
+  const resultSource = calculatedResult ?? recordOf(selectedProduct?.economics);
+
+  function openCostForm(product: (typeof products)[number]) {
+    const row = product.economics;
+    setSelectedKey(product.key);
+    setCalculatedResult(row ? (row as unknown as AnyRecord) : null);
+    setSaveMessage("");
+    setSaveError("");
+    setForm({
+      sellingPrice: row?.sellingPrice !== null && row?.sellingPrice !== undefined ? String(row.sellingPrice) : product.sellingPrice !== null && product.sellingPrice !== undefined ? String(product.sellingPrice) : "",
+      buyingCost: row?.buyingCost !== null && row?.buyingCost !== undefined ? String(row.buyingCost) : row?.landedCost !== null && row?.landedCost !== undefined ? String(row.landedCost) : "",
+      requiredProfit: row?.requiredProfit !== null && row?.requiredProfit !== undefined ? String(row.requiredProfit) : row?.targetProfit !== null && row?.targetProfit !== undefined ? String(row.targetProfit) : "",
+      fulfillmentType: row?.fulfillmentType ?? product.fulfillmentType ?? "FC",
+      productType: row?.productType ?? product.productType ?? "Standard",
+      weightKg: row?.weightKg !== null && row?.weightKg !== undefined ? String(row.weightKg) : product.weightKg !== null && product.weightKg !== undefined ? String(product.weightKg) : "",
+      volumeCuFt: row?.volumeCuFt !== null && row?.volumeCuFt !== undefined ? String(row.volumeCuFt) : product.volumeCuFt !== null && product.volumeCuFt !== undefined ? String(product.volumeCuFt) : "",
+      otherFees: row?.otherFees !== null && row?.otherFees !== undefined ? String(row.otherFees) : row?.otherCostPerUnit !== null && row?.otherCostPerUnit !== undefined ? String(row.otherCostPerUnit) : "",
+      shippingRegion: row?.shippingRegion ?? "National",
+      categoryException: row?.categoryException ?? "No",
+      subCategory: product.subCategory,
+      notes: row?.notes ?? ""
+    });
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!selectedProduct) return;
+    if (!selectedProduct.subCategory && !form.subCategory) {
+      setSaveError("Choose a subcategory before saving cost data.");
+      return;
+    }
+
     setSaving(true);
-    setSaveMessage("");
     setSaveError("");
+    setSaveMessage("");
 
     try {
-      await postJson("/api/product-economics", {
-        sellerId: form.sellerId.trim() || SELLER_ID,
-        sku: form.sku.trim(),
-        asin: form.asin.trim() || null,
-        sellingPrice: asInputNumber(form.sellingPrice),
+      const response = await postJson<AnyRecord>("/api/product-economics", {
+        sellerId: SELLER_ID,
+        sku: selectedProduct.sku,
+        asin: selectedProduct.asin || null,
+        marketplaceId: selectedProduct.marketplaceId || null,
+        productName: selectedProduct.productName || selectedProduct.sku,
+        subCategory: selectedProduct.subCategory || form.subCategory,
+        sellingPrice: asInputNumber(form.sellingPrice) ?? 0,
         buyingCost: asInputNumber(form.buyingCost),
-        packagingCost: asInputNumber(form.packagingCost) ?? 0,
-        shippingCost: asInputNumber(form.shippingCost) ?? 0,
-        referralFee: asInputNumber(form.referralFee) ?? 0,
-        closingFee: asInputNumber(form.closingFee) ?? 0,
         requiredProfit: asInputNumber(form.requiredProfit) ?? 0,
+        fulfillmentType: form.fulfillmentType,
+        productType: form.productType,
+        weightKg: asInputNumber(form.weightKg),
+        volumeCuFt: asInputNumber(form.volumeCuFt),
+        otherFees: asInputNumber(form.otherFees) ?? 0,
+        otherCostPerUnit: asInputNumber(form.otherFees) ?? 0,
+        shippingRegion: form.shippingRegion,
+        categoryException: form.categoryException,
         notes: form.notes.trim() || null
       });
 
-      setForm({
-        sellerId: form.sellerId || SELLER_ID,
-        sku: "",
-        asin: "",
-        sellingPrice: "",
-        buyingCost: "",
-        packagingCost: "",
-        shippingCost: "",
-        referralFee: "",
-        closingFee: "",
-        requiredProfit: "",
-        notes: ""
-      });
-      setSaveMessage("Cost data saved. Profit guardrails will use this SKU data.");
+      const result = recordOf(response.economics ?? response.row ?? response.result ?? response.calculation ?? response);
+      setCalculatedResult(result);
+      setSaveMessage("Cost data saved. Amazon fee calculations refreshed.");
+      queue.reload();
       economics.reload();
     } catch {
       setSaveError("Could not save cost data. Backend may still be deploying.");
@@ -639,58 +754,67 @@ function ProductEconomicsPage() {
     }
   }
 
+  const calculatedRows = [
+    ["Referral Fee %", ["referralFeePercent", "referral_fee_percent", "feeBreakdown.referralFeePercent"], "percent"],
+    ["Referral Fee", ["referralFee", "referral_fee", "amazonFeeEstimate", "amazon_fee_estimate", "feeBreakdown.referralFee"], "money"],
+    ["Closing Fee", ["closingFee", "closing_fee", "feeBreakdown.closingFee"], "money"],
+    ["Shipping Fee", ["shippingFee", "shipping_fee", "shippingFeeEstimate", "shipping_fee_estimate", "feeBreakdown.shippingFee"], "money"],
+    ["Pick & Pack Fee", ["pickAndPackFee", "pick_and_pack_fee", "feeBreakdown.pickAndPackFee"], "money"],
+    ["Storage Fee", ["storageFee", "storage_fee", "feeBreakdown.storageFee"], "money"],
+    ["Other Fees", ["otherFees", "other_fees", "otherCostPerUnit", "other_cost_per_unit"], "money"],
+    ["Total Amazon Fees", ["totalAmazonFees", "total_amazon_fees", "feeBreakdown.totalAmazonFees"], "money"],
+    ["GST on Amazon Fees", ["gstOnAmazonFees", "gst_on_amazon_fees", "feeBreakdown.gstOnAmazonFees"], "money"],
+    ["Gross Profit", ["grossProfit", "gross_profit"], "money"],
+    ["Net Profit", ["netProfit", "net_profit"], "money"],
+    ["Profit Margin %", ["profitMargin", "profit_margin"], "percent"],
+    ["Max Allowable Ad Spend", ["maxAllowableAdSpend", "max_allowable_ad_spend"], "money"],
+    ["Target ACOS", ["targetAcos", "target_acos"], "percent"],
+    ["Break-even ACOS", ["breakEvenAcos", "break_even_acos"], "percent"],
+    ["Fee Rules Version", ["feeRulesVersion", "fee_rules_version"], "text"]
+  ] as const;
+
   return (
     <div className="page">
-      <PageHeader title="Product Economics" subtitle="Add landed cost to unlock profit-safe PPC decisions." />
+      <PageHeader
+        title="Cost Completion Queue"
+        subtitle="Add only the missing business inputs. Amazon listing data and Amazon fee calculations are handled automatically."
+      />
 
-      <div className="advice-box">Add landed cost to unlock profit-safe PPC decisions.</div>
-
-      <Card title="Cost Table">
-        {economics.loading ? <LoadingBlock /> : economics.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
+      <Card title="Products Needing Cost Completion">
+        {queue.loading || economics.loading ? <LoadingBlock /> : queue.error || economics.error ? (
+          <ErrorBlock text="Could not load cost queue. Backend may still be deploying." />
+        ) : products.length === 0 ? (
+          <EmptyBlock text="No products need cost completion right now." />
+        ) : (
           <div className="table-wrap cost-table">
             <table>
               <thead>
                 <tr>
+                  <th>Product Name</th>
                   <th>SKU</th>
                   <th>ASIN</th>
-                  <th>Product Name</th>
+                  <th>Subcategory</th>
                   <th>Selling Price</th>
-                  <th>Buying Cost</th>
-                  <th>Packaging Cost</th>
-                  <th>Shipping Cost</th>
-                  <th>Referral Fee</th>
-                  <th>Closing Fee</th>
-                  <th>Required Profit</th>
-                  <th>Non-Ad Cost</th>
-                  <th>Max Allowable Ad Spend</th>
-                  <th>Target ACOS</th>
-                  <th>Break-even ACOS</th>
+                  <th>Cost Status</th>
+                  <th>Missing Fields</th>
                   <th>Profit Status</th>
+                  <th>Target ACOS</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatEmpty(row.sku)}</td>
-                    <td>{formatEmpty(row.asin)}</td>
-                    <td>{formatEmpty(row.productName)}</td>
-                    <td>{formatMoney(row.sellingPrice)}</td>
-                    <td>{formatMoney(row.buyingCost ?? row.landedCost)}</td>
-                    <td>{formatMoney(row.packagingCost)}</td>
-                    <td>{formatMoney(row.shippingCost ?? row.shippingFeeEstimate)}</td>
-                    <td>{formatMoney(row.referralFee ?? row.amazonFeeEstimate)}</td>
-                    <td>{formatMoney(row.closingFee ?? row.otherCostPerUnit)}</td>
-                    <td>{formatMoney(row.requiredProfit ?? row.targetProfit)}</td>
-                    <td>{formatMoney(row.nonAdCost)}</td>
-                    <td>{formatMoney(row.maxAllowableAdSpend)}</td>
-                    <td>{formatPercent(row.targetAcos)}</td>
-                    <td>{formatPercent(row.breakEvenAcos)}</td>
-                    <td>
-                      <div className="badge-row">
-                        <StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_COST_DATA"} />
-                        {row.profitDataStatus ? <StatusBadge value={row.profitDataStatus} /> : null}
-                      </div>
-                    </td>
+                {products.map((product) => (
+                  <tr key={product.key}>
+                    <td>{formatEmpty(product.productName)}</td>
+                    <td>{formatEmpty(product.sku)}</td>
+                    <td>{formatEmpty(product.asin)}</td>
+                    <td>{product.subCategory ? formatEmpty(product.subCategory) : <StatusBadge value="Subcategory missing" />}</td>
+                    <td>{formatMoney(product.sellingPrice)}</td>
+                    <td><StatusBadge value={product.costStatus} /></td>
+                    <td>{queueMissingFields(product.missingFields)}</td>
+                    <td><StatusBadge value={product.profitStatus || product.economics?.profitStatus || "NEEDS_INPUT"} /></td>
+                    <td>{formatPercent(product.targetAcos ?? product.economics?.targetAcos)}</td>
+                    <td><button type="button" onClick={() => openCostForm(product)}>{product.economics ? "Edit Cost" : "Complete Cost Data"}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -699,30 +823,61 @@ function ProductEconomicsPage() {
         )}
       </Card>
 
-      <Card title="Add or Update Cost Data">
-        <form className="form-grid" onSubmit={submit}>
-          <TextInput label="Seller Id" value={form.sellerId} onChange={(next) => setForm({ ...form, sellerId: next })} />
-          <TextInput label="SKU" value={form.sku} onChange={(next) => setForm({ ...form, sku: next })} />
-          <TextInput label="ASIN" value={form.asin} onChange={(next) => setForm({ ...form, asin: next })} />
-          <TextInput label="Selling Price" type="number" value={form.sellingPrice} onChange={(next) => setForm({ ...form, sellingPrice: next })} />
-          <TextInput label="Buying Cost" type="number" value={form.buyingCost} onChange={(next) => setForm({ ...form, buyingCost: next })} />
-          <TextInput label="Packaging Cost" type="number" value={form.packagingCost} onChange={(next) => setForm({ ...form, packagingCost: next })} />
-          <TextInput label="Shipping Cost" type="number" value={form.shippingCost} onChange={(next) => setForm({ ...form, shippingCost: next })} />
-          <TextInput label="Referral Fee" type="number" value={form.referralFee} onChange={(next) => setForm({ ...form, referralFee: next })} />
-          <TextInput label="Closing Fee" type="number" value={form.closingFee} onChange={(next) => setForm({ ...form, closingFee: next })} />
-          <TextInput label="Required Profit" type="number" value={form.requiredProfit} onChange={(next) => setForm({ ...form, requiredProfit: next })} />
-          <TextArea label="Notes" value={form.notes} onChange={(next) => setForm({ ...form, notes: next })} />
-          <div className="field-wide cost-form-actions">
-            <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
-            {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
-            {saveError ? <span className="save-error">{saveError}</span> : null}
-          </div>
-        </form>
+      <Card title="Cost Completion">
+        {!selectedProduct ? (
+          <EmptyBlock text="Choose Complete Cost Data or Edit Cost from the queue." />
+        ) : (
+          <form className="form-grid" onSubmit={submit}>
+            <ReadOnlyField label="SKU" value={formatEmpty(selectedProduct.sku)} />
+            <ReadOnlyField label="ASIN" value={formatEmpty(selectedProduct.asin)} />
+            <ReadOnlyField label="Product Name" value={formatEmpty(selectedProduct.productName)} />
+            {selectedProduct.subCategory ? (
+              <ReadOnlyField label="Subcategory" value={formatEmpty(selectedProduct.subCategory)} />
+            ) : (
+              <label className="field">
+                <span>Subcategory</span>
+                <select value={form.subCategory} onChange={(event) => setForm({ ...form, subCategory: event.target.value })}>
+                  <option value="">Subcategory missing</option>
+                  {referralFeeSubcategories.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+            )}
+            <TextInput label="Selling Price" type="number" value={form.sellingPrice} onChange={(value) => setForm({ ...form, sellingPrice: value })} />
+            <TextInput label="Product Cost / Buying Cost" type="number" value={form.buyingCost} onChange={(value) => setForm({ ...form, buyingCost: value })} />
+            <TextInput label="Required Profit" type="number" value={form.requiredProfit} onChange={(value) => setForm({ ...form, requiredProfit: value })} />
+            <SelectField label="Fulfillment Type" value={form.fulfillmentType} options={["FC", "Easy Ship", "Easy Ship Prime", "Self Ship", "Seller Flex"]} onChange={(value) => setForm({ ...form, fulfillmentType: value })} />
+            <SelectField label="Product Type" value={form.productType} options={["Standard", "Oversize"]} onChange={(value) => setForm({ ...form, productType: value })} />
+            <TextInput label="Weight kg" type="number" value={form.weightKg} onChange={(value) => setForm({ ...form, weightKg: value })} />
+            <TextInput label="Volume cu ft" type="number" value={form.volumeCuFt} onChange={(value) => setForm({ ...form, volumeCuFt: value })} />
+            <TextInput label="Other Fees" type="number" value={form.otherFees} onChange={(value) => setForm({ ...form, otherFees: value })} />
+            <SelectField label="Shipping Region" value={form.shippingRegion} options={["National"]} onChange={(value) => setForm({ ...form, shippingRegion: value })} />
+            <SelectField label="Category Exception" value={form.categoryException} options={["No", "Yes"]} onChange={(value) => setForm({ ...form, categoryException: value })} />
+            <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+            <div className="field-wide cost-form-actions">
+              <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
+              {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
+              {saveError ? <span className="save-error">{saveError}</span> : null}
+            </div>
+          </form>
+        )}
       </Card>
 
+      {selectedProduct && Object.keys(resultSource).length > 0 ? (
+        <Card title="Calculated Result">
+          <div className="calculated-grid">
+            {calculatedRows.map(([label, keys, format]) => {
+              const value = readFirst(resultSource, [...keys]);
+              const display = format === "money" ? formatMoney(value) : format === "percent" ? formatPercent(value) : formatEmpty(value);
+              return <MetricRow key={label} label={label} value={display} />;
+            })}
+            <MetricRow label="Profit Status" value={<StatusBadge value={readFirst(resultSource, ["profitStatus", "profit_status"]) ?? "NEEDS_INPUT"} />} />
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }
+
 function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
   const live = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
   const saved = useApi<ApiRows<Recommendation>>(() => getJson(`/api/recommendations?sellerId=${SELLER_ID}`));
@@ -1224,3 +1379,4 @@ function labelize(value: string): string {
 }
 
 export default App;
+
