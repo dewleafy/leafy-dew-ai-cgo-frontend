@@ -389,6 +389,10 @@ button.secondary:hover,
   overflow-x: auto;
 }
 
+.cost-table table {
+  min-width: 1500px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -430,6 +434,23 @@ td {
 
 .field-wide {
   grid-column: 1 / -1;
+}
+
+.cost-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.save-message {
+  color: #1e6b43;
+  font-weight: 700;
+}
+
+.save-error {
+  color: #a33c34;
+  font-weight: 700;
 }
 
 input,

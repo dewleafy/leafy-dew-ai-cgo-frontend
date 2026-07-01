@@ -36,9 +36,25 @@ export type ProductEconomics = {
   sku?: string | null;
   asin?: string | null;
   sellingPrice?: number | string | null;
+  buyingCost?: number | string | null;
+  landedCost?: number | string | null;
+  packagingCost?: number | string | null;
+  shippingCost?: number | string | null;
+  shippingFeeEstimate?: number | string | null;
+  referralFee?: number | string | null;
+  amazonFeeEstimate?: number | string | null;
+  closingFee?: number | string | null;
+  otherCostPerUnit?: number | string | null;
+  requiredProfit?: number | string | null;
   targetProfit?: number | string | null;
+  nonAdCost?: number | string | null;
+  maxAllowableAdSpend?: number | string | null;
   targetAcos?: number | string | null;
+  breakEvenAcos?: number | string | null;
   profitStatus?: string | null;
+  profitDataStatus?: string | null;
+  reason?: string | null;
+  notes?: string | null;
 };
 
 export type Experiment = {

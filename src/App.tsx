@@ -112,11 +112,11 @@ function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: str
 
 function StatusBadge({ value }: { value: unknown }) {
   const label = formatEmpty(value).toUpperCase();
-  const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "SUCCESS", "SHADOW", "GOOD"].includes(label)
+  const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE"].includes(label)
     ? "good"
-    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW"].includes(label)
+    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL"].includes(label)
       ? "watch"
-      : ["RISK", "ERROR", "FAILED", "REJECTED", "POOR"].includes(label)
+      : ["RISK", "ERROR", "FAILED", "REJECTED", "POOR", "BLOCKED"].includes(label)
         ? "risk"
         : "neutral";
   return <Badge tone={tone}>{label}</Badge>;
@@ -315,7 +315,8 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const latestReportJob = rowsOf<AnyRecord>(reportJobs.data)[0];
   const profitStatus = executiveSummary.profitStatus ?? ceoReport.profitStatus ?? profitGuardrail.profitStatus;
   const profitDataStatus = profitGuardrail.profitDataStatus;
-  const showProfitSafetyWarning = profitStatus === "NEEDS_COST_DATA" || profitDataStatus === "MISSING_COST_DATA";
+  const showProfitSafetyWarning =
+    profitStatus === "NEEDS_COST_DATA" || profitDataStatus === "MISSING_COST_DATA" || profitDataStatus === "PARTIAL";
 
   return (
     <div className="page">
@@ -367,8 +368,9 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
             <LoadingBlock />
           ) : showProfitSafetyWarning ? (
             <div className="warning-card">
-              <StatusBadge value="NEEDS COST DATA" />
+              <StatusBadge value="NEEDS_COST_DATA" />
               <p>Product cost data is missing. Add landed cost before approving PPC scaling or growth actions.</p>
+              <button type="button" onClick={() => setActiveTab("Product Economics")}>Add Product Costs</button>
             </div>
           ) : (
             <div>
@@ -439,7 +441,7 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
       </div>
       <div className="button-row">
         <button type="button" onClick={() => setActiveTab("CEO Report")}>View Full CEO Report</button>
-        <button type="button" onClick={() => setActiveTab("Product Economics")}>Add Cost Data</button>
+        <button type="button" onClick={() => setActiveTab("Product Economics")}>Add Product Costs</button>
       </div>
     </div>
   );
@@ -574,117 +576,121 @@ function ReadinessDetail({ data }: { data: AnyRecord }) {
 
 function ProductEconomicsPage() {
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const settings = useApi<AnyRecord>(() => getJson(`/api/automation-settings?sellerId=${SELLER_ID}`));
 
   const rows = rowsOf<ProductEconomics>(economics.data);
-  const passportRows = rowsOf<ProductPassport>(passports.data);
 
-  const [selectedPassportId, setSelectedPassportId] = useState("");
   const [form, setForm] = useState({
-    productName: "",
+    sellerId: SELLER_ID,
     sku: "",
     asin: "",
     sellingPrice: "",
-    landedCost: "",
+    buyingCost: "",
     packagingCost: "",
-    amazonFee: "",
     shippingCost: "",
-    returnRatePercent: "",
-    returnCost: "",
-    influencerCost: "",
-    socialMediaCost: "",
-    otherCost: "",
+    referralFee: "",
+    closingFee: "",
+    requiredProfit: "",
     notes: ""
   });
-
-  const toNumber = (value: string) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  const sellingPrice = toNumber(form.sellingPrice);
-  const landedCost = toNumber(form.landedCost);
-  const packagingCost = toNumber(form.packagingCost);
-  const amazonFee = toNumber(form.amazonFee);
-  const shippingCost = toNumber(form.shippingCost);
-  const returnRatePercent = toNumber(form.returnRatePercent);
-  const returnCost = toNumber(form.returnCost);
-  const influencerCost = toNumber(form.influencerCost);
-  const socialMediaCost = toNumber(form.socialMediaCost);
-  const otherCost = toNumber(form.otherCost);
-
-  const settingsData = recordOf(settings.data?.settings);
-  const minProfitLowPrice = readNumber(settingsData.minProfitLowPrice) || 60;
-  const minProfitMidPrice = readNumber(settingsData.minProfitMidPrice) || 110;
-
-  const targetProfit = sellingPrice > 0 && sellingPrice <= 299 ? minProfitLowPrice : minProfitMidPrice;
-  const returnReserve = (returnCost * returnRatePercent) / 100;
-  const nonAdCost = landedCost + packagingCost + amazonFee + shippingCost + returnReserve + influencerCost + socialMediaCost + otherCost;
-  const maxAllowableAdSpend = sellingPrice > 0 ? sellingPrice - nonAdCost - targetProfit : 0;
-  const targetAcos = sellingPrice > 0 ? (maxAllowableAdSpend / sellingPrice) * 100 : null;
-  const breakEvenAcos = sellingPrice > 0 ? ((sellingPrice - nonAdCost) / sellingPrice) * 100 : null;
-  const profitStatus = sellingPrice <= 0 ? "UNKNOWN" : maxAllowableAdSpend > 0 ? "PASS" : "FAIL";
-
-  function selectPassport(productPassportId: string) {
-    setSelectedPassportId(productPassportId);
-
-    const selected = passportRows.find((product) => product.id === productPassportId);
-    if (!selected) return;
-
-    const selectedRecord = selected as unknown as AnyRecord;
-
-    setForm((current) => ({
-      ...current,
-      productName: String(selectedRecord.productName ?? ""),
-      sku: String(selectedRecord.sku ?? ""),
-      asin: String(selectedRecord.asin ?? ""),
-      sellingPrice: selectedRecord.sellingPrice !== null && selectedRecord.sellingPrice !== undefined ? String(selectedRecord.sellingPrice) : current.sellingPrice,
-      landedCost: selectedRecord.supplierCost !== null && selectedRecord.supplierCost !== undefined ? String(selectedRecord.supplierCost) : current.landedCost
-    }));
-  }
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await postJson("/api/product-economics", {
-      sellerId: SELLER_ID,
-      ...Object.fromEntries(
-        Object.entries(form).map(([key, value]) => [
-          key,
-          ["productName", "sku", "asin", "notes"].includes(key) ? value : asInputNumber(value)
-        ])
-      )
-    });
-    setSelectedPassportId("");
-    setForm(Object.fromEntries(Object.keys(form).map((key) => [key, ""])) as typeof form);
-    economics.reload();
+    setSaving(true);
+    setSaveMessage("");
+    setSaveError("");
+
+    try {
+      await postJson("/api/product-economics", {
+        sellerId: form.sellerId.trim() || SELLER_ID,
+        sku: form.sku.trim(),
+        asin: form.asin.trim() || null,
+        sellingPrice: asInputNumber(form.sellingPrice),
+        buyingCost: asInputNumber(form.buyingCost),
+        packagingCost: asInputNumber(form.packagingCost) ?? 0,
+        shippingCost: asInputNumber(form.shippingCost) ?? 0,
+        referralFee: asInputNumber(form.referralFee) ?? 0,
+        closingFee: asInputNumber(form.closingFee) ?? 0,
+        requiredProfit: asInputNumber(form.requiredProfit) ?? 0,
+        notes: form.notes.trim() || null
+      });
+
+      setForm({
+        sellerId: form.sellerId || SELLER_ID,
+        sku: "",
+        asin: "",
+        sellingPrice: "",
+        buyingCost: "",
+        packagingCost: "",
+        shippingCost: "",
+        referralFee: "",
+        closingFee: "",
+        requiredProfit: "",
+        notes: ""
+      });
+      setSaveMessage("Cost data saved. Profit guardrails will use this SKU data.");
+      economics.reload();
+    } catch {
+      setSaveError("Could not save cost data. Backend may still be deploying.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="page">
-      <PageHeader title="Product Economics" subtitle="Profit guardrail protects ads from scaling products without enough net profit." />
+      <PageHeader title="Product Economics" subtitle="Add landed cost to unlock profit-safe PPC decisions." />
 
-      <Card title="Economics">
+      <div className="advice-box">Add landed cost to unlock profit-safe PPC decisions.</div>
+
+      <Card title="Cost Table">
         {economics.loading ? <LoadingBlock /> : economics.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
-          <div className="table-wrap">
+          <div className="table-wrap cost-table">
             <table>
               <thead>
                 <tr>
+                  <th>SKU</th>
+                  <th>ASIN</th>
                   <th>Product Name</th>
                   <th>Selling Price</th>
-                  <th>Target Profit</th>
+                  <th>Buying Cost</th>
+                  <th>Packaging Cost</th>
+                  <th>Shipping Cost</th>
+                  <th>Referral Fee</th>
+                  <th>Closing Fee</th>
+                  <th>Required Profit</th>
+                  <th>Non-Ad Cost</th>
+                  <th>Max Allowable Ad Spend</th>
                   <th>Target ACOS</th>
+                  <th>Break-even ACOS</th>
                   <th>Profit Status</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td>{formatEmpty(row.productName ?? row.sku ?? row.asin)}</td>
+                    <td>{formatEmpty(row.sku)}</td>
+                    <td>{formatEmpty(row.asin)}</td>
+                    <td>{formatEmpty(row.productName)}</td>
                     <td>{formatMoney(row.sellingPrice)}</td>
-                    <td>{formatMoney(row.targetProfit)}</td>
+                    <td>{formatMoney(row.buyingCost ?? row.landedCost)}</td>
+                    <td>{formatMoney(row.packagingCost)}</td>
+                    <td>{formatMoney(row.shippingCost ?? row.shippingFeeEstimate)}</td>
+                    <td>{formatMoney(row.referralFee ?? row.amazonFeeEstimate)}</td>
+                    <td>{formatMoney(row.closingFee ?? row.otherCostPerUnit)}</td>
+                    <td>{formatMoney(row.requiredProfit ?? row.targetProfit)}</td>
+                    <td>{formatMoney(row.nonAdCost)}</td>
+                    <td>{formatMoney(row.maxAllowableAdSpend)}</td>
                     <td>{formatPercent(row.targetAcos)}</td>
-                    <td><StatusBadge value={row.profitStatus ?? "WATCH"} /></td>
+                    <td>{formatPercent(row.breakEvenAcos)}</td>
+                    <td>
+                      <div className="badge-row">
+                        <StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_COST_DATA"} />
+                        {row.profitDataStatus ? <StatusBadge value={row.profitDataStatus} /> : null}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -693,58 +699,27 @@ function ProductEconomicsPage() {
         )}
       </Card>
 
-      <div className="two-column">
-        <Card title="Add Product Economics">
-          <div className="field">
-            <label>Select Product Passport</label>
-            <select value={selectedPassportId} onChange={(event) => selectPassport(event.target.value)}>
-              <option value="">Select product</option>
-              {passportRows.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {formatEmpty(product.productName)}
-                </option>
-              ))}
-            </select>
-            <small>SKU/ASIN auto-fill only if available in Product Passport.</small>
+      <Card title="Add or Update Cost Data">
+        <form className="form-grid" onSubmit={submit}>
+          <TextInput label="Seller Id" value={form.sellerId} onChange={(next) => setForm({ ...form, sellerId: next })} />
+          <TextInput label="SKU" value={form.sku} onChange={(next) => setForm({ ...form, sku: next })} />
+          <TextInput label="ASIN" value={form.asin} onChange={(next) => setForm({ ...form, asin: next })} />
+          <TextInput label="Selling Price" type="number" value={form.sellingPrice} onChange={(next) => setForm({ ...form, sellingPrice: next })} />
+          <TextInput label="Buying Cost" type="number" value={form.buyingCost} onChange={(next) => setForm({ ...form, buyingCost: next })} />
+          <TextInput label="Packaging Cost" type="number" value={form.packagingCost} onChange={(next) => setForm({ ...form, packagingCost: next })} />
+          <TextInput label="Shipping Cost" type="number" value={form.shippingCost} onChange={(next) => setForm({ ...form, shippingCost: next })} />
+          <TextInput label="Referral Fee" type="number" value={form.referralFee} onChange={(next) => setForm({ ...form, referralFee: next })} />
+          <TextInput label="Closing Fee" type="number" value={form.closingFee} onChange={(next) => setForm({ ...form, closingFee: next })} />
+          <TextInput label="Required Profit" type="number" value={form.requiredProfit} onChange={(next) => setForm({ ...form, requiredProfit: next })} />
+          <TextArea label="Notes" value={form.notes} onChange={(next) => setForm({ ...form, notes: next })} />
+          <div className="field-wide cost-form-actions">
+            <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
+            {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
+            {saveError ? <span className="save-error">{saveError}</span> : null}
           </div>
+        </form>
+      </Card>
 
-          {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock /> : null}
-
-          <form className="form-grid" onSubmit={submit}>
-            {Object.entries(form).map(([key, value]) =>
-              key === "notes" ? (
-                <TextArea key={key} label={labelize(key)} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />
-              ) : (
-                <TextInput
-                  key={key}
-                  label={labelize(key)}
-                  value={value}
-                  type={["productName", "sku", "asin"].includes(key) ? "text" : "number"}
-                  onChange={(next) => setForm({ ...form, [key]: next })}
-                />
-              )
-            )}
-            <button type="submit">Save Economics</button>
-          </form>
-        </Card>
-
-        <Card title="Live Profit Preview">
-          <MetricRow label="Target Profit" value={sellingPrice > 0 ? formatMoney(targetProfit) : "—"} />
-          <MetricRow label="Non-Ad Cost" value={sellingPrice > 0 ? formatMoney(nonAdCost) : "—"} />
-          <MetricRow label="Max Allowable Ad Spend" value={sellingPrice > 0 ? formatMoney(maxAllowableAdSpend) : "—"} />
-          <MetricRow label="Target ACOS" value={targetAcos !== null ? formatPercent(targetAcos) : "—"} />
-          <MetricRow label="Break-even ACOS" value={breakEvenAcos !== null ? formatPercent(breakEvenAcos) : "—"} />
-          <MetricRow label="Profit Status" value={<StatusBadge value={profitStatus} />} />
-
-          <div className={profitStatus === "FAIL" ? "notice danger" : "notice"}>
-            {profitStatus === "UNKNOWN"
-              ? "Enter selling price and costs to preview profit guardrail."
-              : profitStatus === "FAIL"
-                ? "This product does not have enough room for ads. Fix price or cost before scaling."
-                : "This product has ad room based on current inputs."}
-          </div>
-        </Card>
-      </div>
     </div>
   );
 }
