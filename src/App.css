@@ -454,6 +454,47 @@ td {
   flex-wrap: wrap;
 }
 
+.advanced-settings {
+  border: 1px solid #e0eadc;
+  border-radius: 12px;
+  background: #f8fbf6;
+  padding: 12px 14px;
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  color: #24342b;
+  font-weight: 800;
+}
+
+.advanced-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.profit-flex-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profit-band-table table {
+  min-width: 960px;
+}
+
+.profit-band-warning {
+  margin: 12px 0;
+}
+
+.table-warning {
+  margin: 6px 0 0;
+  color: #963a30;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .save-message {
   color: #1e6b43;
   font-weight: 700;
@@ -608,6 +649,10 @@ textarea {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .advanced-settings-grid {
     grid-template-columns: 1fr;
   }
 }

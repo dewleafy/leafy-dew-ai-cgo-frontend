@@ -52,6 +52,8 @@ export type CostCompletionQueueItem = {
   productType?: string | null;
   weightKg?: number | string | null;
   volumeCuFt?: number | string | null;
+  productGstRatePercent?: number | string | null;
+  amazonFeeGstRatePercent?: number | string | null;
   economics?: ProductEconomics | null;
 };
 
@@ -86,14 +88,27 @@ export type ProductEconomics = {
   referralFeePercent?: number | string | null;
   totalAmazonFees?: number | string | null;
   gstOnAmazonFees?: number | string | null;
+  productGstRatePercent?: number | string | null;
+  amazonFeeGstRatePercent?: number | string | null;
+  netRevenueBeforeGst?: number | string | null;
+  outputGstOnSale?: number | string | null;
+  returnRatePercent?: number | string | null;
+  returnCostProvision?: number | string | null;
+  hiddenOtherFee?: number | string | null;
   grossProfit?: number | string | null;
   netProfit?: number | string | null;
+  netProfitBeforeAds?: number | string | null;
   profitMargin?: number | string | null;
   feeRulesVersion?: string | null;
   requiredProfit?: number | string | null;
+  minimumApprovedProfit?: number | string | null;
+  profitFlexEnabled?: boolean | null;
+  profitBands?: AnyRecord[] | null;
+  recommendedProfitBand?: AnyRecord | string | null;
+  recommendedProfitBandReason?: string | null;
   fulfillmentType?: string | null;
   shippingRegion?: string | null;
-  categoryException?: string | null;
+  categoryException?: string | boolean | null;
   weightKg?: number | string | null;
   volumeCuFt?: number | string | null;
   targetProfit?: number | string | null;

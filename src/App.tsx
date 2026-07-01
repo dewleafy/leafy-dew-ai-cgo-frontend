@@ -113,11 +113,11 @@ function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: str
 
 function StatusBadge({ value }: { value: unknown }) {
   const label = formatEmpty(value).toUpperCase();
-  const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE"].includes(label)
+  const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE", "LOW"].includes(label)
     ? "good"
-    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL", "INCOMPLETE", "NEEDS_INPUT", "SUBCATEGORY MISSING"].includes(label)
+    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL", "INCOMPLETE", "NEEDS_INPUT", "SUBCATEGORY MISSING", "MEDIUM", "APPROVAL REQUIRED", "APPROVAL_REQUIRED"].includes(label)
       ? "watch"
-      : ["RISK", "ERROR", "FAILED", "REJECTED", "POOR", "BLOCKED"].includes(label)
+      : ["RISK", "ERROR", "FAILED", "REJECTED", "POOR", "BLOCKED", "HIGH", "VERY_HIGH", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(label)
         ? "risk"
         : "neutral";
   return <Badge tone={tone}>{label}</Badge>;
@@ -325,6 +325,11 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const latestReportJob = rowsOf<AnyRecord>(reportJobs.data)[0];
   const profitStatus = executiveSummary.profitStatus ?? ceoReport.profitStatus ?? profitGuardrail.profitStatus;
   const profitDataStatus = profitGuardrail.profitDataStatus;
+  const profitRiskAlerts = arrayOf(ceo.data?.profitRiskAlerts);
+  const warnings = arrayOf(ceo.data?.warnings);
+  const profitFlexAvailable =
+    profitRiskAlerts.some((alert) => String(recordOf(alert).type ?? "").toUpperCase() === "PROFIT_FLEX_REQUIRES_APPROVAL") ||
+    warnings.some((warning) => String(warning.message ?? warning.title ?? warning).toLowerCase().includes("profit flex"));
   const showProfitSafetyWarning =
     profitStatus === "NEEDS_COST_DATA" || profitDataStatus === "MISSING_COST_DATA" || profitDataStatus === "PARTIAL" || !profitDataStatus;
 
@@ -409,6 +414,20 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
             </div>
           )}
         </Card>
+
+        {profitFlexAvailable ? (
+          <Card title="Profit Flex Available">
+            {ceo.loading ? (
+              <LoadingBlock />
+            ) : (
+              <div className="warning-card profit-flex-card">
+                <StatusBadge value="APPROVAL REQUIRED" />
+                <p>Lower profit band may allow PPC, but approval is required.</p>
+                <button type="button" onClick={() => setActiveTab("Product Economics")}>Review Profit Bands</button>
+              </div>
+            )}
+          </Card>
+        ) : null}
 
         <Card title="Today Top 3 Actions">
           {ceo.error ? <ErrorBlock /> : null}
@@ -659,6 +678,8 @@ function CostCompletionQueuePage() {
       productType: String(readFirst(raw, ["productType"]) ?? economicsRow?.productType ?? ""),
       weightKg: readFirst(raw, ["weightKg"]) ?? economicsRow?.weightKg,
       volumeCuFt: readFirst(raw, ["volumeCuFt"]) ?? economicsRow?.volumeCuFt,
+      productGstRatePercent: readFirst(raw, ["productGstRatePercent"]) ?? economicsRow?.productGstRatePercent,
+      amazonFeeGstRatePercent: readFirst(raw, ["amazonFeeGstRatePercent"]) ?? economicsRow?.amazonFeeGstRatePercent,
       marketplaceId: String(readFirst(raw, ["marketplaceId"]) ?? economicsRow?.marketplaceId ?? ""),
       economics: economicsRow
     };
@@ -676,6 +697,8 @@ function CostCompletionQueuePage() {
     otherFees: "",
     shippingRegion: "National",
     categoryException: "No",
+    productGstRatePercent: "18",
+    amazonFeeGstRatePercent: "18",
     subCategory: "",
     notes: ""
   });
@@ -685,6 +708,11 @@ function CostCompletionQueuePage() {
   const [calculatedResult, setCalculatedResult] = useState<AnyRecord | null>(null);
   const selectedProduct = products.find((product) => product.key === selectedKey) ?? null;
   const resultSource = calculatedResult ?? recordOf(selectedProduct?.economics);
+  const profitBands = arrayOf(readFirst(resultSource, ["profitBands", "profit_bands"]));
+  const hasFounderOverrideBand = profitBands.some((band) => {
+    const record = recordOf(band);
+    return String(record.approvalTier ?? record.approval_tier ?? "").toUpperCase() === "FOUNDER_OVERRIDE_REQUIRED";
+  });
 
   function openCostForm(product: (typeof products)[number]) {
     const row = product.economics;
@@ -702,7 +730,9 @@ function CostCompletionQueuePage() {
       volumeCuFt: row?.volumeCuFt !== null && row?.volumeCuFt !== undefined ? String(row.volumeCuFt) : product.volumeCuFt !== null && product.volumeCuFt !== undefined ? String(product.volumeCuFt) : "",
       otherFees: row?.otherFees !== null && row?.otherFees !== undefined ? String(row.otherFees) : row?.otherCostPerUnit !== null && row?.otherCostPerUnit !== undefined ? String(row.otherCostPerUnit) : "",
       shippingRegion: row?.shippingRegion ?? "National",
-      categoryException: row?.categoryException ?? "No",
+      categoryException: row?.categoryException === true ? "Yes" : row?.categoryException === false ? "No" : row?.categoryException ?? "No",
+      productGstRatePercent: row?.productGstRatePercent !== null && row?.productGstRatePercent !== undefined ? String(row.productGstRatePercent) : product.productGstRatePercent !== null && product.productGstRatePercent !== undefined ? String(product.productGstRatePercent) : "18",
+      amazonFeeGstRatePercent: row?.amazonFeeGstRatePercent !== null && row?.amazonFeeGstRatePercent !== undefined ? String(row.amazonFeeGstRatePercent) : product.amazonFeeGstRatePercent !== null && product.amazonFeeGstRatePercent !== undefined ? String(product.amazonFeeGstRatePercent) : "18",
       subCategory: product.subCategory,
       notes: row?.notes ?? ""
     });
@@ -739,6 +769,8 @@ function CostCompletionQueuePage() {
         otherCostPerUnit: asInputNumber(form.otherFees) ?? 0,
         shippingRegion: form.shippingRegion,
         categoryException: form.categoryException,
+        productGstRatePercent: asInputNumber(form.productGstRatePercent) ?? 18,
+        amazonFeeGstRatePercent: asInputNumber(form.amazonFeeGstRatePercent) ?? 18,
         notes: form.notes.trim() || null
       });
 
@@ -755,6 +787,8 @@ function CostCompletionQueuePage() {
   }
 
   const calculatedRows = [
+    ["Net Revenue before GST", ["netRevenueBeforeGst", "net_revenue_before_gst"], "money"],
+    ["Output GST on Sale", ["outputGstOnSale", "output_gst_on_sale"], "money"],
     ["Referral Fee %", ["referralFeePercent", "referral_fee_percent", "feeBreakdown.referralFeePercent"], "percent"],
     ["Referral Fee", ["referralFee", "referral_fee", "amazonFeeEstimate", "amazon_fee_estimate", "feeBreakdown.referralFee"], "money"],
     ["Closing Fee", ["closingFee", "closing_fee", "feeBreakdown.closingFee"], "money"],
@@ -764,8 +798,10 @@ function CostCompletionQueuePage() {
     ["Other Fees", ["otherFees", "other_fees", "otherCostPerUnit", "other_cost_per_unit"], "money"],
     ["Total Amazon Fees", ["totalAmazonFees", "total_amazon_fees", "feeBreakdown.totalAmazonFees"], "money"],
     ["GST on Amazon Fees", ["gstOnAmazonFees", "gst_on_amazon_fees", "feeBreakdown.gstOnAmazonFees"], "money"],
+    ["Return Cost Provision", ["returnCostProvision", "return_cost_provision"], "money"],
     ["Gross Profit", ["grossProfit", "gross_profit"], "money"],
     ["Net Profit", ["netProfit", "net_profit"], "money"],
+    ["Net Profit Before Ads", ["netProfitBeforeAds", "net_profit_before_ads"], "money"],
     ["Profit Margin %", ["profitMargin", "profit_margin"], "percent"],
     ["Max Allowable Ad Spend", ["maxAllowableAdSpend", "max_allowable_ad_spend"], "money"],
     ["Target ACOS", ["targetAcos", "target_acos"], "percent"],
@@ -852,6 +888,13 @@ function CostCompletionQueuePage() {
             <TextInput label="Other Fees" type="number" value={form.otherFees} onChange={(value) => setForm({ ...form, otherFees: value })} />
             <SelectField label="Shipping Region" value={form.shippingRegion} options={["National"]} onChange={(value) => setForm({ ...form, shippingRegion: value })} />
             <SelectField label="Category Exception" value={form.categoryException} options={["No", "Yes"]} onChange={(value) => setForm({ ...form, categoryException: value })} />
+            <details className="advanced-settings field-wide">
+              <summary>Advanced Tax Settings</summary>
+              <div className="advanced-settings-grid">
+                <TextInput label="Product GST Rate %" type="number" value={form.productGstRatePercent} onChange={(value) => setForm({ ...form, productGstRatePercent: value })} />
+                <TextInput label="Amazon Fee GST Rate %" type="number" value={form.amazonFeeGstRatePercent} onChange={(value) => setForm({ ...form, amazonFeeGstRatePercent: value })} />
+              </div>
+            </details>
             <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
             <div className="field-wide cost-form-actions">
               <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
@@ -871,6 +914,69 @@ function CostCompletionQueuePage() {
               return <MetricRow key={label} label={label} value={display} />;
             })}
             <MetricRow label="Profit Status" value={<StatusBadge value={readFirst(resultSource, ["profitStatus", "profit_status"]) ?? "NEEDS_INPUT"} />} />
+          </div>
+        </Card>
+      ) : null}
+
+      {selectedProduct && profitBands.length > 0 ? (
+        <Card title="Profit Flex Options">
+          <p className="section-note">Lower profit bands are approval-only. This screen does not auto-apply any lower profit target.</p>
+          {hasFounderOverrideBand ? (
+            <div className="warning-card profit-band-warning">
+              <StatusBadge value="FOUNDER_OVERRIDE_REQUIRED" />
+              <p>This profit band is too far below target. Founder override required.</p>
+            </div>
+          ) : null}
+          <div className="table-wrap profit-band-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Profit Band</th>
+                  <th>Target ACOS</th>
+                  <th>Max Allowable Ad Spend</th>
+                  <th>Risk Level</th>
+                  <th>Approval Required</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {profitBands.map((band, index) => {
+                  const bandRecord = recordOf(band);
+                  const approvalRequired = Boolean(readFirst(bandRecord, ["approvalRequired", "approval_required"]));
+                  const approvalTier = String(readFirst(bandRecord, ["approvalTier", "approval_tier"]) ?? "");
+                  const bandWarning = String(readFirst(bandRecord, ["warning"]) ?? "");
+                  const status = approvalTier || (approvalRequired ? "APPROVAL_REQUIRED" : "AVAILABLE");
+                  const needsFounderOverride =
+                    approvalTier.toUpperCase() === "FOUNDER_OVERRIDE_REQUIRED" ||
+                    bandWarning.toLowerCase().includes("significantly below") ||
+                    bandWarning.toLowerCase().includes("too far");
+
+                  return (
+                    <tr key={String(readFirst(bandRecord, ["bandLabel", "band_label"]) ?? index)}>
+                      <td>
+                        <strong>{formatEmpty(readFirst(bandRecord, ["bandLabel", "band_label"]))}</strong>
+                        {needsFounderOverride ? <p className="table-warning">Founder override required.</p> : null}
+                      </td>
+                      <td>{formatPercent(readFirst(bandRecord, ["targetAcos", "target_acos"]))}</td>
+                      <td>{formatMoney(readFirst(bandRecord, ["maxAllowableAdSpend", "max_allowable_ad_spend"]))}</td>
+                      <td><StatusBadge value={readFirst(bandRecord, ["riskLevel", "risk_level"])} /></td>
+                      <td>{approvalRequired ? "Approval Required" : "No Approval Required"}</td>
+                      <td><StatusBadge value={status} /></td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => setSaveMessage("Profit band approval request noted for review. No lower profit band was applied automatically.")}
+                        >
+                          Request Approval for This Profit Band
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </Card>
       ) : null}
