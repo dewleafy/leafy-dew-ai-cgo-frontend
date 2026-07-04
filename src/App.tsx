@@ -1077,11 +1077,42 @@ function RecommendationSection({ title, rows, footer, loading, error }: { title:
 
 type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
 type LedgerAction = "approve" | "reject" | "monitor" | "complete";
+type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
+type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
 
 const approvalFilters: ApprovalFilter[] = ["ALL", "PENDING", "APPROVED", "REJECTED", "MONITORING", "COMPLETED"];
+const defaultSourceFilters = ["ALL SOURCES", "CEO_REPORT", "PRODUCT_ECONOMICS", "PPC_RECOMMENDATIONS"];
+const defaultActionTypeFilters = [
+  "ALL ACTION TYPES",
+  "COST_DATA_REQUIRED",
+  "ACCOUNT_HEALTH_REVIEW",
+  "PPC_GUARDRAIL_REVIEW",
+  "PROFIT_BAND_APPROVAL",
+  "ADD_EXACT_KEYWORD_AFTER_APPROVAL",
+  "ADD_PRODUCT_TARGET_AFTER_APPROVAL",
+  "CHECK_LISTING_BEFORE_NEGATIVE"
+];
+const quickViewFilters: Array<{ id: QuickViewFilter; label: string }> = [
+  { id: "ALL", label: "All Review" },
+  { id: "NEEDS_COST_DATA", label: "Needs Cost Data" },
+  { id: "ACCOUNT_RISK", label: "Account Risk" },
+  { id: "PPC_GUARDRAILS", label: "PPC Guardrails" },
+  { id: "PROFIT_BAND_APPROVALS", label: "Profit Band Approvals" },
+  { id: "HIGH_RISK_ONLY", label: "High Risk Only" },
+  { id: "FOUNDER_OVERRIDE", label: "Founder Override" }
+];
+const approvalSortOptions = ["Priority First", "Newest First", "Oldest First", "Risk High First"];
+const APPROVAL_PAGE_SIZE = 25;
+const ACTION_LEDGER_FETCH_LIMIT = 200;
 
 function normalizeState(value: unknown): string {
   return String(value ?? "").toUpperCase();
+}
+
+function uniqueSortedValues(rows: ActionLedgerRow[], field: keyof ActionLedgerRow): string[] {
+  return Array.from(
+    new Set(rows.map((row) => String(row[field] ?? "").trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
 }
 
 function isMonitoringAction(row: ActionLedgerRow): boolean {
@@ -1101,10 +1132,94 @@ function filterActionLedgerRows(rows: ActionLedgerRow[], filter: ApprovalFilter)
   return rows.filter(isCompletedAction);
 }
 
+function filterByQuickView(rows: ActionLedgerRow[], quickView: QuickViewFilter): ActionLedgerRow[] {
+  if (quickView === "ALL") return rows;
+  if (quickView === "NEEDS_COST_DATA") return rows.filter((row) => normalizeState(row.actionType) === "COST_DATA_REQUIRED");
+  if (quickView === "ACCOUNT_RISK") return rows.filter((row) => normalizeState(row.actionType) === "ACCOUNT_HEALTH_REVIEW");
+  if (quickView === "PPC_GUARDRAILS") {
+    return rows.filter((row) => normalizeState(row.actionType).includes("PPC") || normalizeState(row.source) === "PPC_RECOMMENDATIONS");
+  }
+  if (quickView === "PROFIT_BAND_APPROVALS") return rows.filter((row) => normalizeState(row.actionType) === "PROFIT_BAND_APPROVAL");
+  if (quickView === "HIGH_RISK_ONLY") return rows.filter((row) => ["HIGH", "CRITICAL"].includes(normalizeState(row.riskLevel)));
+  return rows.filter((row) => normalizeState(row.approvalTier) === "FOUNDER_OVERRIDE");
+}
+
+function filterBySearch(rows: ActionLedgerRow[], query: string): ActionLedgerRow[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return rows;
+  return rows.filter((row) => [
+    row.title,
+    row.summary,
+    row.recommendedAction,
+    row.sku,
+    row.asin,
+    row.actionType,
+    row.source,
+    row.entityId,
+    row.id,
+    formatShortId(row.id)
+  ].some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery)));
+}
+
+function actionRiskPriority(row: ActionLedgerRow): number {
+  const riskLevel = normalizeState(row.riskLevel);
+  if (riskLevel === "CRITICAL") return 0;
+  if (riskLevel === "HIGH") return 1;
+  return 2;
+}
+
+function actionTierPriority(row: ActionLedgerRow): number {
+  return normalizeState(row.approvalTier).includes("FOUNDER_OVERRIDE") ? 0 : 1;
+}
+
+function actionSourcePriority(row: ActionLedgerRow): number {
+  const source = normalizeState(row.source);
+  if (source === "CEO_REPORT") return 0;
+  if (source === "PRODUCT_ECONOMICS") return 1;
+  if (source === "PPC_RECOMMENDATIONS") return 2;
+  return 3;
+}
+
+function actionCreatedAtValue(row: ActionLedgerRow): number {
+  const parsed = Date.parse(String(row.createdAt ?? ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortActionLedgerRowsByPriority(rows: ActionLedgerRow[]): ActionLedgerRow[] {
+  return [...rows].sort((a, b) => (
+    actionRiskPriority(a) - actionRiskPriority(b)
+    || actionTierPriority(a) - actionTierPriority(b)
+    || actionSourcePriority(a) - actionSourcePriority(b)
+    || actionCreatedAtValue(b) - actionCreatedAtValue(a)
+    || String(a.id).localeCompare(String(b.id))
+  ));
+}
+
+function sortActionLedgerRows(rows: ActionLedgerRow[], sortMode: ApprovalSortMode): ActionLedgerRow[] {
+  if (sortMode === "NEWEST_FIRST") return [...rows].sort((a, b) => actionCreatedAtValue(b) - actionCreatedAtValue(a) || String(a.id).localeCompare(String(b.id)));
+  if (sortMode === "OLDEST_FIRST") return [...rows].sort((a, b) => actionCreatedAtValue(a) - actionCreatedAtValue(b) || String(a.id).localeCompare(String(b.id)));
+  if (sortMode === "RISK_HIGH_FIRST") return [...rows].sort((a, b) => actionRiskPriority(a) - actionRiskPriority(b) || actionCreatedAtValue(b) - actionCreatedAtValue(a) || String(a.id).localeCompare(String(b.id)));
+  return sortActionLedgerRowsByPriority(rows);
+}
+
+function sortModeFromLabel(label: string): ApprovalSortMode {
+  if (label === "Newest First") return "NEWEST_FIRST";
+  if (label === "Oldest First") return "OLDEST_FIRST";
+  if (label === "Risk High First") return "RISK_HIGH_FIRST";
+  return "PRIORITY_FIRST";
+}
+
+function labelFromSortMode(sortMode: ApprovalSortMode): string {
+  if (sortMode === "NEWEST_FIRST") return "Newest First";
+  if (sortMode === "OLDEST_FIRST") return "Oldest First";
+  if (sortMode === "RISK_HIGH_FIRST") return "Risk High First";
+  return "Priority First";
+}
+
 async function fetchActionLedgerData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
   const [summaryResponse, rowsResponse] = await Promise.all([
     getJson<AnyRecord>(`/api/action-ledger/summary?sellerId=${SELLER_ID}`),
-    getJson<unknown>(`/api/action-ledger?sellerId=${SELLER_ID}&limit=50`)
+    getJson<unknown>(`/api/action-ledger?sellerId=${SELLER_ID}&limit=${ACTION_LEDGER_FETCH_LIMIT}`)
   ]);
   const summaryRoot = recordOf(summaryResponse);
   return {
@@ -1128,23 +1243,20 @@ function ActionLedgerCard({
   const completed = isCompletedAction(row);
   const monitoring = isMonitoringAction(row);
   const buttonDisabled = Boolean(processing);
-  const fields: Array<[string, ReactNode]> = [
-    ["Short ID", formatShortId(row.id)],
-    ["Title", formatEmpty(row.title)],
-    ["Summary", formatEmpty(row.summary)],
+  const importantFields: Array<[string, ReactNode]> = [
     ["Recommended Action", formatEmpty(row.recommendedAction)],
-    ["Source", formatEmpty(row.source)],
-    ["Action Type", formatEmpty(row.actionType)],
-    ["Entity Type", formatEmpty(row.entityType)],
-    ["Entity ID", formatEmpty(row.entityId)],
     ["SKU", formatEmpty(row.sku)],
     ["ASIN", formatEmpty(row.asin)],
-    ["Risk Level", <StatusBadge key="risk-level" value={row.riskLevel ?? "LOW"} />],
+    ["Entity", `${formatEmpty(row.entityType)} / ${formatEmpty(row.entityId)}`],
+    ["Created At", formatEmpty(row.createdAt)]
+  ];
+  const detailFields: Array<[string, ReactNode]> = [
+    ["Full Action ID", row.id],
     ["Confidence", <StatusBadge key="confidence-label" value={row.confidenceLabel ?? "LOW"} />],
     ["Approval Tier", formatEmpty(row.approvalTier)],
     ["State", <StatusBadge key="state" value={row.state ?? "UNKNOWN"} />],
-    ["Approval Status", <StatusBadge key="approval-status" value={row.approvalStatus ?? "UNKNOWN"} />],
-    ["Created At", formatEmpty(row.createdAt)]
+    ["Source", formatEmpty(row.source)],
+    ["Action Type", formatEmpty(row.actionType)]
   ];
 
   let footer: ReactNode = null;
@@ -1152,8 +1264,6 @@ function ActionLedgerCard({
     footer = <p className="approval-status-note">Completed manually.</p>;
   } else if (approvalStatus === "REJECTED") {
     footer = <p className="approval-status-note">Rejected. No action executed.</p>;
-  } else if (approvalStatus === "APPROVED") {
-    footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
   } else if (monitoring) {
     footer = (
       <div className="button-row compact">
@@ -1162,6 +1272,8 @@ function ActionLedgerCard({
         </button>
       </div>
     );
+  } else if (approvalStatus === "APPROVED") {
+    footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
   } else if (approvalStatus === "PENDING") {
     footer = (
       <div className="button-row compact">
@@ -1180,20 +1292,36 @@ function ActionLedgerCard({
 
   return (
     <article className="item-card action-ledger-card">
-      <div className="item-top">
-        <strong>{formatEmpty(row.title)}</strong>
-        <StatusBadge value={row.approvalStatus ?? row.state ?? "PENDING"} />
+      <div className="approval-card-head">
+        <div className="approval-title-block">
+          <strong>{formatEmpty(row.title)}</strong>
+          <span>Action ID {formatShortId(row.id)}</span>
+        </div>
+        <div className="badge-row approval-badges">
+          <StatusBadge value={row.source ?? "UNKNOWN_SOURCE"} />
+          <StatusBadge value={row.actionType ?? "UNKNOWN_ACTION"} />
+          <StatusBadge value={row.riskLevel ?? "LOW"} />
+          <StatusBadge value={row.approvalStatus ?? row.state ?? "PENDING"} />
+        </div>
       </div>
-      <p>{formatEmpty(row.summary)}</p>
+      <p className="approval-summary-text">{formatEmpty(row.summary)}</p>
       <div className="approval-id-row">
-        <span>Action ID {formatShortId(row.id)}</span>
+        <span>{formatEmpty(row.source)} priority review</span>
         <button type="button" className="secondary tiny-button" onClick={() => onCopy(row.id)} disabled={buttonDisabled}>Copy ID</button>
       </div>
       <div className="detail-grid approval-detail-grid">
-        {fields.map(([label, value]) => (
+        {importantFields.map(([label, value]) => (
           <MetricRow key={label} label={label} value={value} />
         ))}
       </div>
+      <details className="approval-more-details">
+        <summary>More details</summary>
+        <div className="detail-grid approval-detail-grid">
+          {detailFields.map(([label, value]) => (
+            <MetricRow key={label} label={label} value={value} />
+          ))}
+        </div>
+      </details>
       {footer}
     </article>
   );
@@ -1201,6 +1329,12 @@ function ActionLedgerCard({
 
 function ApprovalCenterPage() {
   const [activeFilter, setActiveFilter] = useState<ApprovalFilter>("ALL");
+  const [sourceFilter, setSourceFilter] = useState("ALL SOURCES");
+  const [actionTypeFilter, setActionTypeFilter] = useState("ALL ACTION TYPES");
+  const [quickView, setQuickView] = useState<QuickViewFilter>("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortMode, setSortMode] = useState<ApprovalSortMode>("PRIORITY_FIRST");
+  const [page, setPage] = useState(1);
   const [processing, setProcessing] = useState<{ id: string; action: LedgerAction } | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [summaryState, setSummaryState] = useState<LoadState<ActionLedgerSummary>>(emptyState<ActionLedgerSummary>());
@@ -1245,7 +1379,29 @@ function ApprovalCenterPage() {
   }, []);
 
   const allRows = rowsState.data ?? [];
-  const rows = filterActionLedgerRows(allRows, activeFilter);
+  const sourceOptions = useMemo(() => (
+    Array.from(new Set([...defaultSourceFilters, ...uniqueSortedValues(allRows, "source")]))
+  ), [allRows]);
+  const actionTypeOptions = useMemo(() => (
+    Array.from(new Set([...defaultActionTypeFilters, ...uniqueSortedValues(allRows, "actionType")]))
+  ), [allRows]);
+  const rows = useMemo(() => {
+    const statusRows = filterActionLedgerRows(allRows, activeFilter);
+    const sourceRows = sourceFilter === "ALL SOURCES"
+      ? statusRows
+      : statusRows.filter((row) => normalizeState(row.source) === normalizeState(sourceFilter));
+    const actionTypeRows = actionTypeFilter === "ALL ACTION TYPES"
+      ? sourceRows
+      : sourceRows.filter((row) => normalizeState(row.actionType) === normalizeState(actionTypeFilter));
+    const quickViewRows = filterByQuickView(actionTypeRows, quickView);
+    return sortActionLedgerRows(filterBySearch(quickViewRows, searchQuery), sortMode);
+  }, [allRows, activeFilter, sourceFilter, actionTypeFilter, quickView, searchQuery, sortMode]);
+  const totalPages = Math.max(1, Math.ceil(rows.length / APPROVAL_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageStartIndex = rows.length === 0 ? 0 : (safePage - 1) * APPROVAL_PAGE_SIZE;
+  const pageRows = rows.slice(pageStartIndex, pageStartIndex + APPROVAL_PAGE_SIZE);
+  const showingStart = rows.length === 0 ? 0 : pageStartIndex + 1;
+  const showingEnd = rows.length === 0 ? 0 : pageStartIndex + pageRows.length;
   const summaryData = summaryState.data ?? {};
   const loading = rowsState.loading || summaryState.loading;
   const loadError = rowsState.error ?? summaryState.error;
@@ -1258,6 +1414,10 @@ function ApprovalCenterPage() {
     highRisk: readNumber(summaryData.highRiskCount),
     founderOverride: readNumber(summaryData.founderOverrideCount)
   };
+
+  function resetPagedView() {
+    setPage(1);
+  }
 
   async function copyActionId(id: string) {
     try {
@@ -1331,8 +1491,70 @@ function ApprovalCenterPage() {
       {message ? <div className={`soft-state ${message.type === "error" ? "error-state" : "success-state"}`}>{message.text}</div> : null}
       <div className="segmented">
         {approvalFilters.map((filter) => (
-          <button key={filter} type="button" className={activeFilter === filter ? "active" : ""} onClick={() => setActiveFilter(filter)} disabled={Boolean(processing)}>
+          <button
+            key={filter}
+            type="button"
+            className={activeFilter === filter ? "active" : ""}
+            onClick={() => {
+              setActiveFilter(filter);
+              resetPagedView();
+            }}
+            disabled={Boolean(processing)}
+          >
             {filter}
+          </button>
+        ))}
+      </div>
+      <div className="approval-controls">
+        <SelectField
+          label="Source"
+          value={sourceFilter}
+          options={sourceOptions}
+          onChange={(value) => {
+            setSourceFilter(value);
+            resetPagedView();
+          }}
+        />
+        <SelectField
+          label="Action Type"
+          value={actionTypeFilter}
+          options={actionTypeOptions}
+          onChange={(value) => {
+            setActionTypeFilter(value);
+            resetPagedView();
+          }}
+        />
+        <TextInput
+          label="Search"
+          value={searchQuery}
+          onChange={(value) => {
+            setSearchQuery(value);
+            resetPagedView();
+          }}
+        />
+        <SelectField
+          label="Sort"
+          value={labelFromSortMode(sortMode)}
+          options={approvalSortOptions}
+          onChange={(value) => {
+            setSortMode(sortModeFromLabel(value));
+            resetPagedView();
+          }}
+        />
+      </div>
+      <div className="approval-quick-views" aria-label="Quick views">
+        {quickViewFilters.map((filter) => (
+          <button
+            key={filter.id}
+            type="button"
+            className={`secondary ${quickView === filter.id ? "active" : ""}`}
+            onClick={() => {
+              setQuickView(filter.id);
+              resetPagedView();
+            }}
+            disabled={Boolean(processing)}
+          >
+            {filter.label}
           </button>
         ))}
       </div>
@@ -1343,17 +1565,34 @@ function ApprovalCenterPage() {
       ) : rows.length === 0 ? (
         <EmptyBlock text="No actions match this filter." />
       ) : (
-        <div className="card-list">
-          {rows.map((row) => (
-            <ActionLedgerCard
-              key={row.id}
-              row={row}
-              processing={processing}
-              onAction={act}
-              onCopy={copyActionId}
-            />
-          ))}
-        </div>
+        <>
+          <p className="approval-count-line">Showing {rows.length} of {allRows.length} loaded actions</p>
+          <div className="approval-pagination">
+            <span>Showing {showingStart}-{showingEnd} of {rows.length}</span>
+            <div className="button-row compact">
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || Boolean(processing)}>Previous</button>
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || Boolean(processing)}>Next</button>
+            </div>
+          </div>
+          <div className="card-list">
+            {pageRows.map((row) => (
+              <ActionLedgerCard
+                key={row.id}
+                row={row}
+                processing={processing}
+                onAction={act}
+                onCopy={copyActionId}
+              />
+            ))}
+          </div>
+          <div className="approval-pagination bottom">
+            <span>Showing {showingStart}-{showingEnd} of {rows.length}</span>
+            <div className="button-row compact">
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || Boolean(processing)}>Previous</button>
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || Boolean(processing)}>Next</button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
