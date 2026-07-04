@@ -284,6 +284,19 @@
   padding: 14px;
 }
 
+.approval-warning {
+  margin-bottom: 18px;
+}
+
+.approval-warning p {
+  margin: 0;
+  font-weight: 800;
+}
+
+.approval-summary {
+  margin-bottom: 18px;
+}
+
 .action-list {
   display: grid;
   gap: 12px;
@@ -303,6 +316,17 @@
 
 .button-row.compact {
   margin-top: 12px;
+}
+
+.approval-id-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  color: #65756b;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 button {
@@ -329,6 +353,11 @@ button.secondary,
 .segmented button {
   background: #ffffff;
   color: #2f6948;
+}
+
+.tiny-button {
+  padding: 6px 9px;
+  font-size: 12px;
 }
 
 button.secondary:hover,
@@ -603,6 +632,11 @@ textarea {
 .error-state {
   color: #963a30;
   background: #fff0ed;
+}
+
+.success-state {
+  color: #1e6b43;
+  background: #edf7ef;
 }
 
 .clean-list {

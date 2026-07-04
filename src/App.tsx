@@ -83,6 +83,32 @@ function formatEmpty(value: unknown): string {
   return String(value);
 }
 
+function formatShortId(value: unknown): string {
+  const id = String(value ?? "").trim();
+  if (!id) return "Unavailable";
+  if (id.length <= 14) return id;
+  return `${id.slice(0, 8)}...${id.slice(-6)}`;
+}
+
+function sanitizeActionError(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error || "Unknown error.");
+  const redacted = rawMessage
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
+    .replace(/\b(?:sk|pk|rk)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[redacted]")
+    .replace(
+      /\b([A-Za-z_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASS|PWD|AUTH)[A-Za-z_]*)\s*([:=])\s*("[^"]+"|'[^']+'|[^,\s;]+)/gi,
+      "$1$2[redacted]"
+    )
+    .replace(
+      /(["']?[A-Za-z0-9_.-]*(?:TOKEN|SECRET|KEY|PASSWORD|PASS|PWD|AUTH)[A-Za-z0-9_.-]*["']?\s*:\s*)("[^"]+"|'[^']+'|[^,\s;}]+)/gi,
+      "$1[redacted]"
+    )
+    .replace(/\b(access_token|refresh_token|api_key|client_secret|secret_key|auth_token)=([^&\s]+)/gi, "$1=[redacted]")
+    .trim();
+  return redacted || "Unknown error.";
+}
+
 function formatMoney(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   const numeric = Number(value);
@@ -1045,6 +1071,10 @@ function RecommendationSection({ title, rows, footer, loading, error }: { title:
 function ApprovalCenterPage() {
   const statuses = ["NEW", "APPROVED", "MONITORING", "REJECTED", "COMPLETED_MANUALLY"];
   const [activeStatus, setActiveStatus] = useState("NEW");
+  const [processing, setProcessing] = useState<{ id: string; action: ApprovalAction } | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  type ApprovalAction = "approve" | "reject" | "monitor" | "complete";
+  const summary = useApi<AnyRecord>(() => getJson(`/api/ceo-report/daily?sellerId=${SELLER_ID}&days=30`));
   const lists = useApi<Record<string, Recommendation[]>>(
     async () => {
       const entries = await Promise.all(
@@ -1060,23 +1090,73 @@ function ApprovalCenterPage() {
 
   const rows = lists.data?.[activeStatus] ?? [];
 
-  async function act(id: string, action: "approve" | "reject" | "monitor" | "complete") {
+  const summaryData = summary.data ?? {};
+  const summaryCounts = {
+    pending: Array.isArray(summaryData.pendingApprovals) ? arrayOf(summaryData.pendingApprovals).length : (lists.data?.NEW.length ?? 0),
+    approved: Array.isArray(summaryData.approvedShadowActions) ? arrayOf(summaryData.approvedShadowActions).length : (lists.data?.APPROVED.length ?? 0),
+    monitoring: Array.isArray(summaryData.monitoringItems) ? arrayOf(summaryData.monitoringItems).length : (lists.data?.MONITORING.length ?? 0),
+    completed: lists.data?.COMPLETED_MANUALLY.length ?? 0
+  };
+
+  async function copyActionId(id: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(id);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = id;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (!copied) throw new Error("Clipboard copy was not available.");
+      }
+      setMessage({ type: "success", text: `Copied action ID ${formatShortId(id)} for debugging.` });
+    } catch (error) {
+      setMessage({ type: "error", text: `Copy failed: ${sanitizeActionError(error)}` });
+    }
+  }
+
+  async function act(row: Recommendation, action: ApprovalAction) {
+    const id = row.id;
     const notes = {
       approve: "Approved from frontend. No Amazon action executed.",
       reject: "Rejected from frontend.",
       monitor: "Moved to monitoring from frontend.",
       complete: "Marked completed manually from frontend."
     };
-    await postJson(`/api/recommendations/${id}/${action}`, { userNote: notes[action] });
-    lists.reload();
+    setProcessing({ id, action });
+    setMessage(null);
+    try {
+      await postJson(`/api/recommendations/${id}/${action}`, { userNote: notes[action] });
+      summary.reload();
+      lists.reload();
+      setMessage({ type: "success", text: `${labelize(action)} saved for action ${formatShortId(id)}.` });
+    } catch (error) {
+      setMessage({ type: "error", text: `Action failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setProcessing(null);
+    }
   }
 
   return (
     <div className="page">
       <PageHeader title="Approval Center" subtitle="Shadow mode active. No Amazon action is executed." />
+      <div className="warning-card approval-warning">
+        <p>Approval Center works in shadow mode. No external Amazon, Ads, Store, Image, A+, or Social action is executed yet.</p>
+      </div>
+      <div className="summary-strip approval-summary" aria-label="Approval summary">
+        <MetricTile label="Pending" value={summary.loading && !lists.data ? "..." : summaryCounts.pending} />
+        <MetricTile label="Approved" value={summary.loading && !lists.data ? "..." : summaryCounts.approved} />
+        <MetricTile label="Monitoring" value={summary.loading && !lists.data ? "..." : summaryCounts.monitoring} />
+        <MetricTile label="Completed" value={lists.loading && !lists.data ? "..." : summaryCounts.completed} />
+      </div>
+      {message ? <div className={`soft-state ${message.type === "error" ? "error-state" : "success-state"}`}>{message.text}</div> : null}
       <div className="segmented">
         {statuses.map((status) => (
-          <button key={status} type="button" className={activeStatus === status ? "active" : ""} onClick={() => setActiveStatus(status)}>
+          <button key={status} type="button" className={activeStatus === status ? "active" : ""} onClick={() => setActiveStatus(status)} disabled={Boolean(processing)}>
             {status}
           </button>
         ))}
@@ -1088,12 +1168,26 @@ function ApprovalCenterPage() {
               key={row.id}
               item={row as unknown as AnyRecord}
               footer={
-                <div className="button-row compact">
-                  <button type="button" onClick={() => act(row.id, "approve")}>Approve</button>
-                  <button type="button" onClick={() => act(row.id, "reject")}>Reject</button>
-                  <button type="button" onClick={() => act(row.id, "monitor")}>Monitor</button>
-                  <button type="button" onClick={() => act(row.id, "complete")}>Complete</button>
-                </div>
+                <>
+                  <div className="approval-id-row">
+                    <span>Action ID {formatShortId(row.id)}</span>
+                    <button type="button" className="secondary tiny-button" onClick={() => copyActionId(row.id)} disabled={Boolean(processing)}>Copy ID</button>
+                  </div>
+                  <div className="button-row compact">
+                    <button type="button" onClick={() => act(row, "approve")} disabled={Boolean(processing)}>
+                      {processing?.id === row.id && processing.action === "approve" ? "Approving..." : "Approve"}
+                    </button>
+                    <button type="button" onClick={() => act(row, "reject")} disabled={Boolean(processing)}>
+                      {processing?.id === row.id && processing.action === "reject" ? "Rejecting..." : "Reject"}
+                    </button>
+                    <button type="button" onClick={() => act(row, "monitor")} disabled={Boolean(processing)}>
+                      {processing?.id === row.id && processing.action === "monitor" ? "Moving..." : "Monitor"}
+                    </button>
+                    <button type="button" onClick={() => act(row, "complete")} disabled={Boolean(processing)}>
+                      {processing?.id === row.id && processing.action === "complete" ? "Completing..." : "Complete"}
+                    </button>
+                  </div>
+                </>
               }
             />
           ))}
