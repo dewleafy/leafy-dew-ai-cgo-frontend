@@ -21,6 +21,35 @@ export type Recommendation = {
   profitEvidence?: AnyRecord;
 };
 
+export type ActionLedgerRow = {
+  id: string;
+  title?: string | null;
+  summary?: string | null;
+  recommendedAction?: string | null;
+  source?: string | null;
+  actionType?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  riskLevel?: string | null;
+  confidenceLabel?: string | null;
+  approvalTier?: string | null;
+  state?: string | null;
+  approvalStatus?: string | null;
+  createdAt?: string | null;
+};
+
+export type ActionLedgerSummary = {
+  pendingCount?: number | string | null;
+  approvedCount?: number | string | null;
+  rejectedCount?: number | string | null;
+  monitoringCount?: number | string | null;
+  completedCount?: number | string | null;
+  highRiskCount?: number | string | null;
+  founderOverrideCount?: number | string | null;
+};
+
 export type ProductPassport = {
   id: string;
   productName?: string;

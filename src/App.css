@@ -294,6 +294,7 @@
 }
 
 .approval-summary {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   margin-bottom: 18px;
 }
 
@@ -326,6 +327,16 @@
   margin-top: 12px;
   color: #65756b;
   font-size: 13px;
+  font-weight: 800;
+}
+
+.approval-detail-grid {
+  margin-top: 12px;
+}
+
+.approval-status-note {
+  margin-top: 12px;
+  color: #526057;
   font-weight: 800;
 }
 

@@ -3,6 +3,8 @@ import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import { deleteJson, getJson, postJson, putJson } from "./api";
 import type {
+  ActionLedgerRow,
+  ActionLedgerSummary,
   ActivityLog,
   AnyRecord,
   ApiRows,
@@ -63,6 +65,11 @@ function rowsOf<T>(value: unknown): T[] {
   if (!value || typeof value !== "object") return [];
   const rows = (value as ApiRows<T>).rows;
   return Array.isArray(rows) ? rows : [];
+}
+
+function actionLedgerRowsOf(value: unknown): ActionLedgerRow[] {
+  if (Array.isArray(value)) return value as ActionLedgerRow[];
+  return rowsOf<ActionLedgerRow>(value);
 }
 
 function arrayOf(value: unknown): AnyRecord[] {
@@ -1068,34 +1075,188 @@ function RecommendationSection({ title, rows, footer, loading, error }: { title:
   );
 }
 
-function ApprovalCenterPage() {
-  const statuses = ["NEW", "APPROVED", "MONITORING", "REJECTED", "COMPLETED_MANUALLY"];
-  const [activeStatus, setActiveStatus] = useState("NEW");
-  const [processing, setProcessing] = useState<{ id: string; action: ApprovalAction } | null>(null);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  type ApprovalAction = "approve" | "reject" | "monitor" | "complete";
-  const summary = useApi<AnyRecord>(() => getJson(`/api/ceo-report/daily?sellerId=${SELLER_ID}&days=30`));
-  const lists = useApi<Record<string, Recommendation[]>>(
-    async () => {
-      const entries = await Promise.all(
-        statuses.map(async (status) => {
-          const response = await getJson<ApiRows<Recommendation>>(`/api/recommendations?sellerId=${SELLER_ID}&status=${status}`);
-          return [status, rowsOf<Recommendation>(response)] as const;
-        })
-      );
-      return Object.fromEntries(entries);
-    },
-    []
+type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
+type LedgerAction = "approve" | "reject" | "monitor" | "complete";
+
+const approvalFilters: ApprovalFilter[] = ["ALL", "PENDING", "APPROVED", "REJECTED", "MONITORING", "COMPLETED"];
+
+function normalizeState(value: unknown): string {
+  return String(value ?? "").toUpperCase();
+}
+
+function isMonitoringAction(row: ActionLedgerRow): boolean {
+  return ["MONITOR", "MONITORING"].includes(normalizeState(row.state));
+}
+
+function isCompletedAction(row: ActionLedgerRow): boolean {
+  return ["COMPLETED", "COMPLETED_MANUALLY"].includes(normalizeState(row.state));
+}
+
+function filterActionLedgerRows(rows: ActionLedgerRow[], filter: ApprovalFilter): ActionLedgerRow[] {
+  if (filter === "ALL") return rows;
+  if (filter === "PENDING") return rows.filter((row) => normalizeState(row.approvalStatus) === "PENDING");
+  if (filter === "APPROVED") return rows.filter((row) => normalizeState(row.approvalStatus) === "APPROVED");
+  if (filter === "REJECTED") return rows.filter((row) => normalizeState(row.approvalStatus) === "REJECTED");
+  if (filter === "MONITORING") return rows.filter(isMonitoringAction);
+  return rows.filter(isCompletedAction);
+}
+
+async function fetchActionLedgerData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
+  const [summaryResponse, rowsResponse] = await Promise.all([
+    getJson<AnyRecord>(`/api/action-ledger/summary?sellerId=${SELLER_ID}`),
+    getJson<unknown>(`/api/action-ledger?sellerId=${SELLER_ID}&limit=50`)
+  ]);
+  const summaryRoot = recordOf(summaryResponse);
+  return {
+    summary: recordOf(summaryRoot.summary ?? summaryRoot) as ActionLedgerSummary,
+    rows: actionLedgerRowsOf(rowsResponse)
+  };
+}
+
+function ActionLedgerCard({
+  row,
+  processing,
+  onAction,
+  onCopy
+}: {
+  row: ActionLedgerRow;
+  processing: { id: string; action: LedgerAction } | null;
+  onAction: (row: ActionLedgerRow, action: LedgerAction) => void;
+  onCopy: (id: string) => void;
+}) {
+  const approvalStatus = normalizeState(row.approvalStatus);
+  const completed = isCompletedAction(row);
+  const monitoring = isMonitoringAction(row);
+  const buttonDisabled = Boolean(processing);
+  const fields: Array<[string, ReactNode]> = [
+    ["Short ID", formatShortId(row.id)],
+    ["Title", formatEmpty(row.title)],
+    ["Summary", formatEmpty(row.summary)],
+    ["Recommended Action", formatEmpty(row.recommendedAction)],
+    ["Source", formatEmpty(row.source)],
+    ["Action Type", formatEmpty(row.actionType)],
+    ["Entity Type", formatEmpty(row.entityType)],
+    ["Entity ID", formatEmpty(row.entityId)],
+    ["SKU", formatEmpty(row.sku)],
+    ["ASIN", formatEmpty(row.asin)],
+    ["Risk Level", <StatusBadge key="risk-level" value={row.riskLevel ?? "LOW"} />],
+    ["Confidence", <StatusBadge key="confidence-label" value={row.confidenceLabel ?? "LOW"} />],
+    ["Approval Tier", formatEmpty(row.approvalTier)],
+    ["State", <StatusBadge key="state" value={row.state ?? "UNKNOWN"} />],
+    ["Approval Status", <StatusBadge key="approval-status" value={row.approvalStatus ?? "UNKNOWN"} />],
+    ["Created At", formatEmpty(row.createdAt)]
+  ];
+
+  let footer: ReactNode = null;
+  if (completed) {
+    footer = <p className="approval-status-note">Completed manually.</p>;
+  } else if (approvalStatus === "REJECTED") {
+    footer = <p className="approval-status-note">Rejected. No action executed.</p>;
+  } else if (approvalStatus === "APPROVED") {
+    footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
+  } else if (monitoring) {
+    footer = (
+      <div className="button-row compact">
+        <button type="button" onClick={() => onAction(row, "complete")} disabled={buttonDisabled}>
+          {processing?.id === row.id && processing.action === "complete" ? "Completing..." : "Complete"}
+        </button>
+      </div>
+    );
+  } else if (approvalStatus === "PENDING") {
+    footer = (
+      <div className="button-row compact">
+        <button type="button" onClick={() => onAction(row, "approve")} disabled={buttonDisabled}>
+          {processing?.id === row.id && processing.action === "approve" ? "Approving..." : "Approve"}
+        </button>
+        <button type="button" onClick={() => onAction(row, "reject")} disabled={buttonDisabled}>
+          {processing?.id === row.id && processing.action === "reject" ? "Rejecting..." : "Reject"}
+        </button>
+        <button type="button" onClick={() => onAction(row, "monitor")} disabled={buttonDisabled}>
+          {processing?.id === row.id && processing.action === "monitor" ? "Moving..." : "Monitor"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <article className="item-card action-ledger-card">
+      <div className="item-top">
+        <strong>{formatEmpty(row.title)}</strong>
+        <StatusBadge value={row.approvalStatus ?? row.state ?? "PENDING"} />
+      </div>
+      <p>{formatEmpty(row.summary)}</p>
+      <div className="approval-id-row">
+        <span>Action ID {formatShortId(row.id)}</span>
+        <button type="button" className="secondary tiny-button" onClick={() => onCopy(row.id)} disabled={buttonDisabled}>Copy ID</button>
+      </div>
+      <div className="detail-grid approval-detail-grid">
+        {fields.map(([label, value]) => (
+          <MetricRow key={label} label={label} value={value} />
+        ))}
+      </div>
+      {footer}
+    </article>
   );
+}
 
-  const rows = lists.data?.[activeStatus] ?? [];
+function ApprovalCenterPage() {
+  const [activeFilter, setActiveFilter] = useState<ApprovalFilter>("ALL");
+  const [processing, setProcessing] = useState<{ id: string; action: LedgerAction } | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [summaryState, setSummaryState] = useState<LoadState<ActionLedgerSummary>>(emptyState<ActionLedgerSummary>());
+  const [rowsState, setRowsState] = useState<LoadState<ActionLedgerRow[]>>(emptyState<ActionLedgerRow[]>());
 
-  const summaryData = summary.data ?? {};
+  async function refreshApprovalData() {
+    setSummaryState((current) => ({ ...current, loading: true, error: null }));
+    setRowsState((current) => ({ ...current, loading: true, error: null }));
+    try {
+      const data = await fetchActionLedgerData();
+      setSummaryState({ data: data.summary, loading: false, error: null });
+      setRowsState({ data: data.rows, loading: false, error: null });
+    } catch (error) {
+      const safeMessage = sanitizeActionError(error);
+      setSummaryState({ data: null, loading: false, error: safeMessage });
+      setRowsState({ data: null, loading: false, error: safeMessage });
+      throw error;
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    setSummaryState((current) => ({ ...current, loading: true, error: null }));
+    setRowsState((current) => ({ ...current, loading: true, error: null }));
+
+    fetchActionLedgerData()
+      .then((data) => {
+        if (!alive) return;
+        setSummaryState({ data: data.summary, loading: false, error: null });
+        setRowsState({ data: data.rows, loading: false, error: null });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        const safeMessage = sanitizeActionError(error);
+        setSummaryState({ data: null, loading: false, error: safeMessage });
+        setRowsState({ data: null, loading: false, error: safeMessage });
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const allRows = rowsState.data ?? [];
+  const rows = filterActionLedgerRows(allRows, activeFilter);
+  const summaryData = summaryState.data ?? {};
+  const loading = rowsState.loading || summaryState.loading;
+  const loadError = rowsState.error ?? summaryState.error;
   const summaryCounts = {
-    pending: Array.isArray(summaryData.pendingApprovals) ? arrayOf(summaryData.pendingApprovals).length : (lists.data?.NEW.length ?? 0),
-    approved: Array.isArray(summaryData.approvedShadowActions) ? arrayOf(summaryData.approvedShadowActions).length : (lists.data?.APPROVED.length ?? 0),
-    monitoring: Array.isArray(summaryData.monitoringItems) ? arrayOf(summaryData.monitoringItems).length : (lists.data?.MONITORING.length ?? 0),
-    completed: lists.data?.COMPLETED_MANUALLY.length ?? 0
+    pending: readNumber(summaryData.pendingCount),
+    approved: readNumber(summaryData.approvedCount),
+    rejected: readNumber(summaryData.rejectedCount),
+    monitoring: readNumber(summaryData.monitoringCount),
+    completed: readNumber(summaryData.completedCount),
+    highRisk: readNumber(summaryData.highRiskCount),
+    founderOverride: readNumber(summaryData.founderOverrideCount)
   };
 
   async function copyActionId(id: string) {
@@ -1119,20 +1280,31 @@ function ApprovalCenterPage() {
     }
   }
 
-  async function act(row: Recommendation, action: ApprovalAction) {
+  async function act(row: ActionLedgerRow, action: LedgerAction) {
     const id = row.id;
-    const notes = {
-      approve: "Approved from frontend. No Amazon action executed.",
-      reject: "Rejected from frontend.",
-      monitor: "Moved to monitoring from frontend.",
-      complete: "Marked completed manually from frontend."
+    const actions = {
+      approve: {
+        path: `/api/action-ledger/${id}/approve`,
+        body: { note: "Approved from Approval Center", approvedBy: "founder" }
+      },
+      reject: {
+        path: `/api/action-ledger/${id}/reject`,
+        body: { note: "Rejected from Approval Center" }
+      },
+      monitor: {
+        path: `/api/action-ledger/${id}/monitor`,
+        body: { note: "Moved to monitoring from Approval Center" }
+      },
+      complete: {
+        path: `/api/action-ledger/${id}/complete`,
+        body: { note: "Completed from Approval Center" }
+      }
     };
     setProcessing({ id, action });
     setMessage(null);
     try {
-      await postJson(`/api/recommendations/${id}/${action}`, { userNote: notes[action] });
-      summary.reload();
-      lists.reload();
+      await postJson(actions[action].path, actions[action].body);
+      await refreshApprovalData();
       setMessage({ type: "success", text: `${labelize(action)} saved for action ${formatShortId(id)}.` });
     } catch (error) {
       setMessage({ type: "error", text: `Action failed: ${sanitizeActionError(error)}` });
@@ -1148,47 +1320,37 @@ function ApprovalCenterPage() {
         <p>Approval Center works in shadow mode. No external Amazon, Ads, Store, Image, A+, or Social action is executed yet.</p>
       </div>
       <div className="summary-strip approval-summary" aria-label="Approval summary">
-        <MetricTile label="Pending" value={summary.loading && !lists.data ? "..." : summaryCounts.pending} />
-        <MetricTile label="Approved" value={summary.loading && !lists.data ? "..." : summaryCounts.approved} />
-        <MetricTile label="Monitoring" value={summary.loading && !lists.data ? "..." : summaryCounts.monitoring} />
-        <MetricTile label="Completed" value={lists.loading && !lists.data ? "..." : summaryCounts.completed} />
+        <MetricTile label="Pending" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.pending} />
+        <MetricTile label="Approved" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.approved} />
+        <MetricTile label="Rejected" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.rejected} />
+        <MetricTile label="Monitoring" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.monitoring} />
+        <MetricTile label="Completed" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.completed} />
+        <MetricTile label="High Risk" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.highRisk} />
+        <MetricTile label="Founder Override" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.founderOverride} />
       </div>
       {message ? <div className={`soft-state ${message.type === "error" ? "error-state" : "success-state"}`}>{message.text}</div> : null}
       <div className="segmented">
-        {statuses.map((status) => (
-          <button key={status} type="button" className={activeStatus === status ? "active" : ""} onClick={() => setActiveStatus(status)} disabled={Boolean(processing)}>
-            {status}
+        {approvalFilters.map((filter) => (
+          <button key={filter} type="button" className={activeFilter === filter ? "active" : ""} onClick={() => setActiveFilter(filter)} disabled={Boolean(processing)}>
+            {filter}
           </button>
         ))}
       </div>
-      {lists.loading ? <LoadingBlock /> : lists.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
+      {loading && !rowsState.data ? <LoadingBlock /> : loadError ? (
+        <ErrorBlock text={`Could not load approval actions: ${loadError}`} />
+      ) : allRows.length === 0 ? (
+        <EmptyBlock text="No approval actions yet. AI recommendations will appear here before execution." />
+      ) : rows.length === 0 ? (
+        <EmptyBlock text="No actions match this filter." />
+      ) : (
         <div className="card-list">
           {rows.map((row) => (
-            <RecommendationCard
+            <ActionLedgerCard
               key={row.id}
-              item={row as unknown as AnyRecord}
-              footer={
-                <>
-                  <div className="approval-id-row">
-                    <span>Action ID {formatShortId(row.id)}</span>
-                    <button type="button" className="secondary tiny-button" onClick={() => copyActionId(row.id)} disabled={Boolean(processing)}>Copy ID</button>
-                  </div>
-                  <div className="button-row compact">
-                    <button type="button" onClick={() => act(row, "approve")} disabled={Boolean(processing)}>
-                      {processing?.id === row.id && processing.action === "approve" ? "Approving..." : "Approve"}
-                    </button>
-                    <button type="button" onClick={() => act(row, "reject")} disabled={Boolean(processing)}>
-                      {processing?.id === row.id && processing.action === "reject" ? "Rejecting..." : "Reject"}
-                    </button>
-                    <button type="button" onClick={() => act(row, "monitor")} disabled={Boolean(processing)}>
-                      {processing?.id === row.id && processing.action === "monitor" ? "Moving..." : "Monitor"}
-                    </button>
-                    <button type="button" onClick={() => act(row, "complete")} disabled={Boolean(processing)}>
-                      {processing?.id === row.id && processing.action === "complete" ? "Completing..." : "Complete"}
-                    </button>
-                  </div>
-                </>
-              }
+              row={row}
+              processing={processing}
+              onAction={act}
+              onCopy={copyActionId}
             />
           ))}
         </div>
