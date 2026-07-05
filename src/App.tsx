@@ -1077,8 +1077,17 @@ function RecommendationSection({ title, rows, footer, loading, error }: { title:
 
 type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
 type LedgerAction = "approve" | "reject" | "monitor" | "complete";
+type BatchLedgerAction = "reject" | "monitor" | "complete";
 type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
 type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
+type BatchActionResult = {
+  updatedCount?: number | string | null;
+  skippedCount?: number | string | null;
+  result?: {
+    updatedCount?: number | string | null;
+    skippedCount?: number | string | null;
+  } | null;
+};
 
 const approvalFilters: ApprovalFilter[] = ["ALL", "PENDING", "APPROVED", "REJECTED", "MONITORING", "COMPLETED"];
 const defaultSourceFilters = ["ALL SOURCES", "CEO_REPORT", "PRODUCT_ECONOMICS", "PPC_RECOMMENDATIONS"];
@@ -1121,6 +1130,16 @@ function isMonitoringAction(row: ActionLedgerRow): boolean {
 
 function isCompletedAction(row: ActionLedgerRow): boolean {
   return ["COMPLETED", "COMPLETED_MANUALLY"].includes(normalizeState(row.state));
+}
+
+function isPendingBatchAction(row: ActionLedgerRow): boolean {
+  return normalizeState(row.approvalStatus) === "PENDING" && !isMonitoringAction(row) && !isCompletedAction(row);
+}
+
+function isSelectableBatchAction(row: ActionLedgerRow): boolean {
+  const approvalStatus = normalizeState(row.approvalStatus);
+  if (isCompletedAction(row) || approvalStatus === "APPROVED" || approvalStatus === "REJECTED") return false;
+  return isPendingBatchAction(row) || isMonitoringAction(row);
 }
 
 function filterActionLedgerRows(rows: ActionLedgerRow[], filter: ApprovalFilter): ActionLedgerRow[] {
@@ -1228,21 +1247,36 @@ async function fetchActionLedgerData(): Promise<{ summary: ActionLedgerSummary; 
   };
 }
 
+function formatBatchCounts(value: unknown): string {
+  const root = recordOf(value);
+  const nested = recordOf(root.result);
+  const updatedCount = readNumber(root.updatedCount ?? nested.updatedCount);
+  const skippedCount = readNumber(root.skippedCount ?? nested.skippedCount);
+  return `Updated ${updatedCount}, skipped ${skippedCount}.`;
+}
+
 function ActionLedgerCard({
   row,
+  selected,
   processing,
+  batchProcessing,
   onAction,
-  onCopy
+  onCopy,
+  onToggleSelected
 }: {
   row: ActionLedgerRow;
+  selected: boolean;
   processing: { id: string; action: LedgerAction } | null;
+  batchProcessing: BatchLedgerAction | "daily-priorities" | "dismiss-low-priority" | null;
   onAction: (row: ActionLedgerRow, action: LedgerAction) => void;
   onCopy: (id: string) => void;
+  onToggleSelected: (row: ActionLedgerRow) => void;
 }) {
   const approvalStatus = normalizeState(row.approvalStatus);
   const completed = isCompletedAction(row);
   const monitoring = isMonitoringAction(row);
-  const buttonDisabled = Boolean(processing);
+  const selectable = isSelectableBatchAction(row);
+  const buttonDisabled = Boolean(processing || batchProcessing);
   const importantFields: Array<[string, ReactNode]> = [
     ["Recommended Action", formatEmpty(row.recommendedAction)],
     ["SKU", formatEmpty(row.sku)],
@@ -1291,11 +1325,23 @@ function ActionLedgerCard({
   }
 
   return (
-    <article className="item-card action-ledger-card">
+    <article className={`item-card action-ledger-card ${selected ? "selected" : ""}`}>
       <div className="approval-card-head">
-        <div className="approval-title-block">
-          <strong>{formatEmpty(row.title)}</strong>
-          <span>Action ID {formatShortId(row.id)}</span>
+        <div className="approval-card-title-row">
+          {selectable ? (
+            <label className="batch-checkbox" aria-label={`Select action ${formatShortId(row.id)}`}>
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={() => onToggleSelected(row)}
+                disabled={buttonDisabled}
+              />
+            </label>
+          ) : null}
+          <div className="approval-title-block">
+            <strong>{formatEmpty(row.title)}</strong>
+            <span>Action ID {formatShortId(row.id)}</span>
+          </div>
         </div>
         <div className="badge-row approval-badges">
           <StatusBadge value={row.source ?? "UNKNOWN_SOURCE"} />
@@ -1336,17 +1382,21 @@ function ApprovalCenterPage() {
   const [sortMode, setSortMode] = useState<ApprovalSortMode>("PRIORITY_FIRST");
   const [page, setPage] = useState(1);
   const [processing, setProcessing] = useState<{ id: string; action: LedgerAction } | null>(null);
+  const [batchProcessing, setBatchProcessing] = useState<BatchLedgerAction | "daily-priorities" | "dismiss-low-priority" | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [dailyPriorityRows, setDailyPriorityRows] = useState<ActionLedgerRow[] | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [summaryState, setSummaryState] = useState<LoadState<ActionLedgerSummary>>(emptyState<ActionLedgerSummary>());
   const [rowsState, setRowsState] = useState<LoadState<ActionLedgerRow[]>>(emptyState<ActionLedgerRow[]>());
 
-  async function refreshApprovalData() {
+  async function refreshApprovalData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
     setSummaryState((current) => ({ ...current, loading: true, error: null }));
     setRowsState((current) => ({ ...current, loading: true, error: null }));
     try {
       const data = await fetchActionLedgerData();
       setSummaryState({ data: data.summary, loading: false, error: null });
       setRowsState({ data: data.rows, loading: false, error: null });
+      return data;
     } catch (error) {
       const safeMessage = sanitizeActionError(error);
       setSummaryState({ data: null, loading: false, error: safeMessage });
@@ -1378,13 +1428,14 @@ function ApprovalCenterPage() {
     };
   }, []);
 
-  const allRows = rowsState.data ?? [];
+  const loadedRows = rowsState.data ?? [];
+  const allRows = dailyPriorityRows ?? loadedRows;
   const sourceOptions = useMemo(() => (
-    Array.from(new Set([...defaultSourceFilters, ...uniqueSortedValues(allRows, "source")]))
-  ), [allRows]);
+    Array.from(new Set([...defaultSourceFilters, ...uniqueSortedValues(loadedRows, "source")]))
+  ), [loadedRows]);
   const actionTypeOptions = useMemo(() => (
-    Array.from(new Set([...defaultActionTypeFilters, ...uniqueSortedValues(allRows, "actionType")]))
-  ), [allRows]);
+    Array.from(new Set([...defaultActionTypeFilters, ...uniqueSortedValues(loadedRows, "actionType")]))
+  ), [loadedRows]);
   const rows = useMemo(() => {
     const statusRows = filterActionLedgerRows(allRows, activeFilter);
     const sourceRows = sourceFilter === "ALL SOURCES"
@@ -1402,6 +1453,15 @@ function ApprovalCenterPage() {
   const pageRows = rows.slice(pageStartIndex, pageStartIndex + APPROVAL_PAGE_SIZE);
   const showingStart = rows.length === 0 ? 0 : pageStartIndex + 1;
   const showingEnd = rows.length === 0 ? 0 : pageStartIndex + pageRows.length;
+  const selectedRows = useMemo(() => (
+    allRows.filter((row) => selectedIds.has(row.id) && isSelectableBatchAction(row))
+  ), [allRows, selectedIds]);
+  const selectedCount = selectedRows.length;
+  const selectedPendingOnly = selectedCount > 0 && selectedRows.every(isPendingBatchAction);
+  const selectedMonitoringOnly = selectedCount > 0 && selectedRows.every(isMonitoringAction);
+  const hasSelectablePageRows = pageRows.some(isSelectableBatchAction);
+  const costDataDismissVisible = quickView === "NEEDS_COST_DATA" || normalizeState(actionTypeFilter) === "COST_DATA_REQUIRED";
+  const controlsDisabled = Boolean(processing || batchProcessing);
   const summaryData = summaryState.data ?? {};
   const loading = rowsState.loading || summaryState.loading;
   const loadError = rowsState.error ?? summaryState.error;
@@ -1415,8 +1475,64 @@ function ApprovalCenterPage() {
     founderOverride: readNumber(summaryData.founderOverrideCount)
   };
 
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const allowedIds = new Set(rows.filter(isSelectableBatchAction).map((row) => row.id));
+      const next = new Set(Array.from(current).filter((id) => allowedIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [rows]);
+
   function resetPagedView() {
     setPage(1);
+  }
+
+  function resetPagedViewAndSelection() {
+    resetPagedView();
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelectedRow(row: ActionLedgerRow) {
+    if (!isSelectableBatchAction(row)) return;
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(row.id)) {
+        next.delete(row.id);
+      } else {
+        next.add(row.id);
+      }
+      return next;
+    });
+  }
+
+  function selectCurrentPage() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      pageRows.filter(isSelectableBatchAction).forEach((row) => next.add(row.id));
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function syncDailyPriorityRows(refreshedRows: ActionLedgerRow[]) {
+    setDailyPriorityRows((current) => {
+      if (!current) return current;
+      const rowsById = new Map(refreshedRows.map((row) => [row.id, row]));
+      return current.map((row) => rowsById.get(row.id) ?? row);
+    });
+  }
+
+  async function refreshDailyPriorityRows(refreshedRows: ActionLedgerRow[]) {
+    if (!dailyPriorityRows) return;
+    try {
+      const response = await getJson<unknown>(`/api/action-ledger/daily-priorities?sellerId=${SELLER_ID}&limit=25`);
+      setDailyPriorityRows(actionLedgerRowsOf(response));
+    } catch {
+      syncDailyPriorityRows(refreshedRows);
+    }
   }
 
   async function copyActionId(id: string) {
@@ -1464,12 +1580,112 @@ function ApprovalCenterPage() {
     setMessage(null);
     try {
       await postJson(actions[action].path, actions[action].body);
-      await refreshApprovalData();
+      const refreshed = await refreshApprovalData();
+      await refreshDailyPriorityRows(refreshed.rows);
       setMessage({ type: "success", text: `${labelize(action)} saved for action ${formatShortId(id)}.` });
     } catch (error) {
       setMessage({ type: "error", text: `Action failed: ${sanitizeActionError(error)}` });
     } finally {
       setProcessing(null);
+    }
+  }
+
+  async function batchAct(action: BatchLedgerAction) {
+    const ids = selectedRows.map((row) => row.id);
+    if (ids.length === 0) return;
+
+    const actions: Record<BatchLedgerAction, { path: string; body: Record<string, unknown>; label: string }> = {
+      reject: {
+        path: "/api/action-ledger/batch/reject",
+        body: {
+          sellerId: SELLER_ID,
+          ids,
+          note: "Rejected in batch from Approval Center",
+          rejectedBy: "founder"
+        },
+        label: "Batch reject"
+      },
+      monitor: {
+        path: "/api/action-ledger/batch/monitor",
+        body: {
+          sellerId: SELLER_ID,
+          ids,
+          note: "Moved to monitoring in batch from Approval Center"
+        },
+        label: "Batch monitor"
+      },
+      complete: {
+        path: "/api/action-ledger/batch/complete",
+        body: {
+          sellerId: SELLER_ID,
+          ids,
+          note: "Completed in batch from Approval Center"
+        },
+        label: "Batch complete"
+      }
+    };
+
+    setBatchProcessing(action);
+    setMessage(null);
+    try {
+      const response = await postJson<BatchActionResult>(actions[action].path, actions[action].body);
+      setSelectedIds(new Set());
+      const refreshed = await refreshApprovalData();
+      await refreshDailyPriorityRows(refreshed.rows);
+      setMessage({ type: "success", text: `${actions[action].label} finished. ${formatBatchCounts(response)}` });
+    } catch (error) {
+      setMessage({ type: "error", text: `${actions[action].label} failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setBatchProcessing(null);
+    }
+  }
+
+  async function loadDailyPriorities() {
+    setBatchProcessing("daily-priorities");
+    setMessage(null);
+    try {
+      const response = await getJson<unknown>(`/api/action-ledger/daily-priorities?sellerId=${SELLER_ID}&limit=25`);
+      setDailyPriorityRows(actionLedgerRowsOf(response));
+      setSelectedIds(new Set());
+      resetPagedView();
+      setMessage({ type: "success", text: "Daily Priorities Mode loaded." });
+    } catch (error) {
+      setMessage({ type: "error", text: `Daily priorities failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setBatchProcessing(null);
+    }
+  }
+
+  function clearDailyPriorities() {
+    setDailyPriorityRows(null);
+    setSelectedIds(new Set());
+    resetPagedView();
+  }
+
+  async function dismissLowPriorityCostActions() {
+    const confirmed = window.confirm(
+      "This will reject low-priority pending cost-data actions only. High-risk and Founder Override actions will not be dismissed. Continue?"
+    );
+    if (!confirmed) return;
+
+    setBatchProcessing("dismiss-low-priority");
+    setMessage(null);
+    try {
+      const response = await postJson<BatchActionResult>("/api/action-ledger/batch/dismiss-low-priority", {
+        sellerId: SELLER_ID,
+        source: "PRODUCT_ECONOMICS",
+        actionType: "COST_DATA_REQUIRED",
+        limit: 50,
+        note: "Dismissed low-priority duplicate cost-data actions from Approval Center"
+      });
+      setSelectedIds(new Set());
+      const refreshed = await refreshApprovalData();
+      await refreshDailyPriorityRows(refreshed.rows);
+      setMessage({ type: "success", text: `Low-priority cost actions dismissed. ${formatBatchCounts(response)}` });
+    } catch (error) {
+      setMessage({ type: "error", text: `Dismiss low-priority failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setBatchProcessing(null);
     }
   }
 
@@ -1497,9 +1713,9 @@ function ApprovalCenterPage() {
             className={activeFilter === filter ? "active" : ""}
             onClick={() => {
               setActiveFilter(filter);
-              resetPagedView();
+              resetPagedViewAndSelection();
             }}
-            disabled={Boolean(processing)}
+            disabled={controlsDisabled}
           >
             {filter}
           </button>
@@ -1512,7 +1728,7 @@ function ApprovalCenterPage() {
           options={sourceOptions}
           onChange={(value) => {
             setSourceFilter(value);
-            resetPagedView();
+            resetPagedViewAndSelection();
           }}
         />
         <SelectField
@@ -1521,7 +1737,7 @@ function ApprovalCenterPage() {
           options={actionTypeOptions}
           onChange={(value) => {
             setActionTypeFilter(value);
-            resetPagedView();
+            resetPagedViewAndSelection();
           }}
         />
         <TextInput
@@ -1529,7 +1745,7 @@ function ApprovalCenterPage() {
           value={searchQuery}
           onChange={(value) => {
             setSearchQuery(value);
-            resetPagedView();
+            resetPagedViewAndSelection();
           }}
         />
         <SelectField
@@ -1538,7 +1754,7 @@ function ApprovalCenterPage() {
           options={approvalSortOptions}
           onChange={(value) => {
             setSortMode(sortModeFromLabel(value));
-            resetPagedView();
+            resetPagedViewAndSelection();
           }}
         />
       </div>
@@ -1550,14 +1766,59 @@ function ApprovalCenterPage() {
             className={`secondary ${quickView === filter.id ? "active" : ""}`}
             onClick={() => {
               setQuickView(filter.id);
-              resetPagedView();
+              resetPagedViewAndSelection();
             }}
-            disabled={Boolean(processing)}
+            disabled={controlsDisabled}
           >
             {filter.label}
           </button>
         ))}
+        <button type="button" className="secondary" onClick={loadDailyPriorities} disabled={controlsDisabled}>
+          {batchProcessing === "daily-priorities" ? "Loading Priorities..." : "Daily Priorities"}
+        </button>
+        {dailyPriorityRows ? (
+          <button type="button" className="secondary" onClick={clearDailyPriorities} disabled={controlsDisabled}>
+            Clear Daily Priorities
+          </button>
+        ) : null}
+        {costDataDismissVisible ? (
+          <button
+            type="button"
+            className="secondary danger-button"
+            onClick={dismissLowPriorityCostActions}
+            disabled={controlsDisabled}
+          >
+            {batchProcessing === "dismiss-low-priority" ? "Dismissing..." : "Dismiss Low-Priority Cost Actions"}
+          </button>
+        ) : null}
       </div>
+      {dailyPriorityRows ? (
+        <div className="daily-priority-label">
+          Daily Priorities Mode: Top 25 pending actions
+        </div>
+      ) : null}
+      {selectedCount > 0 ? (
+        <div className="batch-action-bar" aria-label="Batch actions">
+          <div>
+            <strong>Selected: {selectedCount}</strong>
+            <span>Batch approve is disabled. Only reject, monitor, or complete are allowed in batch.</span>
+          </div>
+          <div className="button-row compact">
+            <button type="button" onClick={() => batchAct("reject")} disabled={!selectedPendingOnly || controlsDisabled}>
+              {batchProcessing === "reject" ? "Rejecting..." : "Batch Reject Selected"}
+            </button>
+            <button type="button" onClick={() => batchAct("monitor")} disabled={!selectedPendingOnly || controlsDisabled}>
+              {batchProcessing === "monitor" ? "Moving..." : "Batch Monitor Selected"}
+            </button>
+            <button type="button" onClick={() => batchAct("complete")} disabled={!selectedMonitoringOnly || controlsDisabled}>
+              {batchProcessing === "complete" ? "Completing..." : "Batch Complete Selected"}
+            </button>
+            <button type="button" className="secondary" onClick={clearSelection} disabled={controlsDisabled}>
+              Clear Selection
+            </button>
+          </div>
+        </div>
+      ) : null}
       {loading && !rowsState.data ? <LoadingBlock /> : loadError ? (
         <ErrorBlock text={`Could not load approval actions: ${loadError}`} />
       ) : allRows.length === 0 ? (
@@ -1570,8 +1831,10 @@ function ApprovalCenterPage() {
           <div className="approval-pagination">
             <span>Showing {showingStart}-{showingEnd} of {rows.length}</span>
             <div className="button-row compact">
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || Boolean(processing)}>Previous</button>
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || Boolean(processing)}>Next</button>
+              <button type="button" className="secondary" onClick={selectCurrentPage} disabled={!hasSelectablePageRows || controlsDisabled}>Select Current Page</button>
+              <button type="button" className="secondary" onClick={clearSelection} disabled={selectedCount === 0 || controlsDisabled}>Clear Selection</button>
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || controlsDisabled}>Previous</button>
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || controlsDisabled}>Next</button>
             </div>
           </div>
           <div className="card-list">
@@ -1579,17 +1842,20 @@ function ApprovalCenterPage() {
               <ActionLedgerCard
                 key={row.id}
                 row={row}
+                selected={selectedIds.has(row.id)}
                 processing={processing}
+                batchProcessing={batchProcessing}
                 onAction={act}
                 onCopy={copyActionId}
+                onToggleSelected={toggleSelectedRow}
               />
             ))}
           </div>
           <div className="approval-pagination bottom">
             <span>Showing {showingStart}-{showingEnd} of {rows.length}</span>
             <div className="button-row compact">
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || Boolean(processing)}>Previous</button>
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || Boolean(processing)}>Next</button>
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || controlsDisabled}>Previous</button>
+              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || controlsDisabled}>Next</button>
             </div>
           </div>
         </>

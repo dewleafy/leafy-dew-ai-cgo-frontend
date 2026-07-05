@@ -358,6 +358,13 @@
   margin-bottom: 10px;
 }
 
+.approval-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
 .approval-title-block {
   min-width: 0;
 }
@@ -429,6 +436,71 @@
 
 .approval-pagination.bottom {
   margin: 14px 0 0;
+}
+
+.action-ledger-card.selected {
+  border-color: #8cc79e;
+  background: #f4fbf6;
+}
+
+.batch-checkbox {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.batch-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: #2f9d62;
+}
+
+.batch-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  border: 1px solid #d7e7d5;
+  border-radius: 12px;
+  background: #f7fbf5;
+  padding: 12px 14px;
+}
+
+.batch-action-bar strong,
+.batch-action-bar span,
+.daily-priority-label {
+  display: block;
+}
+
+.batch-action-bar strong {
+  color: #1e2f26;
+}
+
+.batch-action-bar span {
+  margin-top: 3px;
+  color: #66736b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.daily-priority-label {
+  margin: 0 0 14px;
+  border: 1px solid #cce5d0;
+  border-radius: 12px;
+  background: #edf7ef;
+  color: #1e6b43;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+button.danger-button {
+  border-color: #d78b80;
+  color: #963a30;
+}
+
+button.danger-button:hover {
+  background: #fff0ed;
 }
 
 button {
@@ -765,7 +837,8 @@ textarea {
   }
 
   .approval-card-head,
-  .approval-pagination {
+  .approval-pagination,
+  .batch-action-bar {
     align-items: flex-start;
     flex-direction: column;
   }
