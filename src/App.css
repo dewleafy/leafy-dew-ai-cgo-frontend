@@ -596,6 +596,101 @@ button.secondary:hover,
   min-width: 1500px;
 }
 
+.cost-completion-section {
+  margin-top: 22px;
+}
+
+.cost-section-title {
+  margin-top: 26px;
+}
+
+.cost-summary-strip {
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+}
+
+.cost-helper-note {
+  border: 1px solid #cce5d0;
+  border-radius: 12px;
+  background: #edf7ef;
+  color: #244332;
+  padding: 12px 14px;
+  margin: 0 0 18px;
+  font-weight: 700;
+}
+
+.queue-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(240px, 0.7fr);
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.cost-filter-tabs {
+  margin-bottom: 0;
+}
+
+.queue-search {
+  margin-bottom: 0;
+}
+
+.queue-message {
+  margin-bottom: 14px;
+}
+
+.queue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #5f6f66;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.queue-pagination.bottom {
+  margin: 14px 0 0;
+}
+
+.cost-completion-table table {
+  min-width: 1880px;
+}
+
+.cost-completion-table th,
+.cost-completion-table td {
+  padding: 9px 8px;
+}
+
+.cost-completion-table th {
+  white-space: nowrap;
+}
+
+.cost-completion-table .edited-row {
+  background: #fbfff8;
+}
+
+.identity-cell {
+  color: #1e2f26;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.product-name-cell {
+  min-width: 220px;
+  max-width: 280px;
+}
+
+.cost-number-input {
+  width: 104px;
+  padding: 8px 9px;
+}
+
+.cost-subcategory-input {
+  width: 170px;
+  padding: 8px 9px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -832,13 +927,15 @@ textarea {
   .summary-strip,
   .card-list,
   .detail-grid,
-  .approval-controls {
+  .approval-controls,
+  .queue-controls {
     grid-template-columns: 1fr;
   }
 
   .approval-card-head,
   .approval-pagination,
-  .batch-action-bar {
+  .batch-action-bar,
+  .queue-pagination {
     align-items: flex-start;
     flex-direction: column;
   }
