@@ -147,6 +147,20 @@
   max-width: 100%;
 }
 
+.page-section-label {
+  margin: 0 0 12px;
+  color: #2f6948;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.readiness-detail-anchor {
+  scroll-margin-top: 116px;
+  outline: none;
+}
+
 .page-title {
   margin-bottom: 22px;
 }
@@ -690,8 +704,44 @@ button.secondary:hover,
 }
 
 .cost-completion-table table {
-  min-width: 1760px;
+  min-width: 1860px;
   table-layout: fixed;
+}
+
+.cost-col-sku {
+  width: 128px;
+}
+
+.cost-col-asin {
+  width: 124px;
+}
+
+.cost-col-name {
+  width: 260px;
+}
+
+.cost-col-subcategory {
+  width: 180px;
+}
+
+.cost-col-money {
+  width: 116px;
+}
+
+.cost-col-input {
+  width: 118px;
+}
+
+.cost-col-missing {
+  width: 180px;
+}
+
+.cost-col-status {
+  width: 146px;
+}
+
+.cost-col-action {
+  width: 190px;
 }
 
 .cost-completion-table th,
@@ -707,6 +757,11 @@ button.secondary:hover,
   background: #fbfff8;
 }
 
+.cost-completion-table .saved-row {
+  background: #f0faef;
+  box-shadow: inset 3px 0 0 #2f9d62;
+}
+
 .identity-cell {
   color: #1e2f26;
   font-weight: 800;
@@ -714,20 +769,26 @@ button.secondary:hover,
 }
 
 .product-name-cell {
-  width: 240px;
-  max-width: 240px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.missing-fields-cell {
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.35;
 }
 
 .cost-number-input {
-  width: 92px;
+  width: 100%;
+  min-width: 0;
   padding: 8px 9px;
 }
 
 .cost-subcategory-input {
-  width: 150px;
+  width: 100%;
+  min-width: 0;
   padding: 8px 9px;
 }
 

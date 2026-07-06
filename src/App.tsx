@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import { deleteJson, getJson, postJson, putJson } from "./api";
@@ -512,7 +512,9 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
 function ProductPassportPage() {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const readiness = useApi<AnyRecord>(() => getJson(`/api/product-passports/readiness/summary?sellerId=${SELLER_ID}`));
+  const readinessRef = useRef<HTMLDivElement | null>(null);
   const [openForm, setOpenForm] = useState(false);
+  const [selectedPassport, setSelectedPassport] = useState<ProductPassport | null>(null);
   const [detail, setDetail] = useState<LoadState<AnyRecord>>({ data: null, loading: false, error: null });
   const [form, setForm] = useState({
     productName: "",
@@ -534,10 +536,15 @@ function ProductPassportPage() {
   const summary = recordOf(readiness.data?.summary);
   const rows = rowsOf<ProductPassport>(passports.data);
 
-  async function loadReadiness(id: string) {
+  async function loadReadiness(row: ProductPassport) {
+    setSelectedPassport(row);
     setDetail({ data: null, loading: true, error: null });
+    window.setTimeout(() => {
+      readinessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      readinessRef.current?.focus({ preventScroll: true });
+    }, 0);
     try {
-      const data = await getJson<AnyRecord>(`/api/product-passports/${id}/readiness`);
+      const data = await getJson<AnyRecord>(`/api/product-passports/${row.id}/readiness`);
       setDetail({ data, loading: false, error: null });
     } catch {
       setDetail({ data: null, loading: false, error: "Unable to load this section." });
@@ -560,6 +567,7 @@ function ProductPassportPage() {
   return (
     <div className="page">
       <PageHeader title="Product Passport" subtitle="Keep product truth, listing readiness, and founder context in one place." />
+      <div className="page-section-label">Product Passport Readiness</div>
       <div className="summary-strip">
         <MetricTile label="Product count" value={readNumber(readiness.data?.productCount ?? summary.productCount ?? rows.length)} />
         <MetricTile label="Ready count" value={readNumber(summary.readyCount)} />
@@ -606,7 +614,7 @@ function ProductPassportPage() {
                     <td>{formatEmpty(row.asin)}</td>
                     <td>{formatEmpty(row.category)}</td>
                     <td><StatusBadge value={row.status} /></td>
-                    <td><button type="button" onClick={() => loadReadiness(row.id)}>View Readiness</button></td>
+                    <td><button type="button" onClick={() => loadReadiness(row)}>View Readiness</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -614,19 +622,28 @@ function ProductPassportPage() {
           </div>
         )}
       </Card>
-      <Card title="Readiness Details">
-        {detail.loading ? <LoadingBlock /> : detail.error ? <ErrorBlock /> : detail.data ? <ReadinessDetail data={detail.data} /> : <EmptyBlock text="Choose a product to view readiness." />}
-      </Card>
+      <div ref={readinessRef} tabIndex={-1} className="readiness-detail-anchor">
+        <Card title="Readiness Details">
+          {detail.loading ? <LoadingBlock text="Loading readiness..." /> : detail.error ? <ErrorBlock /> : detail.data ? (
+            <ReadinessDetail data={detail.data} product={selectedPassport} />
+          ) : (
+            <EmptyBlock text="Choose a product to view readiness." />
+          )}
+        </Card>
+      </div>
       <CostCompletionQueueSection />
     </div>
   );
 }
 
-function ReadinessDetail({ data }: { data: AnyRecord }) {
+function ReadinessDetail({ data, product }: { data: AnyRecord; product: ProductPassport | null }) {
   const row = recordOf(data.row ?? data.readiness ?? data);
-  const missing = arrayOf(row.missingFields);
+  const missing = normalizeMissingFields(row.missingFields);
   return (
     <div className="detail-grid">
+      <MetricRow label="SKU" value={formatEmpty(row.sku ?? product?.sku)} />
+      <MetricRow label="ASIN" value={formatEmpty(row.asin ?? product?.asin)} />
+      <MetricRow label="Product name" value={formatEmpty(row.productName ?? row.title ?? product?.productName)} />
       <MetricRow label="Passport score" value={formatEmpty(row.passportScore ?? row.score)} />
       <MetricRow label="Economics status" value={<StatusBadge value={row.economicsStatus} />} />
       <MetricRow label="Profit status" value={<StatusBadge value={row.profitStatus} />} />
@@ -712,7 +729,25 @@ function costCompletionRowsOf(value: unknown): CostCompletionQueueItem[] {
   const rows = rowsOf<CostCompletionQueueItem>(value);
   if (rows.length > 0) return rows;
   const root = recordOf(value);
-  return arrayOf(root.items ?? root.queue ?? root.products ?? root.data) as CostCompletionQueueItem[];
+  const result = recordOf(root.result);
+  const nestedData = recordOf(root.data);
+  return arrayOf(
+    root.items ??
+    root.queue ??
+    root.products ??
+    root.updatedRows ??
+    root.rows ??
+    result.items ??
+    result.queue ??
+    result.products ??
+    result.updatedRows ??
+    result.rows ??
+    nestedData.items ??
+    nestedData.queue ??
+    nestedData.products ??
+    nestedData.updatedRows ??
+    nestedData.rows
+  ) as CostCompletionQueueItem[];
 }
 
 function normalizeMissingFields(value: unknown): string[] {
@@ -886,9 +921,7 @@ function resolvedCostActionCount(response: unknown): number | null {
 
 function costCompletionSaveMessage(savedCount: number, response: unknown): string {
   const resolvedCount = resolvedCostActionCount(response) ?? 0;
-  void savedCount;
-  if (resolvedCount > 0) return "Saved. Related COST_DATA_REQUIRED approval actions were completed.";
-  return "Saved. No related pending cost actions were found.";
+  return `Saved ${savedCount} row(s). Resolved ${resolvedCount} related COST_DATA_REQUIRED approval action(s).`;
 }
 
 function CostCompletionQueueSection() {
@@ -899,8 +932,9 @@ function CostCompletionQueueSection() {
   const [page, setPage] = useState(1);
   const [edits, setEdits] = useState<Record<string, CostEditState>>({});
   const [dirtyRows, setDirtyRows] = useState<Record<string, DirtyCostFields>>({});
-  const [savedOverrides, setSavedOverrides] = useState<Record<string, CostCompletionPayloadItem>>({});
+  const [savedOverrides, setSavedOverrides] = useState<Record<string, Partial<NormalizedCostCompletionRow>>>({});
   const [lastSavedRows, setLastSavedRows] = useState<Record<string, CostCompletionPayloadItem>>({});
+  const [savedKeys, setSavedKeys] = useState<string[]>([]);
   const [savingKeys, setSavingKeys] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -916,13 +950,7 @@ function CostCompletionQueueSection() {
       if (!override) return row;
       return {
         ...row,
-        productCost: override.productCost,
-        landedCost: override.landedCost,
-        packagingCost: override.packagingCost,
-        shippingCost: override.shippingCost,
-        otherCost: override.otherCost,
-        requiredProfit: override.requiredProfit,
-        subcategory: override.subcategory
+        ...override
       };
     }),
     [queue.data, savedOverrides]
@@ -954,6 +982,9 @@ function CostCompletionQueueSection() {
   }
 
   function showCompleteRows() {
+    if (search && searchCostCompletionRows(filterCostCompletionRows(rows, "COMPLETE"), search).length === 0) {
+      setSearch("");
+    }
     setFilter("COMPLETE");
     setPage(1);
   }
@@ -1041,10 +1072,22 @@ function CostCompletionQueueSection() {
         const next = { ...current };
         targetRows.forEach((row, index) => {
           const responseRow = responseRows.find((candidate) => candidate.key === row.key || (candidate.sku && candidate.sku === row.sku) || (candidate.asin && candidate.asin === row.asin));
-          next[row.key] = responseRow ? buildCostPayload(responseRow, editStateForRow(responseRow)) : items[index];
+          next[row.key] = responseRow ?? {
+            productCost: items[index].productCost,
+            landedCost: items[index].landedCost,
+            packagingCost: items[index].packagingCost,
+            shippingCost: items[index].shippingCost,
+            otherCost: items[index].otherCost,
+            requiredProfit: items[index].requiredProfit,
+            subcategory: items[index].subcategory
+          };
         });
         return next;
       });
+      setSavedKeys(targetKeys);
+      window.setTimeout(() => {
+        setSavedKeys((current) => current.filter((key) => !targetKeys.includes(key)));
+      }, 4500);
       setLastSavedRows((current) => {
         const next = { ...current };
         targetRows.forEach((row, index) => {
@@ -1170,6 +1213,25 @@ function CostCompletionQueueSection() {
             </datalist>
             <div className="table-wrap cost-completion-table">
               <table>
+                <colgroup>
+                  <col className="cost-col-sku" />
+                  <col className="cost-col-asin" />
+                  <col className="cost-col-name" />
+                  <col className="cost-col-subcategory" />
+                  <col className="cost-col-money" />
+                  <col className="cost-col-input" />
+                  <col className="cost-col-input" />
+                  <col className="cost-col-input" />
+                  <col className="cost-col-input" />
+                  <col className="cost-col-input" />
+                  <col className="cost-col-input" />
+                  <col className="cost-col-missing" />
+                  <col className="cost-col-status" />
+                  <col className="cost-col-status" />
+                  <col className="cost-col-money" />
+                  <col className="cost-col-money" />
+                  <col className="cost-col-action" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>SKU</th>
@@ -1198,9 +1260,10 @@ function CostCompletionQueueSection() {
                     const rowSaving = savingKeys.includes(row.key) || bulkSaving;
                     const displayName = row.productName || row.title;
                     const lastSaved = lastSavedRows[row.key];
+                    const isSaved = savedKeys.includes(row.key);
 
                     return (
-                      <tr key={row.key} className={isEdited ? "edited-row" : ""}>
+                      <tr key={row.key} className={`${isEdited ? "edited-row" : ""} ${isSaved ? "saved-row" : ""}`}>
                         <td className="identity-cell">{formatEmpty(row.sku)}</td>
                         <td className="identity-cell">{formatEmpty(row.asin)}</td>
                         <td className="product-name-cell" title={displayName}>{formatEmpty(displayName)}</td>
@@ -1220,14 +1283,14 @@ function CostCompletionQueueSection() {
                         <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.shippingCost} aria-label={`Shipping cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "shippingCost", event.target.value)} /></td>
                         <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.otherCost} aria-label={`Other cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "otherCost", event.target.value)} /></td>
                         <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.requiredProfit} aria-label={`Required profit for ${row.sku || row.asin}`} onChange={(event) => setField(row, "requiredProfit", event.target.value)} /></td>
-                        <td>{row.missingFields.length ? row.missingFields.map(labelize).join(", ") : "None"}</td>
+                        <td className="missing-fields-cell">{row.missingFields.length ? row.missingFields.map(labelize).join(", ") : "None"}</td>
                         <td><StatusBadge value={row.costStatus ?? "NEEDS_INPUT"} /></td>
                         <td><StatusBadge value={row.currentProfitStatus ?? "NEEDS_INPUT"} /></td>
                         <td>{formatPercent(row.targetAcos)}</td>
                         <td>{formatPercent(row.breakEvenAcos)}</td>
                         <td className="cost-action-cell">
                           {isEdited ? <span className="unsaved-label">Unsaved changes</span> : null}
-                          {!isEdited && lastSaved ? <span className="last-saved-label">Last saved values</span> : null}
+                          {!isEdited && (lastSaved || isSaved) ? <span className="last-saved-label">{isSaved ? "Saved" : "Last saved values"}</span> : null}
                           <div className="button-row compact">
                             <button type="button" onClick={() => saveRows([row])} disabled={rowSaving || !isEdited}>
                               {rowSaving ? "Saving..." : "Save Row"}
