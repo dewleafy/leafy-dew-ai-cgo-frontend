@@ -32,6 +32,7 @@ const tabs = [
 
 type Tab = (typeof tabs)[number];
 type LoadState<T> = { data: T | null; loading: boolean; error: string | null };
+type ProductPassportSection = "READINESS" | "COST_COMPLETION";
 
 const emptyState = <T,>(): LoadState<T> => ({ data: null, loading: true, error: null });
 
@@ -513,6 +514,7 @@ function ProductPassportPage() {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const readiness = useApi<AnyRecord>(() => getJson(`/api/product-passports/readiness/summary?sellerId=${SELLER_ID}`));
   const readinessRef = useRef<HTMLDivElement | null>(null);
+  const [section, setSection] = useState<ProductPassportSection>("COST_COMPLETION");
   const [openForm, setOpenForm] = useState(false);
   const [selectedPassport, setSelectedPassport] = useState<ProductPassport | null>(null);
   const [detail, setDetail] = useState<LoadState<AnyRecord>>({ data: null, loading: false, error: null });
@@ -567,71 +569,94 @@ function ProductPassportPage() {
   return (
     <div className="page">
       <PageHeader title="Product Passport" subtitle="Keep product truth, listing readiness, and founder context in one place." />
-      <div className="page-section-label">Product Passport Readiness</div>
-      <div className="summary-strip">
-        <MetricTile label="Product count" value={readNumber(readiness.data?.productCount ?? summary.productCount ?? rows.length)} />
-        <MetricTile label="Ready count" value={readNumber(summary.readyCount)} />
-        <MetricTile label="Needs fix count" value={readNumber(summary.needsFixCount)} />
-        <MetricTile label="Missing economics" value={readNumber(summary.missingEconomicsCount)} />
+
+      <div className="product-passport-tabs segmented" aria-label="Product Passport sections">
+        <button
+          type="button"
+          className={section === "READINESS" ? "active" : ""}
+          onClick={() => setSection("READINESS")}
+        >
+          Product Readiness
+        </button>
+        <button
+          type="button"
+          className={section === "COST_COMPLETION" ? "active" : ""}
+          onClick={() => setSection("COST_COMPLETION")}
+        >
+          Cost Completion Queue
+        </button>
       </div>
-      <Card title="Products" action={<button type="button" onClick={() => setOpenForm((value) => !value)}>Add Product</button>}>
-        {openForm ? (
-          <form className="form-grid" onSubmit={submit}>
-            {Object.entries(form).map(([key, value]) =>
-              key === "brandPositioning" || key === "targetCustomer" || key === "useCase" ? (
-                <TextArea key={key} label={labelize(key)} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />
-              ) : (
-                <TextInput
-                  key={key}
-                  label={labelize(key)}
-                  value={value}
-                  type={key === "sellingPrice" ? "number" : "text"}
-                  onChange={(next) => setForm({ ...form, [key]: next })}
-                />
-              )
-            )}
-            <button type="submit">Save Product</button>
-          </form>
-        ) : null}
-        {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Product Name</th>
-                  <th>SKU</th>
-                  <th>ASIN</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatEmpty(row.productName)}</td>
-                    <td>{formatEmpty(row.sku)}</td>
-                    <td>{formatEmpty(row.asin)}</td>
-                    <td>{formatEmpty(row.category)}</td>
-                    <td><StatusBadge value={row.status} /></td>
-                    <td><button type="button" onClick={() => loadReadiness(row)}>View Readiness</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+      {section === "READINESS" ? (
+        <section className="product-passport-section" aria-labelledby="product-readiness-heading">
+          <div className="page-section-label" id="product-readiness-heading">Product Readiness</div>
+          <div className="summary-strip">
+            <MetricTile label="Product count" value={readNumber(readiness.data?.productCount ?? summary.productCount ?? rows.length)} />
+            <MetricTile label="Ready count" value={readNumber(summary.readyCount)} />
+            <MetricTile label="Needs fix count" value={readNumber(summary.needsFixCount)} />
+            <MetricTile label="Missing economics" value={readNumber(summary.missingEconomicsCount)} />
           </div>
-        )}
-      </Card>
-      <div ref={readinessRef} tabIndex={-1} className="readiness-detail-anchor">
-        <Card title="Readiness Details">
-          {detail.loading ? <LoadingBlock text="Loading readiness..." /> : detail.error ? <ErrorBlock /> : detail.data ? (
-            <ReadinessDetail data={detail.data} product={selectedPassport} />
-          ) : (
-            <EmptyBlock text="Choose a product to view readiness." />
-          )}
-        </Card>
-      </div>
-      <CostCompletionQueueSection />
+          <Card title="Products" action={<button type="button" onClick={() => setOpenForm((value) => !value)}>Add Product</button>}>
+            {openForm ? (
+              <form className="form-grid" onSubmit={submit}>
+                {Object.entries(form).map(([key, value]) =>
+                  key === "brandPositioning" || key === "targetCustomer" || key === "useCase" ? (
+                    <TextArea key={key} label={labelize(key)} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />
+                  ) : (
+                    <TextInput
+                      key={key}
+                      label={labelize(key)}
+                      value={value}
+                      type={key === "sellingPrice" ? "number" : "text"}
+                      onChange={(next) => setForm({ ...form, [key]: next })}
+                    />
+                  )
+                )}
+                <button type="submit">Save Product</button>
+              </form>
+            ) : null}
+            {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Product Name</th>
+                      <th>SKU</th>
+                      <th>ASIN</th>
+                      <th>Category</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.id}>
+                        <td>{formatEmpty(row.productName)}</td>
+                        <td>{formatEmpty(row.sku)}</td>
+                        <td>{formatEmpty(row.asin)}</td>
+                        <td>{formatEmpty(row.category)}</td>
+                        <td><StatusBadge value={row.status} /></td>
+                        <td><button type="button" onClick={() => loadReadiness(row)}>View Readiness</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+          <div ref={readinessRef} tabIndex={-1} className="readiness-detail-anchor">
+            <Card title="Readiness Details">
+              {detail.loading ? <LoadingBlock text="Loading readiness..." /> : detail.error ? <ErrorBlock /> : detail.data ? (
+                <ReadinessDetail data={detail.data} product={selectedPassport} />
+              ) : (
+                <EmptyBlock text="Choose a product to view readiness." />
+              )}
+            </Card>
+          </div>
+        </section>
+      ) : (
+        <CostCompletionQueueSection />
+      )}
     </div>
   );
 }
@@ -921,6 +946,7 @@ function resolvedCostActionCount(response: unknown): number | null {
 
 function costCompletionSaveMessage(savedCount: number, response: unknown): string {
   const resolvedCount = resolvedCostActionCount(response) ?? 0;
+  if (resolvedCount === 0) return `Saved ${savedCount} row(s). No related pending cost actions were found.`;
   return `Saved ${savedCount} row(s). Resolved ${resolvedCount} related COST_DATA_REQUIRED approval action(s).`;
 }
 
@@ -975,7 +1001,12 @@ function CostCompletionQueueSection() {
     setSavedOverrides({});
   }, [queue.data]);
 
-  function showAllRows() {
+  function viewAllRows() {
+    setFilter("ALL");
+    setPage(1);
+  }
+
+  function clearFilters() {
     setFilter("ALL");
     setSearch("");
     setPage(1);
@@ -1181,7 +1212,8 @@ function CostCompletionQueueSection() {
             <span>{moveMessage}</span>
             <div className="button-row compact">
               <button type="button" className="secondary" onClick={showCompleteRows}>View Complete rows</button>
-              <button type="button" className="secondary" onClick={showAllRows}>Clear filters</button>
+              <button type="button" className="secondary" onClick={viewAllRows}>View All rows</button>
+              <button type="button" className="secondary" onClick={clearFilters}>Clear filters</button>
             </div>
           </div>
         ) : null}
@@ -1196,7 +1228,7 @@ function CostCompletionQueueSection() {
           <div className="soft-state">
             <p>No rows match this filter or search.</p>
             <div className="button-row compact">
-              <button type="button" className="secondary" onClick={showAllRows}>Clear filters</button>
+              <button type="button" className="secondary" onClick={clearFilters}>Clear filters</button>
             </div>
           </div>
         ) : (
@@ -1211,100 +1243,72 @@ function CostCompletionQueueSection() {
             <datalist id="cost-subcategory-options">
               {referralFeeSubcategories.map((option) => <option key={option} value={option} />)}
             </datalist>
-            <div className="table-wrap cost-completion-table">
-              <table>
-                <colgroup>
-                  <col className="cost-col-sku" />
-                  <col className="cost-col-asin" />
-                  <col className="cost-col-name" />
-                  <col className="cost-col-subcategory" />
-                  <col className="cost-col-money" />
-                  <col className="cost-col-input" />
-                  <col className="cost-col-input" />
-                  <col className="cost-col-input" />
-                  <col className="cost-col-input" />
-                  <col className="cost-col-input" />
-                  <col className="cost-col-input" />
-                  <col className="cost-col-missing" />
-                  <col className="cost-col-status" />
-                  <col className="cost-col-status" />
-                  <col className="cost-col-money" />
-                  <col className="cost-col-money" />
-                  <col className="cost-col-action" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>ASIN</th>
-                    <th>Product Name</th>
-                    <th>Subcategory</th>
-                    <th>Selling Price</th>
-                    <th>Product Cost</th>
-                    <th>Landed Cost</th>
-                    <th>Packaging Cost</th>
-                    <th>Shipping Cost</th>
-                    <th>Other Cost</th>
-                    <th>Required Profit</th>
-                    <th>Missing Fields</th>
-                    <th>Cost Status</th>
-                    <th>Current Profit Status</th>
-                    <th>Target ACOS</th>
-                    <th>Break-even ACOS</th>
-                    <th>Save</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.map((row) => {
-                    const rowEdits = currentEditState(row);
-                    const isEdited = Boolean(dirtyRows[row.key] && Object.keys(dirtyRows[row.key] ?? {}).length > 0);
-                    const rowSaving = savingKeys.includes(row.key) || bulkSaving;
-                    const displayName = row.productName || row.title;
-                    const lastSaved = lastSavedRows[row.key];
-                    const isSaved = savedKeys.includes(row.key);
+            <div className="cost-card-list">
+              {pageRows.map((row) => {
+                const rowEdits = currentEditState(row);
+                const isEdited = Boolean(dirtyRows[row.key] && Object.keys(dirtyRows[row.key] ?? {}).length > 0);
+                const rowSaving = savingKeys.includes(row.key) || bulkSaving;
+                const displayName = row.productName || row.title;
+                const lastSaved = lastSavedRows[row.key];
+                const isSaved = savedKeys.includes(row.key);
+                const rowLabel = row.sku || row.asin || displayName;
 
-                    return (
-                      <tr key={row.key} className={`${isEdited ? "edited-row" : ""} ${isSaved ? "saved-row" : ""}`}>
-                        <td className="identity-cell">{formatEmpty(row.sku)}</td>
-                        <td className="identity-cell">{formatEmpty(row.asin)}</td>
-                        <td className="product-name-cell" title={displayName}>{formatEmpty(displayName)}</td>
-                        <td>
-                          <input
-                            className="cost-subcategory-input"
-                            list="cost-subcategory-options"
-                            value={rowEdits.subcategory}
-                            aria-label={`Subcategory for ${row.sku || row.asin || displayName}`}
-                            onChange={(event) => setField(row, "subcategory", event.target.value)}
-                          />
-                        </td>
-                        <td>{formatMoney(row.sellingPrice)}</td>
-                        <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.productCost} aria-label={`Product cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "productCost", event.target.value)} /></td>
-                        <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.landedCost} aria-label={`Landed cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "landedCost", event.target.value)} /></td>
-                        <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.packagingCost} aria-label={`Packaging cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "packagingCost", event.target.value)} /></td>
-                        <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.shippingCost} aria-label={`Shipping cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "shippingCost", event.target.value)} /></td>
-                        <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.otherCost} aria-label={`Other cost for ${row.sku || row.asin}`} onChange={(event) => setField(row, "otherCost", event.target.value)} /></td>
-                        <td><input className="cost-number-input" type="number" inputMode="decimal" value={rowEdits.requiredProfit} aria-label={`Required profit for ${row.sku || row.asin}`} onChange={(event) => setField(row, "requiredProfit", event.target.value)} /></td>
-                        <td className="missing-fields-cell">{row.missingFields.length ? row.missingFields.map(labelize).join(", ") : "None"}</td>
-                        <td><StatusBadge value={row.costStatus ?? "NEEDS_INPUT"} /></td>
-                        <td><StatusBadge value={row.currentProfitStatus ?? "NEEDS_INPUT"} /></td>
-                        <td>{formatPercent(row.targetAcos)}</td>
-                        <td>{formatPercent(row.breakEvenAcos)}</td>
-                        <td className="cost-action-cell">
-                          {isEdited ? <span className="unsaved-label">Unsaved changes</span> : null}
-                          {!isEdited && (lastSaved || isSaved) ? <span className="last-saved-label">{isSaved ? "Saved" : "Last saved values"}</span> : null}
-                          <div className="button-row compact">
-                            <button type="button" onClick={() => saveRows([row])} disabled={rowSaving || !isEdited}>
-                              {rowSaving ? "Saving..." : "Save Row"}
-                            </button>
-                            <button type="button" className="secondary" onClick={() => resetRow(row)} disabled={rowSaving || !isEdited}>
-                              Reset Row
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                return (
+                  <article key={row.key} className={`cost-completion-card ${isEdited ? "edited-row" : ""} ${isSaved ? "saved-row" : ""}`}>
+                    <div className="cost-card-head">
+                      <div className="cost-card-title">
+                        <h3>{formatEmpty(displayName)}</h3>
+                        <div className="cost-card-meta">
+                          <span><strong>SKU</strong> {formatEmpty(row.sku)}</span>
+                          <span><strong>ASIN</strong> {formatEmpty(row.asin)}</span>
+                        </div>
+                      </div>
+                      <div className="badge-row cost-card-badges">
+                        <StatusBadge value={row.costStatus ?? "NEEDS_INPUT"} />
+                        <StatusBadge value={row.currentProfitStatus ?? "NEEDS_INPUT"} />
+                      </div>
+                    </div>
+
+                    <div className="cost-card-readonly">
+                      <MetricRow label="Selling Price" value={formatMoney(row.sellingPrice)} />
+                      <MetricRow label="Missing Fields" value={row.missingFields.length ? row.missingFields.map(labelize).join(", ") : "None"} />
+                    </div>
+
+                    <div className="cost-edit-grid">
+                      <label className="field">
+                        <span>Subcategory</span>
+                        <input
+                          list="cost-subcategory-options"
+                          value={rowEdits.subcategory}
+                          aria-label={`Subcategory for ${rowLabel}`}
+                          onChange={(event) => setField(row, "subcategory", event.target.value)}
+                        />
+                      </label>
+                      <TextInput label="Product Cost" type="number" value={rowEdits.productCost} onChange={(value) => setField(row, "productCost", value)} />
+                      <TextInput label="Landed Cost" type="number" value={rowEdits.landedCost} onChange={(value) => setField(row, "landedCost", value)} />
+                      <TextInput label="Packaging Cost" type="number" value={rowEdits.packagingCost} onChange={(value) => setField(row, "packagingCost", value)} />
+                      <TextInput label="Shipping Cost" type="number" value={rowEdits.shippingCost} onChange={(value) => setField(row, "shippingCost", value)} />
+                      <TextInput label="Other Cost" type="number" value={rowEdits.otherCost} onChange={(value) => setField(row, "otherCost", value)} />
+                      <TextInput label="Required Profit" type="number" value={rowEdits.requiredProfit} onChange={(value) => setField(row, "requiredProfit", value)} />
+                    </div>
+
+                    <div className="cost-card-footer">
+                      <div className="cost-card-state">
+                        {isEdited ? <span className="unsaved-label">Unsaved changes</span> : null}
+                        {!isEdited && (lastSaved || isSaved) ? <span className="last-saved-label">{isSaved ? "Saved" : "Last saved values"}</span> : null}
+                      </div>
+                      <div className="button-row compact">
+                        <button type="button" onClick={() => saveRows([row])} disabled={rowSaving || !isEdited}>
+                          {rowSaving ? "Saving..." : "Save Row"}
+                        </button>
+                        <button type="button" className="secondary" onClick={() => resetRow(row)} disabled={rowSaving || !isEdited}>
+                          Reset Row
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
             <div className="queue-pagination bottom">
               <span>Page {safePage} of {totalPages}</span>

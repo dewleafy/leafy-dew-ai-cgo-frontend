@@ -161,6 +161,15 @@
   outline: none;
 }
 
+.product-passport-tabs {
+  margin-bottom: 18px;
+}
+
+.product-passport-section {
+  display: grid;
+  gap: 18px;
+}
+
 .page-title {
   margin-bottom: 22px;
 }
@@ -651,14 +660,9 @@ button.secondary:hover,
 }
 
 .cost-completion-toolbar {
-  position: sticky;
-  top: 96px;
-  z-index: 12;
   display: grid;
   gap: 12px;
   margin-bottom: 18px;
-  padding: 10px 0 12px;
-  background: #f5f7f2;
 }
 
 .queue-controls {
@@ -795,6 +799,111 @@ button.secondary:hover,
 .queue-save-control {
   display: flex;
   justify-content: flex-end;
+}
+
+.cost-card-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.cost-completion-card {
+  border: 1px solid #e3ebdf;
+  border-radius: 12px;
+  background: #fbfdf9;
+  padding: 14px;
+  min-width: 0;
+}
+
+.cost-completion-card.edited-row {
+  border-color: #dfc374;
+  background: #fffdf4;
+}
+
+.cost-completion-card.saved-row {
+  border-color: #9ed5a8;
+  background: #f0faef;
+  box-shadow: inset 3px 0 0 #2f9d62;
+}
+
+.cost-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.cost-card-title {
+  min-width: 0;
+}
+
+.cost-card-title h3 {
+  margin: 0 0 8px;
+  color: #1f2d25;
+  font-size: 17px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cost-card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #65756b;
+  font-size: 13px;
+}
+
+.cost-card-meta span {
+  border: 1px solid #e0e8dd;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+}
+
+.cost-card-meta strong {
+  color: #405248;
+}
+
+.cost-card-badges {
+  justify-content: flex-end;
+  margin-bottom: 0;
+}
+
+.cost-card-readonly {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(220px, 1fr);
+  gap: 0 18px;
+  border-top: 1px solid #edf2ea;
+  border-bottom: 1px solid #edf2ea;
+  margin-bottom: 14px;
+}
+
+.cost-card-readonly .metric-row strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cost-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.cost-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  border-top: 1px solid #edf2ea;
+  padding-top: 12px;
+}
+
+.cost-card-state {
+  min-height: 18px;
 }
 
 .cost-action-cell,
@@ -1077,6 +1186,7 @@ textarea {
   .summary-strip,
   .card-list,
   .detail-grid,
+  .cost-card-readonly,
   .approval-controls,
   .queue-controls {
     grid-template-columns: 1fr;
@@ -1085,13 +1195,19 @@ textarea {
   .approval-card-head,
   .approval-pagination,
   .batch-action-bar,
-  .queue-pagination {
+  .queue-pagination,
+  .cost-card-head,
+  .cost-card-footer {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .cost-completion-toolbar {
     position: static;
+  }
+
+  .cost-edit-grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 
   .approval-badges {
@@ -1133,6 +1249,10 @@ textarea {
   }
 
   .advanced-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cost-edit-grid {
     grid-template-columns: 1fr;
   }
 }
