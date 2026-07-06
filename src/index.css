@@ -18,12 +18,27 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  height: 100vh;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 a {
   color: inherit;
+}
+
+@media (max-width: 820px) {
+  body {
+    overflow: auto;
+  }
+
+  #root {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
 }
