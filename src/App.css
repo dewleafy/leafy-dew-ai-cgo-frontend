@@ -660,9 +660,14 @@ button.secondary:hover,
 }
 
 .cost-completion-toolbar {
+  position: sticky;
+  top: 96px;
+  z-index: 12;
   display: grid;
   gap: 12px;
   margin-bottom: 18px;
+  padding: 10px 0 12px;
+  background: #f5f7f2;
 }
 
 .queue-controls {
@@ -904,6 +909,37 @@ button.secondary:hover,
 
 .cost-card-state {
   min-height: 18px;
+}
+
+.economics-table {
+  max-height: 64vh;
+  overflow: auto;
+}
+
+.economics-table table {
+  min-width: 1280px;
+}
+
+.economics-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #f7faf5;
+  box-shadow: 0 1px 0 #dfe8dc;
+}
+
+.economics-inline-detail-row td {
+  background: #f7fbf5;
+  padding: 0;
+}
+
+.economics-inline-detail {
+  border: 1px solid #d7e7d5;
+  border-radius: 12px;
+  margin: 12px;
+  padding: 14px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(24, 41, 31, 0.05);
 }
 
 .cost-action-cell,

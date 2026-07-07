@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import { deleteJson, getJson, postJson, putJson } from "./api";
@@ -803,7 +803,7 @@ function normalizeCostCompletionRow(item: CostCompletionQueueItem, index: number
     otherCost: readFirst(raw, ["otherCost", "other_cost", "otherCostPerUnit", "other_cost_per_unit", "otherFees", "other_fees"]) ?? readFirst(economics, ["otherCost", "other_cost", "otherCostPerUnit", "other_cost_per_unit", "otherFees", "other_fees"]),
     requiredProfit: readFirst(raw, ["requiredProfit", "required_profit", "targetProfit", "target_profit"]) ?? readFirst(economics, ["requiredProfit", "required_profit", "targetProfit", "target_profit"]),
     missingFields: normalizeMissingFields(readFirst(raw, ["missingFields", "missing_fields"])),
-    costStatus: readFirst(raw, ["costStatus", "cost_status", "costDataStatus", "profitDataStatus", "status"]) ?? readFirst(economics, ["costStatus", "cost_status", "profitDataStatus", "profit_data_status"]),
+    costStatus: readFirst(raw, ["costStatus", "cost_status", "costDataStatus", "profitDataStatus", "profitData_status", "currentProfitStatus", "current_profit_status", "status"]) ?? readFirst(economics, ["costStatus", "cost_status", "profitDataStatus", "profit_data_status", "currentProfitStatus", "current_profit_status"]),
     currentProfitStatus: readFirst(raw, ["currentProfitStatus", "current_profit_status", "profitStatus", "profit_status"]) ?? readFirst(economics, ["currentProfitStatus", "current_profit_status", "profitStatus", "profit_status"]),
     targetAcos: readFirst(raw, ["targetAcos", "target_acos"]) ?? readFirst(economics, ["targetAcos", "target_acos"]),
     breakEvenAcos: readFirst(raw, ["breakEvenAcos", "break_even_acos"]) ?? readFirst(economics, ["breakEvenAcos", "break_even_acos"])
@@ -966,6 +966,7 @@ function CostCompletionQueueSection() {
   const [message, setMessage] = useState("");
   const [moveMessage, setMoveMessage] = useState("");
   const [error, setError] = useState("");
+  const [completeRefetchTried, setCompleteRefetchTried] = useState(false);
 
   const summaryRoot = recordOf(summary.data?.summary ?? summary.data) as CostCompletionSummary;
   const summaryValue = (value: unknown) => summary.loading ? "..." : readNumber(value);
@@ -992,10 +993,29 @@ function CostCompletionQueueSection() {
   const editedRows = rows.filter((row) => editedRowKeys.includes(row.key));
   const showingStart = filteredRows.length === 0 ? 0 : (safePage - 1) * COST_COMPLETION_PAGE_SIZE + 1;
   const showingEnd = Math.min(safePage * COST_COMPLETION_PAGE_SIZE, filteredRows.length);
+  const completeCount = readNumber(summaryRoot.completeCount);
+  const loadedCompleteRows = filterCostCompletionRows(rows, "COMPLETE");
+  const completeRowsMissingFromQueue =
+    filter === "COMPLETE" &&
+    completeCount > 0 &&
+    loadedCompleteRows.length === 0 &&
+    completeRefetchTried &&
+    !queue.loading;
 
   useEffect(() => {
     setPage(1);
   }, [filter, search]);
+
+  useEffect(() => {
+    if (filter !== "COMPLETE") {
+      setCompleteRefetchTried(false);
+      return;
+    }
+    if (completeCount > 0 && loadedCompleteRows.length === 0 && !queue.loading && !completeRefetchTried) {
+      setCompleteRefetchTried(true);
+      queue.reload();
+    }
+  }, [completeCount, completeRefetchTried, filter, loadedCompleteRows.length, queue.loading]);
 
   useEffect(() => {
     setSavedOverrides({});
@@ -1013,9 +1033,7 @@ function CostCompletionQueueSection() {
   }
 
   function showCompleteRows() {
-    if (search && searchCostCompletionRows(filterCostCompletionRows(rows, "COMPLETE"), search).length === 0) {
-      setSearch("");
-    }
+    setSearch("");
     setFilter("COMPLETE");
     setPage(1);
   }
@@ -1099,6 +1117,7 @@ function CostCompletionQueueSection() {
         items
       });
       const responseRows = costCompletionRowsOf(response).map(normalizeCostCompletionRow);
+      const savedComplete = responseRows.some(isCostRowComplete);
       setSavedOverrides((current) => {
         const next = { ...current };
         targetRows.forEach((row, index) => {
@@ -1132,7 +1151,7 @@ function CostCompletionQueueSection() {
       queue.reload();
       setMessage(costCompletionSaveMessage(items.length, response));
       if (!["ALL", "COMPLETE"].includes(filter)) {
-        setMoveMessage("Saved successfully. The row may have moved because its cost status changed.");
+        setMoveMessage(savedComplete ? "Saved successfully. The row moved to Complete." : "Saved successfully. The row may have moved because its cost status changed.");
       }
     } catch (saveError) {
       setError(saveError instanceof Error ? sanitizeActionError(saveError) : "Could not save cost data. Please try again.");
@@ -1216,6 +1235,9 @@ function CostCompletionQueueSection() {
               <button type="button" className="secondary" onClick={clearFilters}>Clear filters</button>
             </div>
           </div>
+        ) : null}
+        {completeRowsMissingFromQueue ? (
+          <div className="soft-state error-state queue-message">Complete count exists, but complete rows are not loaded. Please refresh.</div>
         ) : null}
         {error ? <div className="soft-state error-state queue-message">{error}</div> : null}
         {summary.error ? <ErrorBlock text="Could not load cost summary. Backend may still be deploying." /> : null}
@@ -1328,24 +1350,26 @@ function ProductEconomicsPage() {
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const rows = rowsOf<ProductEconomics>(economics.data);
   const [selectedId, setSelectedId] = useState("");
-  const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
+  const selectedRow = rows.find((row) => row.id === selectedId) ?? null;
   const completeCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("COMPLETE") || normalizeState(row.profitDataStatus).includes("AVAILABLE")).length;
   const needsInputCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("MISSING") || normalizeState(row.profitDataStatus).includes("NEEDS") || normalizeState(row.profitDataStatus).includes("PARTIAL")).length;
 
-  const detailRows: Array<[string, ReactNode]> = selectedRow ? [
-    ["Selling Price", formatMoney(selectedRow.sellingPrice)],
-    ["Buying Cost", formatMoney(selectedRow.buyingCost)],
-    ["Landed Cost", formatMoney(selectedRow.landedCost)],
-    ["Required Profit", formatMoney(selectedRow.requiredProfit)],
-    ["Net Profit", formatMoney(selectedRow.netProfit)],
-    ["Net Profit Before Ads", formatMoney(selectedRow.netProfitBeforeAds)],
-    ["Profit Margin", formatPercent(selectedRow.profitMargin)],
-    ["Target ACOS", formatPercent(selectedRow.targetAcos)],
-    ["Break-even ACOS", formatPercent(selectedRow.breakEvenAcos)],
-    ["Profit Status", <StatusBadge key="profit-status" value={selectedRow.profitStatus ?? "NEEDS_INPUT"} />],
-    ["Data Status", <StatusBadge key="data-status" value={selectedRow.profitDataStatus ?? "NEEDS_INPUT"} />],
-    ["Fee Rules Version", formatEmpty(selectedRow.feeRulesVersion)]
-  ] : [];
+  function economicsDetailRows(row: ProductEconomics): Array<[string, ReactNode]> {
+    return [
+      ["Selling Price", formatMoney(row.sellingPrice)],
+      ["Buying Cost", formatMoney(row.buyingCost)],
+      ["Landed Cost", formatMoney(row.landedCost)],
+      ["Required Profit", formatMoney(row.requiredProfit)],
+      ["Net Profit", formatMoney(row.netProfit)],
+      ["Net Profit Before Ads", formatMoney(row.netProfitBeforeAds)],
+      ["Profit Margin", formatPercent(row.profitMargin)],
+      ["Target ACOS", formatPercent(row.targetAcos)],
+      ["Break-even ACOS", formatPercent(row.breakEvenAcos)],
+      ["Profit Status", <StatusBadge key="profit-status" value={row.profitStatus ?? "NEEDS_INPUT"} />],
+      ["Data Status", <StatusBadge key="data-status" value={row.profitDataStatus ?? "NEEDS_INPUT"} />],
+      ["Fee Rules Version", formatEmpty(row.feeRulesVersion)]
+    ];
+  }
 
   return (
     <div className="page">
@@ -1384,33 +1408,52 @@ function ProductEconomicsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id} className={selectedRow?.id === row.id ? "edited-row" : ""}>
-                    <td className="product-name-cell">{formatEmpty(row.productName)}</td>
-                    <td className="identity-cell">{formatEmpty(row.sku)}</td>
-                    <td className="identity-cell">{formatEmpty(row.asin)}</td>
-                    <td>{formatEmpty(row.subCategory)}</td>
-                    <td>{formatMoney(row.sellingPrice)}</td>
-                    <td>{formatMoney(row.landedCost)}</td>
-                    <td>{formatMoney(row.requiredProfit)}</td>
-                    <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
-                    <td>{formatPercent(row.targetAcos)}</td>
-                    <td>{formatPercent(row.breakEvenAcos)}</td>
-                    <td><button type="button" className="secondary" onClick={() => setSelectedId(row.id)}>View Details</button></td>
-                  </tr>
-                ))}
+                {rows.map((row) => {
+                  const open = selectedId === row.id;
+                  return (
+                    <Fragment key={row.id}>
+                      <tr className={open ? "edited-row" : ""}>
+                        <td className="product-name-cell">{formatEmpty(row.productName)}</td>
+                        <td className="identity-cell">{formatEmpty(row.sku)}</td>
+                        <td className="identity-cell">{formatEmpty(row.asin)}</td>
+                        <td>{formatEmpty(row.subCategory)}</td>
+                        <td>{formatMoney(row.sellingPrice)}</td>
+                        <td>{formatMoney(row.landedCost)}</td>
+                        <td>{formatMoney(row.requiredProfit)}</td>
+                        <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
+                        <td>{formatPercent(row.targetAcos)}</td>
+                        <td>{formatPercent(row.breakEvenAcos)}</td>
+                        <td>
+                          <button type="button" className="secondary" onClick={() => setSelectedId(open ? "" : row.id)}>
+                            {open ? "Close Details" : "View Details"}
+                          </button>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr className="economics-inline-detail-row">
+                          <td colSpan={11}>
+                            <div className="economics-inline-detail">
+                              <div className="approval-card-head">
+                                <div className="approval-title-block">
+                                  <strong>{formatEmpty(row.productName)}</strong>
+                                  <span>{formatEmpty(row.sku)} / {formatEmpty(row.asin)}</span>
+                                </div>
+                                <button type="button" className="secondary" onClick={() => setSelectedId("")}>Close Details</button>
+                              </div>
+                              <div className="detail-grid">
+                                {economicsDetailRows(row).map(([label, value]) => (
+                                  <MetricRow key={label} label={label} value={value} />
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
-          </div>
-        )}
-      </Card>
-
-      <Card title="Calculated Economics Detail">
-        {!selectedRow ? <EmptyBlock text="Choose a row to view calculated economics." /> : (
-          <div className="detail-grid">
-            {detailRows.map(([label, value]) => (
-              <MetricRow key={label} label={label} value={value} />
-            ))}
           </div>
         )}
       </Card>
