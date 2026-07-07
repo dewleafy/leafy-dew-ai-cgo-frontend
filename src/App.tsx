@@ -1905,6 +1905,30 @@ type LedgerAction = "approve" | "reject" | "monitor" | "complete";
 type BatchLedgerAction = "reject" | "monitor" | "complete";
 type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
 type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
+type WorkflowEvent = AnyRecord;
+type WorkflowHistory = {
+  actionId: string;
+  currentState: string;
+  currentApprovalStatus: string;
+  events: WorkflowEvent[];
+};
+type RollbackPreview = {
+  canRollback: boolean;
+  message: string;
+  rollbackSnapshot?: unknown;
+};
+type RollbackPreviewState = {
+  data: RollbackPreview | null;
+  loading: boolean;
+  error: string | null;
+};
+type WorkflowPanelState = {
+  open: boolean;
+  data: WorkflowHistory | null;
+  loading: boolean;
+  error: string | null;
+  rollback: RollbackPreviewState;
+};
 type BatchActionResult = {
   updatedCount?: number | string | null;
   skippedCount?: number | string | null;
@@ -1938,9 +1962,107 @@ const quickViewFilters: Array<{ id: QuickViewFilter; label: string }> = [
 const approvalSortOptions = ["Priority First", "Newest First", "Oldest First", "Risk High First"];
 const APPROVAL_PAGE_SIZE = 25;
 const ACTION_LEDGER_FETCH_LIMIT = 200;
+const workflowEventLabels: Record<string, string> = {
+  INITIAL_STATE_CAPTURE: "Initial state captured",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  MOVED_TO_MONITORING: "Moved to monitoring",
+  COMPLETED: "Completed",
+  BATCH_REJECTED: "Batch rejected",
+  BATCH_MONITORING: "Batch moved to monitoring",
+  BATCH_COMPLETED: "Batch completed",
+  COST_DATA_COMPLETED_AUTO_RESOLVE: "Cost data completed automatically",
+  REOPEN: "Reopened"
+};
+
+const emptyRollbackPreviewState = (): RollbackPreviewState => ({ data: null, loading: false, error: null });
 
 function normalizeState(value: unknown): string {
   return String(value ?? "").toUpperCase();
+}
+
+function recordsOf(value: unknown): AnyRecord[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is AnyRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+  }
+  return rowsOf<AnyRecord>(value);
+}
+
+function readBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["true", "yes", "1", "y"].includes(normalized);
+}
+
+function formatLocalDateTime(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return formatEmpty(value);
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return raw;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(timestamp));
+}
+
+function formatWorkflowEventType(value: unknown): string {
+  const eventType = normalizeState(value);
+  if (!eventType) return "Unknown event";
+  return workflowEventLabels[eventType] ?? labelize(eventType);
+}
+
+function workflowHistoryOf(value: unknown, row: ActionLedgerRow): WorkflowHistory {
+  const root = recordOf(value);
+  const workflow = recordOf(root.workflow ?? root.data ?? root.result ?? root);
+  const action = recordOf(workflow.action ?? workflow.actionLedger ?? workflow.row ?? root.action ?? root.actionLedger);
+  const eventSource = workflow.events ?? workflow.auditEvents ?? workflow.history ?? root.events ?? root.auditEvents ?? root.history;
+
+  return {
+    actionId: String(workflow.actionId ?? workflow.id ?? action.id ?? row.id),
+    currentState: String(workflow.currentState ?? workflow.state ?? action.state ?? row.state ?? "UNKNOWN"),
+    currentApprovalStatus: String(
+      workflow.currentApprovalStatus ?? workflow.approvalStatus ?? action.approvalStatus ?? row.approvalStatus ?? "UNKNOWN"
+    ),
+    events: recordsOf(eventSource)
+  };
+}
+
+function rollbackPreviewOf(value: unknown): RollbackPreview {
+  const root = recordOf(value);
+  const preview = recordOf(root.preview ?? root.rollbackPreview ?? root.data ?? root.result ?? root);
+  const rollback = recordOf(preview.rollback);
+  const rollbackSnapshot =
+    preview.rollbackSnapshot ??
+    preview.rollback_snapshot ??
+    preview.snapshot ??
+    preview.snapshotBefore ??
+    preview.restoreSnapshot ??
+    rollback.snapshot;
+  const canRollback = readBoolean(preview.canRollback ?? preview.allowed ?? preview.rollbackAllowed);
+
+  return {
+    canRollback,
+    message: String(preview.message ?? root.message ?? (canRollback ? "Rollback preview is available." : "Rollback is not available.")),
+    rollbackSnapshot
+  };
+}
+
+function canReopenAction(row: ActionLedgerRow): boolean {
+  const approvalStatus = normalizeState(row.approvalStatus);
+  return approvalStatus === "REJECTED" || isCompletedAction(row);
+}
+
+function workflowEventField(event: WorkflowEvent, keys: string[]): unknown {
+  for (const key of keys) {
+    if (event[key] !== undefined && event[key] !== null && event[key] !== "") return event[key];
+  }
+  return undefined;
+}
+
+function workflowEventHasSnapshot(event: WorkflowEvent): boolean {
+  return workflowEventField(event, ["snapshotBefore", "snapshot_before"]) !== undefined
+    || workflowEventField(event, ["snapshotAfter", "snapshot_after"]) !== undefined;
 }
 
 function uniqueSortedValues(rows: ActionLedgerRow[], field: keyof ActionLedgerRow): string[] {
@@ -2080,28 +2202,136 @@ function formatBatchCounts(value: unknown): string {
   return `Updated ${updatedCount}, skipped ${skippedCount}.`;
 }
 
+function WorkflowHistoryPanel({
+  row,
+  panel,
+  onRollbackPreview,
+  onReopen,
+  disabled,
+  reopening
+}: {
+  row: ActionLedgerRow;
+  panel: WorkflowPanelState;
+  onRollbackPreview: (row: ActionLedgerRow) => void;
+  onReopen: (row: ActionLedgerRow) => void;
+  disabled: boolean;
+  reopening: boolean;
+}) {
+  const data = panel.data;
+  const rollback = panel.rollback;
+  const snapshot = rollback.data?.rollbackSnapshot;
+  const hasRollbackSnapshot = snapshot !== undefined && snapshot !== null && snapshot !== "";
+
+  return (
+    <section className="workflow-panel" aria-label={`Workflow history for action ${formatShortId(row.id)}`}>
+      <div className="workflow-panel-head">
+        <div>
+          <h3>Workflow History</h3>
+          <span>Action {formatShortId(data?.actionId ?? row.id)}</span>
+        </div>
+        <div className="button-row compact workflow-panel-actions">
+          <button type="button" className="secondary tiny-button" onClick={() => onRollbackPreview(row)} disabled={disabled || rollback.loading}>
+            Rollback Preview
+          </button>
+          {canReopenAction(row) ? (
+            <button type="button" className="secondary tiny-button" onClick={() => onReopen(row)} disabled={disabled}>
+              {reopening ? "Reopening..." : "Reopen"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {panel.loading ? (
+        <div className="soft-state compact-state">Loading workflow history...</div>
+      ) : panel.error ? (
+        <div className="soft-state error-state compact-state">Could not load workflow history.</div>
+      ) : data ? (
+        <>
+          <div className="workflow-status-row">
+            <MetricRow label="Current State" value={<StatusBadge value={data.currentState} />} />
+            <MetricRow label="Approval Status" value={<StatusBadge value={data.currentApprovalStatus} />} />
+          </div>
+          {data.events.length === 0 ? (
+            <div className="soft-state compact-state">No workflow events yet.</div>
+          ) : (
+            <ol className="workflow-timeline">
+              {data.events.map((event, index) => {
+                const eventType = workflowEventField(event, ["eventType", "event_type", "type"]);
+                const createdAt = workflowEventField(event, ["createdAt", "created_at", "timestamp", "time"]);
+                const fromState = workflowEventField(event, ["fromState", "from_state", "previousState", "from"]);
+                const toState = workflowEventField(event, ["toState", "to_state", "nextState", "to"]);
+                const actor = workflowEventField(event, ["actor", "actorType", "createdBy", "created_by", "user"]);
+                const note = workflowEventField(event, ["note", "message", "reason"]);
+
+                return (
+                  <li key={String(event.id ?? `${row.id}-${index}`)} className="workflow-event">
+                    <div className="workflow-event-main">
+                      <span className="workflow-event-date">{formatLocalDateTime(createdAt)}</span>
+                      <strong>{formatWorkflowEventType(eventType)}</strong>
+                    </div>
+                    <div className="workflow-event-meta">
+                      <span>{formatEmpty(fromState)} to {formatEmpty(toState)}</span>
+                      <span>Actor: {formatEmpty(actor)}</span>
+                      {workflowEventHasSnapshot(event) ? <span className="snapshot-pill">Snapshot available</span> : null}
+                    </div>
+                    {note ? <p>{formatEmpty(note)}</p> : null}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </>
+      ) : null}
+
+      {rollback.loading ? <div className="soft-state compact-state">Loading rollback preview...</div> : null}
+      {rollback.error ? <div className="soft-state error-state compact-state">{rollback.error}</div> : null}
+      {rollback.data ? (
+        <div className="rollback-preview">
+          <MetricRow label="Can Rollback" value={rollback.data.canRollback ? "Yes" : "No"} />
+          <MetricRow label="Message" value={rollback.data.message} />
+          {hasRollbackSnapshot ? (
+            <pre>{JSON.stringify(snapshot, null, 2)}</pre>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ActionLedgerCard({
   row,
   selected,
   processing,
   batchProcessing,
+  workflowPanel,
+  reopening,
+  actionsDisabled,
   onAction,
   onCopy,
-  onToggleSelected
+  onToggleSelected,
+  onToggleWorkflow,
+  onRollbackPreview,
+  onReopen
 }: {
   row: ActionLedgerRow;
   selected: boolean;
   processing: { id: string; action: LedgerAction } | null;
   batchProcessing: BatchLedgerAction | "daily-priorities" | "dismiss-low-priority" | null;
+  workflowPanel?: WorkflowPanelState;
+  reopening: boolean;
+  actionsDisabled: boolean;
   onAction: (row: ActionLedgerRow, action: LedgerAction) => void;
   onCopy: (id: string) => void;
   onToggleSelected: (row: ActionLedgerRow) => void;
+  onToggleWorkflow: (row: ActionLedgerRow) => void;
+  onRollbackPreview: (row: ActionLedgerRow) => void;
+  onReopen: (row: ActionLedgerRow) => void;
 }) {
   const approvalStatus = normalizeState(row.approvalStatus);
   const completed = isCompletedAction(row);
   const monitoring = isMonitoringAction(row);
   const selectable = isSelectableBatchAction(row);
-  const buttonDisabled = Boolean(processing || batchProcessing);
+  const buttonDisabled = Boolean(processing || batchProcessing || actionsDisabled);
   const importantFields: Array<[string, ReactNode]> = [
     ["Recommended Action", formatEmpty(row.recommendedAction)],
     ["SKU", formatEmpty(row.sku)],
@@ -2178,7 +2408,18 @@ function ActionLedgerCard({
       <p className="approval-summary-text">{formatEmpty(row.summary)}</p>
       <div className="approval-id-row">
         <span>{formatEmpty(row.source)} priority review</span>
-        <button type="button" className="secondary tiny-button" onClick={() => onCopy(row.id)} disabled={buttonDisabled}>Copy ID</button>
+        <div className="approval-id-actions">
+          <button type="button" className="secondary tiny-button" onClick={() => onCopy(row.id)} disabled={buttonDisabled}>Copy ID</button>
+          <button
+            type="button"
+            className="secondary tiny-button"
+            onClick={() => onToggleWorkflow(row)}
+            disabled={buttonDisabled}
+            aria-expanded={Boolean(workflowPanel?.open)}
+          >
+            Workflow History
+          </button>
+        </div>
       </div>
       <div className="detail-grid approval-detail-grid">
         {importantFields.map(([label, value]) => (
@@ -2194,6 +2435,16 @@ function ActionLedgerCard({
         </div>
       </details>
       {footer}
+      {workflowPanel?.open ? (
+        <WorkflowHistoryPanel
+          row={row}
+          panel={workflowPanel}
+          onRollbackPreview={onRollbackPreview}
+          onReopen={onReopen}
+          disabled={buttonDisabled}
+          reopening={reopening}
+        />
+      ) : null}
     </article>
   );
 }
@@ -2213,6 +2464,8 @@ function ApprovalCenterPage() {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [summaryState, setSummaryState] = useState<LoadState<ActionLedgerSummary>>(emptyState<ActionLedgerSummary>());
   const [rowsState, setRowsState] = useState<LoadState<ActionLedgerRow[]>>(emptyState<ActionLedgerRow[]>());
+  const [workflowPanels, setWorkflowPanels] = useState<Record<string, WorkflowPanelState>>({});
+  const [reopeningId, setReopeningId] = useState<string | null>(null);
 
   async function refreshApprovalData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
     setSummaryState((current) => ({ ...current, loading: true, error: null }));
@@ -2286,7 +2539,7 @@ function ApprovalCenterPage() {
   const selectedMonitoringOnly = selectedCount > 0 && selectedRows.every(isMonitoringAction);
   const hasSelectablePageRows = pageRows.some(isSelectableBatchAction);
   const costDataDismissVisible = quickView === "NEEDS_COST_DATA" || normalizeState(actionTypeFilter) === "COST_DATA_REQUIRED";
-  const controlsDisabled = Boolean(processing || batchProcessing);
+  const controlsDisabled = Boolean(processing || batchProcessing || reopeningId);
   const summaryData = summaryState.data ?? {};
   const loading = rowsState.loading || summaryState.loading;
   const loadError = rowsState.error ?? summaryState.error;
@@ -2360,6 +2613,132 @@ function ApprovalCenterPage() {
     }
   }
 
+  async function fetchWorkflowPanel(row: ActionLedgerRow, preserveRollback = false) {
+    const id = row.id;
+    setWorkflowPanels((current) => {
+      const existing = current[id];
+      return {
+        ...current,
+        [id]: {
+          open: true,
+          data: existing?.data ?? null,
+          loading: true,
+          error: null,
+          rollback: preserveRollback ? existing?.rollback ?? emptyRollbackPreviewState() : emptyRollbackPreviewState()
+        }
+      };
+    });
+
+    try {
+      const response = await getJson<unknown>(`/api/action-ledger/${id}/workflow?sellerId=${SELLER_ID}`);
+      const data = workflowHistoryOf(response, row);
+      setWorkflowPanels((current) => {
+        const existing = current[id];
+        return {
+          ...current,
+          [id]: {
+            open: true,
+            data,
+            loading: false,
+            error: null,
+            rollback: preserveRollback ? existing?.rollback ?? emptyRollbackPreviewState() : emptyRollbackPreviewState()
+          }
+        };
+      });
+    } catch (error) {
+      setWorkflowPanels((current) => {
+        const existing = current[id];
+        return {
+          ...current,
+          [id]: {
+            open: true,
+            data: existing?.data ?? null,
+            loading: false,
+            error: sanitizeActionError(error),
+            rollback: preserveRollback ? existing?.rollback ?? emptyRollbackPreviewState() : emptyRollbackPreviewState()
+          }
+        };
+      });
+    }
+  }
+
+  function toggleWorkflowPanel(row: ActionLedgerRow) {
+    const current = workflowPanels[row.id];
+    if (current?.open) {
+      setWorkflowPanels((panels) => ({
+        ...panels,
+        [row.id]: { ...current, open: false }
+      }));
+      return;
+    }
+    void fetchWorkflowPanel(row);
+  }
+
+  async function loadRollbackPreview(row: ActionLedgerRow) {
+    const id = row.id;
+    setWorkflowPanels((current) => {
+      const existing = current[id] ?? {
+        open: true,
+        data: null,
+        loading: false,
+        error: null,
+        rollback: emptyRollbackPreviewState()
+      };
+      return {
+        ...current,
+        [id]: {
+          ...existing,
+          open: true,
+          rollback: { data: null, loading: true, error: null }
+        }
+      };
+    });
+
+    try {
+      const response = await getJson<unknown>(`/api/action-ledger/${id}/rollback-preview?sellerId=${SELLER_ID}`);
+      const data = rollbackPreviewOf(response);
+      setWorkflowPanels((current) => {
+        const existing = current[id] ?? {
+          open: true,
+          data: null,
+          loading: false,
+          error: null,
+          rollback: emptyRollbackPreviewState()
+        };
+        return {
+          ...current,
+          [id]: {
+            ...existing,
+            open: true,
+            rollback: { data, loading: false, error: null }
+          }
+        };
+      });
+    } catch (error) {
+      setWorkflowPanels((current) => {
+        const existing = current[id] ?? {
+          open: true,
+          data: null,
+          loading: false,
+          error: null,
+          rollback: emptyRollbackPreviewState()
+        };
+        return {
+          ...current,
+          [id]: {
+            ...existing,
+            open: true,
+            rollback: {
+              data: null,
+              loading: false,
+              error: `Could not load rollback preview: ${sanitizeActionError(error)}`
+            }
+          }
+        };
+      });
+    }
+  }
+
   async function copyActionId(id: string) {
     try {
       if (navigator.clipboard?.writeText) {
@@ -2407,11 +2786,41 @@ function ApprovalCenterPage() {
       await postJson(actions[action].path, actions[action].body);
       const refreshed = await refreshApprovalData();
       await refreshDailyPriorityRows(refreshed.rows);
+      if (workflowPanels[id]?.open) {
+        await fetchWorkflowPanel(refreshed.rows.find((refreshedRow) => refreshedRow.id === id) ?? row);
+      }
       setMessage({ type: "success", text: `${labelize(action)} saved for action ${formatShortId(id)}.` });
     } catch (error) {
       setMessage({ type: "error", text: `Action failed: ${sanitizeActionError(error)}` });
     } finally {
       setProcessing(null);
+    }
+  }
+
+  async function reopenAction(row: ActionLedgerRow) {
+    if (!canReopenAction(row)) return;
+    const confirmed = window.confirm("Reopen this action and move it back to Waiting for Approval?");
+    if (!confirmed) return;
+
+    const id = row.id;
+    setReopeningId(id);
+    setMessage(null);
+    try {
+      await postJson(`/api/action-ledger/${id}/reopen`, {
+        sellerId: SELLER_ID,
+        note: "Reopened from Approval Center",
+        actor: "founder"
+      });
+      const refreshed = await refreshApprovalData();
+      await refreshDailyPriorityRows(refreshed.rows);
+      if (workflowPanels[id]?.open) {
+        await fetchWorkflowPanel(refreshed.rows.find((refreshedRow) => refreshedRow.id === id) ?? row);
+      }
+      setMessage({ type: "success", text: `Action ${formatShortId(id)} reopened and moved back to Waiting for Approval.` });
+    } catch (error) {
+      setMessage({ type: "error", text: `Reopen failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setReopeningId(null);
     }
   }
 
@@ -2670,9 +3079,15 @@ function ApprovalCenterPage() {
                 selected={selectedIds.has(row.id)}
                 processing={processing}
                 batchProcessing={batchProcessing}
+                workflowPanel={workflowPanels[row.id]}
+                reopening={reopeningId === row.id}
+                actionsDisabled={controlsDisabled}
                 onAction={act}
                 onCopy={copyActionId}
                 onToggleSelected={toggleSelectedRow}
+                onToggleWorkflow={toggleWorkflowPanel}
+                onRollbackPreview={loadRollbackPreview}
+                onReopen={reopenAction}
               />
             ))}
           </div>

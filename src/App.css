@@ -388,6 +388,13 @@
   font-weight: 800;
 }
 
+.approval-id-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .approval-card-head {
   display: flex;
   align-items: flex-start;
@@ -452,6 +459,122 @@
   margin-top: 12px;
   color: #526057;
   font-weight: 800;
+}
+
+.workflow-panel {
+  margin-top: 14px;
+  border-top: 1px solid #edf2ea;
+  padding-top: 14px;
+}
+
+.workflow-panel-head,
+.workflow-event-main,
+.workflow-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workflow-panel-head {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.workflow-panel-head h3 {
+  margin: 0;
+  color: #1f2d25;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.workflow-panel-head span,
+.workflow-event-date {
+  color: #65756b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workflow-panel-actions {
+  margin-top: 0;
+}
+
+.workflow-status-row,
+.rollback-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.workflow-timeline {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-event {
+  border: 1px solid #e4eee0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.workflow-event-main {
+  justify-content: space-between;
+}
+
+.workflow-event-main strong {
+  color: #1f2d25;
+  text-align: right;
+}
+
+.workflow-event-meta {
+  flex-wrap: wrap;
+  margin-top: 7px;
+  color: #65756b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workflow-event p {
+  margin-top: 8px;
+  color: #42554a;
+  line-height: 1.45;
+}
+
+.snapshot-pill {
+  border-radius: 999px;
+  background: #eef2ee;
+  color: #526057;
+  padding: 3px 8px;
+}
+
+.compact-state {
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.rollback-preview {
+  margin-top: 12px;
+  border-top: 1px solid #edf2ea;
+  padding-top: 12px;
+}
+
+.rollback-preview pre {
+  grid-column: 1 / -1;
+  max-height: 260px;
+  overflow: auto;
+  margin: 10px 0 0;
+  border: 1px solid #e1e9df;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #26352d;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .approval-pagination {
@@ -1231,6 +1354,8 @@ textarea {
   .approval-card-head,
   .approval-pagination,
   .batch-action-bar,
+  .workflow-panel-head,
+  .workflow-event-main,
   .queue-pagination,
   .cost-card-head,
   .cost-card-footer {
@@ -1249,6 +1374,11 @@ textarea {
   .approval-badges {
     justify-content: flex-start;
     max-width: none;
+  }
+
+  .workflow-status-row,
+  .rollback-preview {
+    grid-template-columns: 1fr;
   }
 }
 
