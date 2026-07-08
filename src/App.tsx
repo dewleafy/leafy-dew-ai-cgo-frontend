@@ -288,6 +288,11 @@ function RecommendationCard({ item, footer }: { item: AnyRecord; footer?: ReactN
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>("Today Dashboard");
   const [logoFailed, setLogoFailed] = useState(false);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    mainContentRef.current?.scrollTo({ top: 0 });
+  }, [activeTab]);
 
   return (
     <div className="app-shell">
@@ -330,17 +335,19 @@ function App() {
           </div>
         </header>
 
-        {activeTab === "Today Dashboard" && <TodayDashboard setActiveTab={setActiveTab} />}
-        {activeTab === "Product Passport" && <ProductPassportPage />}
-        {activeTab === "Product Economics" && <ProductEconomicsPage />}
-        {activeTab === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setActiveTab} />}
-        {activeTab === "Engine Command Center" && <EngineCommandCenterPage />}
-        {activeTab === "Approval Center" && <ApprovalCenterPage />}
-        {activeTab === "CEO Report" && <CeoReportPage />}
-        {activeTab === "Experiments" && <ExperimentsPage />}
-        {activeTab === "Learning" && <LearningPage />}
-        {activeTab === "Settings" && <SettingsPage />}
-        {activeTab === "Activity Logs" && <ActivityLogsPage />}
+        <div className="main-content" ref={mainContentRef}>
+          {activeTab === "Today Dashboard" && <TodayDashboard setActiveTab={setActiveTab} />}
+          {activeTab === "Product Passport" && <ProductPassportPage />}
+          {activeTab === "Product Economics" && <ProductEconomicsPage />}
+          {activeTab === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setActiveTab} />}
+          {activeTab === "Engine Command Center" && <EngineCommandCenterPage />}
+          {activeTab === "Approval Center" && <ApprovalCenterPage />}
+          {activeTab === "CEO Report" && <CeoReportPage />}
+          {activeTab === "Experiments" && <ExperimentsPage />}
+          {activeTab === "Learning" && <LearningPage />}
+          {activeTab === "Settings" && <SettingsPage />}
+          {activeTab === "Activity Logs" && <ActivityLogsPage />}
+        </div>
       </main>
     </div>
   );
@@ -1925,6 +1932,7 @@ const engineCategories = [
   "SOCIAL_CONTENT"
 ];
 const engineSortOptions = ["Priority First", "Risk High First", "Category", "Last Run Newest", "Last Run Oldest"];
+const ENGINE_REGISTRY_PAGE_SIZE = 25;
 
 function firstRecordRows<T extends AnyRecord>(...sources: unknown[]): T[] {
   for (const source of sources) {
@@ -2120,6 +2128,7 @@ function EngineCommandCenterPage() {
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<EngineSortMode>("PRIORITY_FIRST");
+  const [enginePage, setEnginePage] = useState(1);
   const [runningEngineKey, setRunningEngineKey] = useState<string | null>(null);
   const [togglingEngineKey, setTogglingEngineKey] = useState<string | null>(null);
   const [runningDaily, setRunningDaily] = useState(false);
@@ -2139,8 +2148,19 @@ function EngineCommandCenterPage() {
     });
     return sortEngineRows(rows, sortMode);
   }, [categoryFilter, engineRows, searchQuery, sortMode]);
+  const enginePageCount = Math.max(1, Math.ceil(filteredEngines.length / ENGINE_REGISTRY_PAGE_SIZE));
+  const currentEnginePage = Math.min(enginePage, enginePageCount);
+  const enginePageStartIndex = filteredEngines.length === 0 ? 0 : (currentEnginePage - 1) * ENGINE_REGISTRY_PAGE_SIZE;
+  const enginePageEndIndex = Math.min(enginePageStartIndex + ENGINE_REGISTRY_PAGE_SIZE, filteredEngines.length);
+  const visibleEngines = filteredEngines.slice(enginePageStartIndex, enginePageEndIndex);
   const filtersActive = categoryFilter !== "All" || searchQuery.trim().length > 0;
   const controlsDisabled = Boolean(runningEngineKey || togglingEngineKey || runningDaily);
+
+  useEffect(() => {
+    if (enginePage > enginePageCount) {
+      setEnginePage(enginePageCount);
+    }
+  }, [enginePage, enginePageCount]);
 
   const summaryCards = [
     {
@@ -2214,6 +2234,7 @@ function EngineCommandCenterPage() {
         note: "Toggled from Engine Command Center"
       });
       registrySummary.reload();
+      routerSummary.reload();
       registry.reload();
       setMessage({ type: "success", text: `${engineNameOf(row)} ${enabled ? "enabled" : "disabled"}.` });
     } catch {
@@ -2268,7 +2289,14 @@ function EngineCommandCenterPage() {
 
       <Card title="Engine Registry">
         <div className="engine-controls">
-          <TextInput label="Search engines" value={searchQuery} onChange={setSearchQuery} />
+          <TextInput
+            label="Search engines"
+            value={searchQuery}
+            onChange={(value) => {
+              setSearchQuery(value);
+              setEnginePage(1);
+            }}
+          />
           <SelectField
             label="Sort"
             value={engineSortLabel(sortMode)}
@@ -2282,16 +2310,46 @@ function EngineCommandCenterPage() {
               key={category}
               type="button"
               className={categoryFilter === category ? "active" : ""}
-              onClick={() => setCategoryFilter(category)}
+              onClick={() => {
+                setCategoryFilter(category);
+                setEnginePage(1);
+              }}
             >
               {category}
             </button>
           ))}
         </div>
         {!registry.loading && !registry.error ? (
-          <p className="approval-count-line">
-            Showing {filteredEngines.length} of {engineRows.length} loaded engines{filtersActive ? " after filters" : ""}
-          </p>
+          <div className="approval-pagination engine-pagination" aria-label="Engine registry pagination">
+            <span>
+              {filteredEngines.length === 0 ? (
+                <>Showing 0 of {engineRows.length} loaded engines{filtersActive ? " after filters" : ""}</>
+              ) : filtersActive ? (
+                <>Showing {enginePageStartIndex + 1}-{enginePageEndIndex} of {filteredEngines.length} matching engines ({engineRows.length} loaded)</>
+              ) : (
+                <>Showing {enginePageStartIndex + 1}-{enginePageEndIndex} of {engineRows.length} loaded engines</>
+              )}
+            </span>
+            <div className="button-row compact engine-pagination-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setEnginePage((page) => Math.max(1, page - 1))}
+                disabled={currentEnginePage <= 1}
+              >
+                Previous
+              </button>
+              <span>Page {currentEnginePage} of {enginePageCount}</span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setEnginePage((page) => Math.min(enginePageCount, page + 1))}
+                disabled={currentEnginePage >= enginePageCount}
+              >
+                Next
+              </button>
+            </div>
+          </div>
         ) : null}
         {registry.loading ? <LoadingBlock text="Loading engines..." /> : registry.error ? (
           <ErrorBlock text="Could not load engine registry" />
@@ -2302,8 +2360,8 @@ function EngineCommandCenterPage() {
         ) : (
           <>
             <div className="engine-card-list">
-              {filteredEngines.map((row, index) => {
-                const engineKey = engineKeyOf(row) || `engine-${index}`;
+              {visibleEngines.map((row, index) => {
+                const engineKey = engineKeyOf(row) || `engine-${enginePageStartIndex + index}`;
                 const enabled = engineEnabled(row);
                 const lastRunStatus = engineLastRunField(row, ["lastRunStatus", "runStatus", "status", "last_run_status"]);
                 const lastRunSummary = engineLastRunField(row, ["lastRunSummary", "summary", "message", "last_run_summary"]);
