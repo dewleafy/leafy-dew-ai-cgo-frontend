@@ -1,4 +1,4 @@
-export const API_BASE = "https://api.leafydew.in";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "" : "https://api.leafydew.in");
 
 type Body = Record<string, unknown> | undefined;
 

@@ -331,6 +331,108 @@
   font-weight: 800;
 }
 
+.engine-command-center {
+  display: grid;
+  gap: 18px;
+}
+
+.engine-command-center .page-title,
+.engine-command-center .approval-warning,
+.engine-command-center .summary-strip {
+  margin-bottom: 0;
+}
+
+.engine-safety-banner p {
+  line-height: 1.45;
+}
+
+.engine-summary {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.engine-message {
+  margin: 0;
+}
+
+.engine-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, 0.35fr);
+  gap: 14px;
+  margin-bottom: 14px;
+  align-items: end;
+}
+
+.engine-category-filter {
+  margin-bottom: 14px;
+}
+
+.engine-category-filter button {
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.engine-card-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.engine-card {
+  min-width: 0;
+}
+
+.engine-card-head {
+  align-items: flex-start;
+}
+
+.engine-badges {
+  max-width: 52%;
+}
+
+.engine-detail-grid {
+  margin-top: 8px;
+}
+
+.engine-detail-grid .metric-row strong {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.engine-run-summary {
+  min-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.engine-section-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.engine-table {
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.engine-table table {
+  min-width: 760px;
+}
+
+.engine-log-table table {
+  min-width: 980px;
+}
+
+.engine-key-line {
+  display: block;
+  margin-top: 4px;
+  color: #65756b;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .approval-summary {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   margin-bottom: 18px;
@@ -1345,6 +1447,9 @@ textarea {
   .summary-strip,
   .card-list,
   .detail-grid,
+  .engine-card-list,
+  .engine-controls,
+  .engine-section-grid,
   .cost-card-readonly,
   .approval-controls,
   .queue-controls {
@@ -1372,6 +1477,11 @@ textarea {
   }
 
   .approval-badges {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .engine-badges {
     justify-content: flex-start;
     max-width: none;
   }
@@ -1408,6 +1518,23 @@ textarea {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .main-panel {
+    padding: 18px;
+  }
+
+  .engine-command-center {
+    overflow-x: hidden;
+  }
+
+  .engine-command-center .card {
+    overflow: hidden;
+  }
+
+  .engine-table {
+    display: block;
+    overflow-x: auto;
   }
 
   .form-grid {

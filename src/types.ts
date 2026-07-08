@@ -204,6 +204,36 @@ export type ActivityLog = {
   userNote?: string | null;
 };
 
+export type EngineRegistryItem = AnyRecord & {
+  engineKey?: string | null;
+  engineName?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  ruleTemplate?: string | null;
+  outputActionType?: string | null;
+  riskLevel?: string | null;
+  costLevel?: string | null;
+  priorityScore?: number | string | null;
+  enabled?: boolean | string | number | null;
+  shadowMode?: boolean | string | number | null;
+  requiresApproval?: boolean | string | number | null;
+  ownerModule?: string | null;
+  lastRunStatus?: string | null;
+  lastRunSummary?: string | null;
+  lastRunAt?: string | null;
+};
+
+export type EngineRunLog = AnyRecord & {
+  id?: string | null;
+  engineKey?: string | null;
+  runStatus?: string | null;
+  runType?: string | null;
+  actionsCreatedCount?: number | string | null;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+};
+
 export type AutomationSettings = {
   mode?: string;
   maxDailyRecommendations?: number;
