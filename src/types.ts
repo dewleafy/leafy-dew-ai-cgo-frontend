@@ -234,6 +234,39 @@ export type EngineRunLog = AnyRecord & {
   finishedAt?: string | null;
 };
 
+export type DailyOrchestratorStatus = AnyRecord & {
+  mode?: string | null;
+  totalEngines?: number | string | null;
+  enabledEngines?: number | string | null;
+  pendingApprovals?: number | string | null;
+  last24hEngineRuns?: number | string | null;
+  last24hActionsCreated?: number | string | null;
+  productPassportReady?: boolean | string | number | null;
+  productEconomicsReady?: boolean | string | number | null;
+  approvalCenterReady?: boolean | string | number | null;
+  warnings?: unknown[] | null;
+};
+
+export type DailyOrchestratorRun = AnyRecord & {
+  id?: string | null;
+  runId?: string | null;
+  runStatus?: string | null;
+  mode?: string | null;
+  runType?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  enginesPlanned?: number | string | null;
+  enginesRun?: number | string | null;
+  actionsCreated?: number | string | null;
+  skippedCount?: number | string | null;
+  failedCount?: number | string | null;
+  approvalPendingBefore?: number | string | null;
+  approvalPendingAfter?: number | string | null;
+  warnings?: unknown[] | null;
+  recommendations?: unknown[] | null;
+  message?: string | null;
+};
+
 export type AutomationSettings = {
   mode?: string;
   maxDailyRecommendations?: number;

@@ -9,6 +9,8 @@ import type {
   AnyRecord,
   ApiRows,
   CostCompletionQueueItem,
+  DailyOrchestratorRun,
+  DailyOrchestratorStatus,
   EngineRegistryItem,
   EngineRunLog,
   Experiment,
@@ -21,6 +23,7 @@ const SELLER_ID = "default";
 
 const tabs = [
   "Today Dashboard",
+  "Daily AI-CGO",
   "Product Passport",
   "Product Economics",
   "PPC Recommendations",
@@ -337,6 +340,7 @@ function App() {
 
         <div className="main-content" ref={mainContentRef}>
           {activeTab === "Today Dashboard" && <TodayDashboard setActiveTab={setActiveTab} />}
+          {activeTab === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setActiveTab} />}
           {activeTab === "Product Passport" && <ProductPassportPage />}
           {activeTab === "Product Economics" && <ProductEconomicsPage />}
           {activeTab === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setActiveTab} />}
@@ -517,6 +521,298 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
         <button type="button" onClick={() => setActiveTab("CEO Report")}>View Full CEO Report</button>
         <button type="button" onClick={() => setActiveTab("Product Passport")}>Complete Product Costs</button>
       </div>
+    </div>
+  );
+}
+
+function dailyRoot(value: unknown): AnyRecord {
+  const root = recordOf(value);
+  return recordOf(root.status ?? root.summary ?? root.data ?? root.result ?? root);
+}
+
+function dailyRunResultOf(value: unknown): DailyOrchestratorRun {
+  const root = recordOf(value);
+  return recordOf(root.run ?? root.result ?? root.data ?? root) as DailyOrchestratorRun;
+}
+
+function dailyRunRowsOf(value: unknown): DailyOrchestratorRun[] {
+  if (Array.isArray(value)) return value as DailyOrchestratorRun[];
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  const rows = root.rows ?? root.runs ?? root.items ?? data.rows ?? data.runs ?? data.items ?? result.rows ?? result.runs ?? result.items;
+  return recordsOf(rows) as DailyOrchestratorRun[];
+}
+
+function dailyField(source: unknown, keys: string[]): unknown {
+  const root = recordOf(source);
+  return readFirst(root, keys);
+}
+
+function dailyNumber(source: unknown, keys: string[]): number {
+  return readNumber(dailyField(source, keys));
+}
+
+function dailyList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === "") return [];
+  const rows = rowsOf<unknown>(value);
+  if (rows.length > 0) return rows;
+  return [value];
+}
+
+function dailyStatusList(source: AnyRecord, keys: string[]): unknown[] {
+  for (const key of keys) {
+    const value = dailyField(source, [key]);
+    const list = dailyList(value);
+    if (list.length > 0) return list;
+  }
+  return [];
+}
+
+function formatDailyListItem(item: unknown): string {
+  if (item === null || item === undefined || item === "") return "No details provided.";
+  if (typeof item !== "object") return String(item);
+  const row = recordOf(item);
+  const preferred = row.message ?? row.title ?? row.recommendation ?? row.recommendedAction ?? row.reason ?? row.summary ?? row.description;
+  if (preferred !== undefined && preferred !== null && preferred !== "") return String(preferred);
+  return JSON.stringify(row);
+}
+
+function readinessLabel(value: unknown): string {
+  if (typeof value === "boolean") return value ? "READY" : "NOT_READY";
+  if (typeof value === "number") return value > 0 ? "READY" : "NOT_READY";
+  const normalized = normalizeState(value).replace(/\s+/g, "_");
+  if (!normalized) return "UNKNOWN";
+  if (["TRUE", "YES", "Y", "1", "READY", "PASS", "PASSED", "GOOD", "AVAILABLE", "COMPLETE", "COMPLETED", "CONNECTED", "OK"].includes(normalized)) {
+    return "READY";
+  }
+  if (["PARTIAL", "WARNING", "WARN", "WATCH", "INCOMPLETE", "NEEDS_INPUT", "NEEDS_COST_DATA", "MISSING_COST_DATA"].includes(normalized)) {
+    return "PARTIAL";
+  }
+  if (["FALSE", "NO", "N", "0", "NOT_READY", "UNREADY", "MISSING", "FAILED", "ERROR", "DISCONNECTED", "BLOCKED", "UNAVAILABLE"].includes(normalized)) {
+    return "NOT_READY";
+  }
+  return normalized;
+}
+
+function ReadinessBadge({ value }: { value: unknown }) {
+  const label = readinessLabel(value);
+  const tone = label === "READY" ? "good" : label === "PARTIAL" || label === "UNKNOWN" ? "watch" : "risk";
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
+function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+  const status = useApi<DailyOrchestratorStatus>(() => getJson(`/api/daily-orchestrator/status?sellerId=${SELLER_ID}`));
+  const runs = useApi<unknown>(() => getJson(`/api/daily-orchestrator/runs?sellerId=${SELLER_ID}&limit=20`));
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState<DailyOrchestratorRun | null>(null);
+  const [runError, setRunError] = useState("");
+  const [approvalRefreshMessage, setApprovalRefreshMessage] = useState("");
+
+  const statusRoot = dailyRoot(status.data);
+  const recentRuns = useMemo(() => dailyRunRowsOf(runs.data), [runs.data]);
+  const warnings = dailyStatusList(statusRoot, ["warnings", "warningMessages", "alerts"]);
+  const mode = dailyField(statusRoot, ["mode", "executionMode", "runMode"]) ?? "SHADOW";
+  const statusCards = [
+    { label: "Mode", value: <StatusBadge value={mode} /> },
+    { label: "Total Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["totalEngines", "engineCount", "total_engines"]) },
+    { label: "Enabled Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["enabledEngines", "enabledCount", "enabled_engines"]) },
+    { label: "Pending Approvals", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["pendingApprovals", "pendingApprovalCount", "approvalPending", "approval_pending"]) },
+    { label: "Last 24h Engine Runs", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["last24hEngineRuns", "last24hRuns", "engineRunsLast24h", "runsLast24h"]) },
+    { label: "Last 24h Actions Created", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["last24hActionsCreated", "actionsCreatedLast24h", "actionsCreated24h"]) },
+    { label: "Product Passport Ready", value: <ReadinessBadge value={dailyField(statusRoot, ["productPassportReady", "passportReady", "product_passport_ready"])} /> },
+    { label: "Product Economics Ready", value: <ReadinessBadge value={dailyField(statusRoot, ["productEconomicsReady", "economicsReady", "product_economics_ready"])} /> },
+    { label: "Approval Center Ready", value: <ReadinessBadge value={dailyField(statusRoot, ["approvalCenterReady", "approvalsReady", "approval_center_ready"])} /> }
+  ];
+
+  async function refreshApprovalSummaryIfAvailable() {
+    try {
+      const data = await fetchActionLedgerData();
+      setApprovalRefreshMessage(`Approval Center refreshed. Pending approvals: ${readNumber(data.summary.pendingCount)}.`);
+    } catch {
+      setApprovalRefreshMessage("");
+    }
+  }
+
+  async function runDailyAiCgo() {
+    const confirmed = window.confirm("Run Daily AI-CGO in shadow mode? No external action will be executed.");
+    if (!confirmed) return;
+
+    setRunning(true);
+    setRunError("");
+    setApprovalRefreshMessage("");
+    try {
+      const response = await postJson<unknown>("/api/daily-orchestrator/run", {
+        sellerId: SELLER_ID,
+        actor: "founder",
+        limit: 25,
+        runType: "MANUAL"
+      });
+      setRunResult(dailyRunResultOf(response));
+      status.reload();
+      runs.reload();
+      await refreshApprovalSummaryIfAvailable();
+    } catch {
+      setRunError("Could not run daily AI-CGO");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="page daily-ai-cgo">
+      <PageHeader
+        title="Daily AI-CGO"
+        subtitle="Run the daily AI growth operating system in shadow mode. Recommendations go to Approval Center only."
+      />
+      <div className="warning-card approval-warning daily-safety-banner">
+        <p>Shadow mode active. No Amazon, Ads, Listing, Image, A+, Store, or Social action is executed.</p>
+      </div>
+
+      {status.loading && !status.data ? <LoadingBlock text="Loading daily AI-CGO status..." /> : null}
+      {status.error ? <ErrorBlock text="Could not load daily status" /> : null}
+
+      <div className="summary-strip daily-status-grid" aria-label="Daily AI-CGO status">
+        {statusCards.map((card) => (
+          <MetricTile key={card.label} label={card.label} value={card.value} />
+        ))}
+      </div>
+
+      <div className="daily-command-grid">
+        <Card
+          title="Run Daily AI-CGO"
+          action={(
+            <button type="button" onClick={runDailyAiCgo} disabled={running}>
+              {running ? "Running daily AI-CGO..." : "Run Daily AI-CGO"}
+            </button>
+          )}
+        >
+          <p className="section-note">This creates approval-first recommendations only. No external action executed.</p>
+          {running ? <div className="soft-state compact-state">Running daily AI-CGO...</div> : null}
+          {runError ? <div className="soft-state error-state compact-state">{runError}</div> : null}
+          {approvalRefreshMessage ? <div className="soft-state success-state compact-state">{approvalRefreshMessage}</div> : null}
+        </Card>
+
+        <Card title="Quick Links">
+          <div className="quick-link-grid">
+            <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
+            <button type="button" onClick={() => setActiveTab("Engine Command Center")}>Open Engine Command Center</button>
+            <button type="button" onClick={() => setActiveTab("Product Passport")}>Open Product Passport Cost Queue</button>
+            <button type="button" onClick={() => setActiveTab("CEO Report")}>Open CEO Report</button>
+          </div>
+        </Card>
+      </div>
+
+      <Card title="Warnings">
+        {status.loading && !status.data ? (
+          <LoadingBlock text="Loading daily AI-CGO status..." />
+        ) : status.error ? (
+          <ErrorBlock text="Could not load daily status" />
+        ) : warnings.length === 0 ? (
+          <EmptyBlock text="No daily AI-CGO warnings right now." />
+        ) : (
+          <ul className="clean-list daily-list">
+            {warnings.map((warning, index) => (
+              <li key={index}>{formatDailyListItem(warning)}</li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {runResult ? <DailyRunResultPanel result={runResult} /> : null}
+
+      <Card
+        title="Recent Runs"
+        action={<button type="button" className="secondary" onClick={runs.reload}>Refresh Runs</button>}
+      >
+        {runs.loading ? <LoadingBlock text="Loading recent runs..." /> : runs.error ? (
+          <ErrorBlock text="Could not load recent runs" />
+        ) : recentRuns.length === 0 ? (
+          <EmptyBlock text="No Daily AI-CGO runs yet." />
+        ) : (
+          <div className="daily-run-list">
+            {recentRuns.map((run, index) => {
+              const runId = dailyField(run, ["runId", "id", "dailyRunId", "run_id"]) ?? index;
+              return (
+                <article className="item-card daily-run-card" key={String(runId)}>
+                  <div className="item-top">
+                    <strong>{formatShortId(runId)}</strong>
+                    <StatusBadge value={dailyField(run, ["runStatus", "status", "run_status"])} />
+                  </div>
+                  <div className="detail-grid">
+                    <MetricRow label="Started At" value={formatLocalDateTime(dailyField(run, ["startedAt", "started_at"]))} />
+                    <MetricRow label="Finished At" value={formatLocalDateTime(dailyField(run, ["finishedAt", "finished_at"]))} />
+                    <MetricRow label="Run Type" value={formatEmpty(dailyField(run, ["runType", "run_type"]))} />
+                    <MetricRow label="Engines Planned" value={formatEmpty(dailyField(run, ["enginesPlanned", "plannedEngines", "engines_planned"]))} />
+                    <MetricRow label="Engines Run" value={formatEmpty(dailyField(run, ["enginesRun", "enginesRunCount", "engines_run"]))} />
+                    <MetricRow label="Actions Created" value={formatEmpty(dailyField(run, ["actionsCreated", "actionsCreatedCount", "actions_created"]))} />
+                    <MetricRow label="Skipped Count" value={formatEmpty(dailyField(run, ["skippedCount", "skipped", "skipped_count"]))} />
+                    <MetricRow label="Failed Count" value={formatEmpty(dailyField(run, ["failedCount", "failed", "failed_count"]))} />
+                    <MetricRow label="Approval Pending Before" value={formatEmpty(dailyField(run, ["approvalPendingBefore", "pendingBefore", "approval_pending_before"]))} />
+                    <MetricRow label="Approval Pending After" value={formatEmpty(dailyField(run, ["approvalPendingAfter", "pendingAfter", "approval_pending_after"]))} />
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function DailyRunResultPanel({ result }: { result: DailyOrchestratorRun }) {
+  const actionsCreated = dailyNumber(result, ["actionsCreated", "actionsCreatedCount", "actions_created"]);
+  const warnings = dailyStatusList(result, ["warnings", "warningMessages", "alerts"]);
+  const recommendations = dailyStatusList(result, ["recommendations", "recommendedActions", "topRecommendations"]);
+  const message = dailyField(result, ["message", "summary", "statusMessage"]);
+  const rows: Array<[string, ReactNode]> = [
+    ["runId", formatEmpty(dailyField(result, ["runId", "id", "dailyRunId", "run_id"]))],
+    ["runStatus", <StatusBadge key="run-status" value={dailyField(result, ["runStatus", "status", "run_status"])} />],
+    ["mode", <StatusBadge key="mode" value={dailyField(result, ["mode", "executionMode", "runMode"]) ?? "SHADOW"} />],
+    ["enginesPlanned", formatEmpty(dailyField(result, ["enginesPlanned", "plannedEngines", "engines_planned"]))],
+    ["enginesRun", formatEmpty(dailyField(result, ["enginesRun", "enginesRunCount", "engines_run"]))],
+    ["actionsCreated", formatEmpty(dailyField(result, ["actionsCreated", "actionsCreatedCount", "actions_created"]))],
+    ["skippedCount", formatEmpty(dailyField(result, ["skippedCount", "skipped", "skipped_count"]))],
+    ["failedCount", formatEmpty(dailyField(result, ["failedCount", "failed", "failed_count"]))],
+    ["approvalPendingBefore", formatEmpty(dailyField(result, ["approvalPendingBefore", "pendingBefore", "approval_pending_before"]))],
+    ["approvalPendingAfter", formatEmpty(dailyField(result, ["approvalPendingAfter", "pendingAfter", "approval_pending_after"]))]
+  ];
+
+  return (
+    <Card title="Run Result">
+      <div className="soft-state success-state daily-shadow-note">No external action executed.</div>
+      {actionsCreated === 0 ? (
+        <div className="soft-state compact-state">No new actions were created. Existing pending recommendations may already cover today's risks.</div>
+      ) : null}
+      <div className="detail-grid daily-result-grid">
+        {rows.map(([label, value]) => (
+          <MetricRow key={label} label={label} value={value} />
+        ))}
+      </div>
+      <div className="daily-result-sections">
+        <DailyTextList title="Warnings" rows={warnings} emptyText="No warnings returned for this run." />
+        <DailyTextList title="Recommendations" rows={recommendations} emptyText="No recommendations returned for this run." />
+      </div>
+      {message ? <p className="section-note daily-message">{formatEmpty(message)}</p> : null}
+    </Card>
+  );
+}
+
+function DailyTextList({ title, rows, emptyText }: { title: string; rows: unknown[]; emptyText: string }) {
+  return (
+    <div className="daily-text-list">
+      <h3>{title}</h3>
+      {rows.length === 0 ? (
+        <p className="section-note">{emptyText}</p>
+      ) : (
+        <ul className="clean-list daily-list">
+          {rows.map((item, index) => (
+            <li key={index}>{formatDailyListItem(item)}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
