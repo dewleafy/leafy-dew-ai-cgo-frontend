@@ -2017,21 +2017,21 @@ function engineRequiresApproval(row: AnyRecord): boolean {
 }
 
 function enginePriority(row: AnyRecord): number {
-  return readNumber(engineField(row, ["priorityScore", "priority", "score", "priority_score"]));
+  return readNumber(engineField(row, ["priorityScore", "priority_score", "priority", "score"]));
 }
 
-function engineLastRunTime(row: AnyRecord): number {
-  const parsed = Date.parse(String(engineLastRunField(row, ["lastRunAt", "finishedAt", "startedAt", "createdAt", "last_run_at"]) ?? ""));
-  return Number.isFinite(parsed) ? parsed : 0;
+function engineLastRunTimestamp(row: AnyRecord): number | null {
+  const value = engineLastRunField(row, ["lastRunAt", "last_run_at", "finishedAt", "finished_at", "startedAt", "started_at", "createdAt", "created_at"]);
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function engineRiskPriority(row: AnyRecord): number {
-  const risk = normalizeState(engineField(row, ["riskLevel", "risk", "risk_level"]));
-  if (["CRITICAL", "VERY_HIGH"].includes(risk)) return 0;
-  if (risk === "HIGH") return 1;
-  if (risk === "MEDIUM") return 2;
-  if (risk === "LOW") return 3;
-  return 4;
+  const risk = normalizeState(engineField(row, ["riskLevel", "risk_level", "risk"]));
+  if (["HIGH", "CRITICAL", "VERY_HIGH"].includes(risk)) return 0;
+  if (risk === "MEDIUM") return 1;
+  if (risk === "LOW") return 2;
+  return 3;
 }
 
 function engineCategoryOf(row: AnyRecord): string {
@@ -2059,10 +2059,20 @@ function sortEngineRows(rows: EngineRegistryItem[], sortMode: EngineSortMode): E
       return engineCategoryOf(a).localeCompare(engineCategoryOf(b)) || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
     }
     if (sortMode === "LAST_RUN_NEWEST") {
-      return engineLastRunTime(b) - engineLastRunTime(a) || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
+      const aTime = engineLastRunTimestamp(a);
+      const bTime = engineLastRunTimestamp(b);
+      if (aTime === null && bTime === null) return enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
+      if (aTime === null) return 1;
+      if (bTime === null) return -1;
+      return bTime - aTime || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
     }
     if (sortMode === "LAST_RUN_OLDEST") {
-      return engineLastRunTime(a) - engineLastRunTime(b) || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
+      const aTime = engineLastRunTimestamp(a);
+      const bTime = engineLastRunTimestamp(b);
+      if (aTime === null && bTime === null) return enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
+      if (aTime === null) return -1;
+      if (bTime === null) return 1;
+      return aTime - bTime || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
     }
     return enginePriority(b) - enginePriority(a) || engineRiskPriority(a) - engineRiskPriority(b) || engineKeyOf(a).localeCompare(engineKeyOf(b));
   });
@@ -2097,6 +2107,10 @@ function responseCount(value: unknown, keys: string[]): number {
   return summaryNumber(root, keys, summaryNumber(result, keys, summaryNumber(summary, keys, 0)));
 }
 
+function runLogField(row: EngineRunLog, keys: string[]): unknown {
+  return readFirst(row, keys);
+}
+
 function EngineCommandCenterPage() {
   const registrySummary = useApi<AnyRecord>(() => getJson("/api/engine-registry/summary"));
   const routerSummary = useApi<AnyRecord>(() => getJson(`/api/engine-router/summary?sellerId=${SELLER_ID}`));
@@ -2125,6 +2139,7 @@ function EngineCommandCenterPage() {
     });
     return sortEngineRows(rows, sortMode);
   }, [categoryFilter, engineRows, searchQuery, sortMode]);
+  const filtersActive = categoryFilter !== "All" || searchQuery.trim().length > 0;
   const controlsDisabled = Boolean(runningEngineKey || togglingEngineKey || runningDaily);
 
   const summaryCards = [
@@ -2150,7 +2165,7 @@ function EngineCommandCenterPage() {
     },
     {
       label: "Actions Created",
-      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["actionsCreated", "actionsCreatedCount", "totalActionsCreated"], 0)
+      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["last24hActionsCreated", "actionsCreated", "actionsCreatedCount", "totalActionsCreated"], 0)
     },
     {
       label: "Failed Runs",
@@ -2158,7 +2173,7 @@ function EngineCommandCenterPage() {
     },
     {
       label: "Preview Runs",
-      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["previewRuns", "previewRunCount"], 0)
+      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["previewOnlyRuns", "previewRuns", "previewRunCount"], 0)
     }
   ];
 
@@ -2217,10 +2232,7 @@ function EngineCommandCenterPage() {
         limit: 25,
         actor: "founder"
       });
-      routerSummary.reload();
-      registrySummary.reload();
-      registry.reload();
-      runLogs.reload();
+      refreshEngineData();
       const enginesRun = responseCount(response, ["enginesRun", "enginesRunCount", "runCount"]);
       const actionsCreated = responseCount(response, ["actionsCreated", "actionsCreatedCount"]);
       const skippedCount = responseCount(response, ["skippedCount", "enginesSkipped", "skipped"]);
@@ -2276,6 +2288,11 @@ function EngineCommandCenterPage() {
             </button>
           ))}
         </div>
+        {!registry.loading && !registry.error ? (
+          <p className="approval-count-line">
+            Showing {filteredEngines.length} of {engineRows.length} loaded engines{filtersActive ? " after filters" : ""}
+          </p>
+        ) : null}
         {registry.loading ? <LoadingBlock text="Loading engines..." /> : registry.error ? (
           <ErrorBlock text="Could not load engine registry" />
         ) : engineRows.length === 0 ? (
@@ -2284,14 +2301,13 @@ function EngineCommandCenterPage() {
           <EmptyBlock text="No engines match this filter." />
         ) : (
           <>
-            <p className="approval-count-line">Showing {filteredEngines.length} of {engineRows.length} loaded engines</p>
             <div className="engine-card-list">
               {filteredEngines.map((row, index) => {
                 const engineKey = engineKeyOf(row) || `engine-${index}`;
                 const enabled = engineEnabled(row);
                 const lastRunStatus = engineLastRunField(row, ["lastRunStatus", "runStatus", "status", "last_run_status"]);
                 const lastRunSummary = engineLastRunField(row, ["lastRunSummary", "summary", "message", "last_run_summary"]);
-                const lastRunAt = engineLastRunField(row, ["lastRunAt", "finishedAt", "startedAt", "createdAt", "last_run_at"]);
+                const lastRunAt = engineLastRunField(row, ["lastRunAt", "last_run_at", "finishedAt", "finished_at", "startedAt", "started_at", "createdAt", "created_at"]);
 
                 return (
                   <article className="item-card engine-card" key={engineKey}>
@@ -2302,7 +2318,7 @@ function EngineCommandCenterPage() {
                       </div>
                       <div className="badge-row approval-badges engine-badges">
                         <StatusBadge value={engineCategoryOf(row) || "UNCATEGORIZED"} />
-                        <StatusBadge value={engineField(row, ["riskLevel", "risk", "risk_level"]) ?? "LOW"} />
+                        <StatusBadge value={engineField(row, ["riskLevel", "risk_level", "risk"]) ?? "LOW"} />
                         <StatusBadge value={enabled ? "ENABLED" : "DISABLED"} />
                         {engineShadowMode(row) ? <StatusBadge value="SHADOW" /> : null}
                         {engineRequiresApproval(row) ? <StatusBadge value="APPROVAL_REQUIRED" /> : null}
@@ -2314,7 +2330,7 @@ function EngineCommandCenterPage() {
                       <MetricRow label="Rule Template" value={formatEmpty(engineField(row, ["ruleTemplate", "rule_template"]))} />
                       <MetricRow label="Output Action Type" value={formatEmpty(engineField(row, ["outputActionType", "actionType", "output_action_type"]))} />
                       <MetricRow label="Cost Level" value={<StatusBadge value={engineField(row, ["costLevel", "cost_level"]) ?? "LOW"} />} />
-                      <MetricRow label="Priority Score" value={formatEmpty(engineField(row, ["priorityScore", "priority", "score", "priority_score"]))} />
+                      <MetricRow label="Priority Score" value={formatEmpty(engineField(row, ["priorityScore", "priority_score", "priority", "score"]))} />
                       <MetricRow label="Last Run Status" value={<StatusBadge value={lastRunStatus ?? "NOT_RUN"} />} />
                       <MetricRow label="Last Run At" value={formatLocalDateTime(lastRunAt)} />
                     </div>
@@ -2371,8 +2387,8 @@ function EngineCommandCenterPage() {
                         <strong>{formatEmpty(engineNameOf(row))}</strong>
                         <span className="engine-key-line">{formatEmpty(engineKeyOf(row))}</span>
                       </td>
-                      <td>{formatEmpty(engineField(row, ["priorityScore", "priority", "score", "priority_score"]))}</td>
-                      <td><StatusBadge value={engineField(row, ["riskLevel", "risk", "risk_level"]) ?? "LOW"} /></td>
+                      <td>{formatEmpty(engineField(row, ["priorityScore", "priority_score", "priority", "score"]))}</td>
+                      <td><StatusBadge value={engineField(row, ["riskLevel", "risk_level", "risk"]) ?? "LOW"} /></td>
                       <td>{formatEmpty(engineCategoryOf(row))}</td>
                       <td><StatusBadge value={engineLastRunField(row, ["lastRunStatus", "runStatus", "status", "last_run_status"]) ?? "NOT_RUN"} /></td>
                     </tr>
@@ -2404,14 +2420,14 @@ function EngineCommandCenterPage() {
                 </thead>
                 <tbody>
                   {logRows.map((row, index) => (
-                    <tr key={String(row.id ?? row.runId ?? `${row.engineKey ?? "run"}-${index}`)}>
-                      <td className="identity-cell">{formatEmpty(row.engineKey ?? row.engine_key)}</td>
-                      <td><StatusBadge value={row.runStatus ?? row.status ?? row.run_status} /></td>
-                      <td>{formatEmpty(row.runType ?? row.run_type)}</td>
-                      <td>{formatEmpty(row.actionsCreatedCount ?? row.actions_created_count ?? row.actionsCreated)}</td>
-                      <td>{formatEmpty(row.errorMessage ?? row.error_message)}</td>
-                      <td>{formatLocalDateTime(row.startedAt ?? row.started_at)}</td>
-                      <td>{formatLocalDateTime(row.finishedAt ?? row.finished_at)}</td>
+                    <tr key={String(runLogField(row, ["id", "runId", "run_id"]) ?? `${runLogField(row, ["engineKey", "engine_key"]) ?? "run"}-${index}`)}>
+                      <td className="identity-cell">{formatEmpty(runLogField(row, ["engineKey", "engine_key"]))}</td>
+                      <td><StatusBadge value={runLogField(row, ["runStatus", "run_status", "status"])} /></td>
+                      <td>{formatEmpty(runLogField(row, ["runType", "run_type"]))}</td>
+                      <td>{formatEmpty(runLogField(row, ["actionsCreatedCount", "actions_created_count", "actionsCreated"]))}</td>
+                      <td>{formatEmpty(runLogField(row, ["errorMessage", "error_message"]))}</td>
+                      <td>{formatLocalDateTime(runLogField(row, ["startedAt", "started_at"]))}</td>
+                      <td>{formatLocalDateTime(runLogField(row, ["finishedAt", "finished_at"]))}</td>
                     </tr>
                   ))}
                 </tbody>
