@@ -236,14 +236,20 @@ export type EngineRunLog = AnyRecord & {
 
 export type DailyOrchestratorStatus = AnyRecord & {
   mode?: string | null;
-  totalEngines?: number | string | null;
-  enabledEngines?: number | string | null;
-  pendingApprovals?: number | string | null;
-  last24hEngineRuns?: number | string | null;
-  last24hActionsCreated?: number | string | null;
-  productPassportReady?: boolean | string | number | null;
-  productEconomicsReady?: boolean | string | number | null;
-  approvalCenterReady?: boolean | string | number | null;
+  counts?: {
+    totalEngines?: number | string | null;
+    enabledEngines?: number | string | null;
+    pendingApprovals?: number | string | null;
+    last24hEngineRuns?: number | string | null;
+    last24hActionsCreated?: number | string | null;
+  } | null;
+  dataReadiness?: {
+    productPassportAvailable?: boolean | string | number | null;
+    productEconomicsAvailable?: boolean | string | number | null;
+    engineRegistryReady?: boolean | string | number | null;
+    engineRouterReady?: boolean | string | number | null;
+    approvalCenterReady?: boolean | string | number | null;
+  } | null;
   warnings?: unknown[] | null;
 };
 

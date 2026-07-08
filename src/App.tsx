@@ -611,19 +611,21 @@ function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const [approvalRefreshMessage, setApprovalRefreshMessage] = useState("");
 
   const statusRoot = dailyRoot(status.data);
+  const statusCounts = recordOf(statusRoot.counts);
+  const dataReadiness = recordOf(statusRoot.dataReadiness);
   const recentRuns = useMemo(() => dailyRunRowsOf(runs.data), [runs.data]);
-  const warnings = dailyStatusList(statusRoot, ["warnings", "warningMessages", "alerts"]);
+  const warnings = dailyStatusList(statusRoot, ["warnings"]);
   const mode = dailyField(statusRoot, ["mode", "executionMode", "runMode"]) ?? "SHADOW";
   const statusCards = [
     { label: "Mode", value: <StatusBadge value={mode} /> },
-    { label: "Total Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["totalEngines", "engineCount", "total_engines"]) },
-    { label: "Enabled Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["enabledEngines", "enabledCount", "enabled_engines"]) },
-    { label: "Pending Approvals", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["pendingApprovals", "pendingApprovalCount", "approvalPending", "approval_pending"]) },
-    { label: "Last 24h Engine Runs", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["last24hEngineRuns", "last24hRuns", "engineRunsLast24h", "runsLast24h"]) },
-    { label: "Last 24h Actions Created", value: status.loading && !status.data ? "..." : dailyNumber(statusRoot, ["last24hActionsCreated", "actionsCreatedLast24h", "actionsCreated24h"]) },
-    { label: "Product Passport Ready", value: <ReadinessBadge value={dailyField(statusRoot, ["productPassportReady", "passportReady", "product_passport_ready"])} /> },
-    { label: "Product Economics Ready", value: <ReadinessBadge value={dailyField(statusRoot, ["productEconomicsReady", "economicsReady", "product_economics_ready"])} /> },
-    { label: "Approval Center Ready", value: <ReadinessBadge value={dailyField(statusRoot, ["approvalCenterReady", "approvalsReady", "approval_center_ready"])} /> }
+    { label: "Total Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["totalEngines"]) },
+    { label: "Enabled Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["enabledEngines"]) },
+    { label: "Pending Approvals", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["pendingApprovals"]) },
+    { label: "Last 24h Engine Runs", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["last24hEngineRuns"]) },
+    { label: "Last 24h Actions Created", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["last24hActionsCreated"]) },
+    { label: "Product Passport Ready", value: <ReadinessBadge value={dailyField(dataReadiness, ["productPassportAvailable"])} /> },
+    { label: "Product Economics Ready", value: <ReadinessBadge value={dailyField(dataReadiness, ["productEconomicsAvailable"])} /> },
+    { label: "Approval Center Ready", value: <ReadinessBadge value={dailyField(dataReadiness, ["approvalCenterReady"])} /> }
   ];
 
   async function refreshApprovalSummaryIfAvailable() {
