@@ -1,3 +1,20 @@
+import type {
+  AiCostEstimate,
+  AiCostSummary,
+  AiGatewayStatus,
+  AiLedgerRow,
+  AlertEvent,
+  AlertSummary,
+  ApiRows,
+  DataFreshnessSummary,
+  Experiment,
+  ExperimentSummary,
+  ProductionHealthSummary,
+  SafetyAuditEvent,
+  SafetyControlSettingsPayload,
+  SafetyControlStatus
+} from "./types";
+
 export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "" : "https://api.leafydew.in");
 
 type Body = Record<string, unknown> | undefined;
@@ -43,6 +60,13 @@ export function postJson<T>(path: string, body?: Body): Promise<T> {
   });
 }
 
+export function patchJson<T>(path: string, body?: Body): Promise<T> {
+  return requestJson<T>(path, {
+    method: "PATCH",
+    body: JSON.stringify(body ?? {})
+  });
+}
+
 export function putJson<T>(path: string, body?: Body): Promise<T> {
   return requestJson<T>(path, {
     method: "PUT",
@@ -55,3 +79,52 @@ export function deleteJson<T>(path: string): Promise<T> {
     method: "DELETE"
   });
 }
+
+export const safetyControlApi = {
+  status: (sellerId: string) => getJson<SafetyControlStatus>(`/api/safety-control/status?sellerId=${sellerId}`),
+  initialize: (sellerId: string) => postJson<SafetyControlStatus>(`/api/safety-control/initialize?sellerId=${sellerId}`, {}),
+  saveSettings: (sellerId: string, body: SafetyControlSettingsPayload) =>
+    patchJson<SafetyControlStatus>(`/api/safety-control/settings?sellerId=${sellerId}`, body),
+  auditEvents: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<SafetyAuditEvent>>(`/api/safety-control/audit-events?sellerId=${sellerId}&limit=${limit}`)
+};
+
+export const alertCenterApi = {
+  summary: (sellerId: string) => getJson<AlertSummary>(`/api/alert-center/summary?sellerId=${sellerId}`),
+  events: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<AlertEvent>>(`/api/alert-center/events?sellerId=${sellerId}&limit=${limit}`),
+  seedRules: (sellerId: string) => postJson(`/api/alert-center/seed-rules?sellerId=${sellerId}`, {}),
+  generate: (sellerId: string) => postJson(`/api/alert-center/generate?sellerId=${sellerId}`, {}),
+  acknowledge: (id: string) => postJson(`/api/alert-center/events/${encodeURIComponent(id)}/acknowledge`, {}),
+  resolve: (id: string) => postJson(`/api/alert-center/events/${encodeURIComponent(id)}/resolve`, {})
+};
+
+export const experimentsApi = {
+  summary: (sellerId: string) => getJson<ExperimentSummary>(`/api/experiments/summary?sellerId=${sellerId}`),
+  list: (sellerId: string, limit = 100) => getJson<ApiRows<Experiment>>(`/api/experiments?sellerId=${sellerId}&limit=${limit}`),
+  create: (body: Record<string, unknown>) => postJson<Experiment>("/api/experiments", body),
+  createFromAction: (actionId: string) => postJson<Experiment>(`/api/experiments/from-action/${encodeURIComponent(actionId)}`, {}),
+  start: (id: string) => postJson(`/api/experiments/${encodeURIComponent(id)}/start`, {}),
+  recordCheckpoint: (id: string, body: Record<string, unknown>) =>
+    postJson(`/api/experiments/${encodeURIComponent(id)}/record-checkpoint`, body),
+  complete: (id: string, body: Record<string, unknown>) => postJson(`/api/experiments/${encodeURIComponent(id)}/complete`, body),
+  cancel: (id: string) => postJson(`/api/experiments/${encodeURIComponent(id)}/cancel`, {})
+};
+
+export const dataFreshnessApi = {
+  summary: (sellerId: string) => getJson<DataFreshnessSummary>(`/api/data-freshness/summary?sellerId=${sellerId}`),
+  check: (sellerId: string) => postJson<DataFreshnessSummary>(`/api/data-freshness/check?sellerId=${sellerId}`, {}),
+  mark: (body: Record<string, unknown>) => postJson("/api/data-freshness/mark", body)
+};
+
+export const aiGatewayApi = {
+  status: (sellerId: string) => getJson<AiGatewayStatus>(`/api/ai-gateway/status?sellerId=${sellerId}`),
+  costSummary: (sellerId: string) => getJson<AiCostSummary>(`/api/ai-gateway/cost-summary?sellerId=${sellerId}`),
+  ledger: (sellerId: string, limit = 100) => getJson<ApiRows<AiLedgerRow>>(`/api/ai-gateway/ledger?sellerId=${sellerId}&limit=${limit}`),
+  estimate: (body: Record<string, unknown>) => postJson<AiCostEstimate>("/api/ai-gateway/estimate", body),
+  recordBlocked: (body: Record<string, unknown>) => postJson("/api/ai-gateway/record-blocked", body)
+};
+
+export const productionHealthApi = {
+  summary: (sellerId: string) => getJson<ProductionHealthSummary>(`/api/production-health/summary?sellerId=${sellerId}`)
+};

@@ -449,6 +449,27 @@
   overflow-wrap: anywhere;
 }
 
+.json-snippet {
+  display: block;
+  max-width: 420px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  border: 1px solid #e1e9df;
+  border-radius: 10px;
+  background: #f8fbf6;
+  color: #26352d;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.compact-form {
+  margin-top: 12px;
+  border-top: 1px solid #edf2ea;
+  padding-top: 12px;
+}
+
 .filters-grid {
   margin-bottom: 14px;
   align-items: end;

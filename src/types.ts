@@ -181,15 +181,181 @@ export type ProductEconomics = {
 
 export type Experiment = {
   id: string;
+  name?: string | null;
   experimentName?: string;
   experimentType?: string;
   status?: string;
   priority?: string;
+  sku?: string | null;
+  asin?: string | null;
+  description?: string | null;
   hypothesis?: string | null;
+  resultStatus?: string | null;
+  resultSummary?: string | null;
   expectedResult?: string | null;
   successMetric?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
   startDate?: string | null;
   endDate?: string | null;
+};
+
+export type SafetyControlSettingsPayload = {
+  maxDailyEngineRuns?: number;
+  maxDailyExecutionAttempts?: number;
+  maxDailyAiCost?: number;
+  safetyNotes?: string;
+};
+
+export type SafetyControlStatus = AnyRecord & {
+  settings?: (AnyRecord & {
+    globalMode?: string | null;
+    mode?: string | null;
+    liveExecutionEnabled?: boolean | string | number | null;
+    ppcLiveExecution?: boolean | string | number | null;
+    listingLiveExecution?: boolean | string | number | null;
+    imageLiveExecution?: boolean | string | number | null;
+    aplusLiveExecution?: boolean | string | number | null;
+    socialLiveExecution?: boolean | string | number | null;
+    aiCallsEnabled?: boolean | string | number | null;
+    approvalRequired?: boolean | string | number | null;
+    founderApprovalRequired?: boolean | string | number | null;
+    maxDailyEngineRuns?: number | string | null;
+    maxDailyExecutionAttempts?: number | string | null;
+    maxDailyAiCost?: number | string | null;
+    safetyNotes?: string | null;
+  }) | null;
+  initialized?: boolean | string | number | null;
+  status?: string | null;
+};
+
+export type SafetyAuditEvent = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  eventType?: string | null;
+  actor?: string | null;
+  note?: string | null;
+  beforeState?: unknown;
+  afterState?: unknown;
+};
+
+export type AlertSummary = AnyRecord & {
+  openAlerts?: number | string | null;
+  openCount?: number | string | null;
+  highAlerts?: number | string | null;
+  criticalAlerts?: number | string | null;
+  acknowledgedAlerts?: number | string | null;
+  resolvedAlerts?: number | string | null;
+};
+
+export type AlertEvent = AnyRecord & {
+  id: string;
+  createdAt?: string | null;
+  severity?: string | null;
+  category?: string | null;
+  title?: string | null;
+  message?: string | null;
+  entityType?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  status?: string | null;
+  actionId?: string | null;
+};
+
+export type ExperimentSummary = AnyRecord & {
+  totalExperiments?: number | string | null;
+  draftExperiments?: number | string | null;
+  runningExperiments?: number | string | null;
+  completedExperiments?: number | string | null;
+  cancelledExperiments?: number | string | null;
+  won?: number | string | null;
+  lost?: number | string | null;
+  inconclusive?: number | string | null;
+};
+
+export type DataFreshnessRow = AnyRecord & {
+  id?: string | null;
+  dataSource?: string | null;
+  status?: string | null;
+  lastSuccessAt?: string | null;
+  lastAttemptAt?: string | null;
+  freshnessMinutes?: number | string | null;
+  staleAfterMinutes?: number | string | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+};
+
+export type DataFreshnessSummary = AnyRecord & {
+  totalSources?: number | string | null;
+  freshSources?: number | string | null;
+  staleSources?: number | string | null;
+  unknownSources?: number | string | null;
+  errorSources?: number | string | null;
+  rows?: DataFreshnessRow[] | null;
+  warnings?: unknown[] | null;
+};
+
+export type AiGatewayStatus = AnyRecord & {
+  aiCallsEnabled?: boolean | string | number | null;
+  dailyBudget?: number | string | null;
+  monthlyBudget?: number | string | null;
+  requestsToday?: number | string | null;
+  requestsThisMonth?: number | string | null;
+};
+
+export type AiCostSummary = AnyRecord & {
+  dailyCost?: number | string | null;
+  monthlyCost?: number | string | null;
+  requestsToday?: number | string | null;
+  requestsThisMonth?: number | string | null;
+};
+
+export type AiCostEstimate = AnyRecord & {
+  estimatedCost?: number | string | null;
+  status?: string | null;
+  blockedReason?: string | null;
+};
+
+export type AiLedgerRow = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  moduleName?: string | null;
+  purpose?: string | null;
+  provider?: string | null;
+  modelName?: string | null;
+  inputTokens?: number | string | null;
+  outputTokens?: number | string | null;
+  estimatedCost?: number | string | null;
+  status?: string | null;
+  blockedReason?: string | null;
+};
+
+export type ProductionHealthModule = AnyRecord & {
+  key?: string | null;
+  name?: string | null;
+  status?: string | null;
+  message?: string | null;
+  critical?: boolean | string | number | null;
+  counts?: AnyRecord | null;
+  lastCheckedAt?: string | null;
+};
+
+export type ProductionHealthSummary = AnyRecord & {
+  overallStatus?: string | null;
+  mode?: string | null;
+  shadowMode?: boolean | string | number | null;
+  externalExecution?: string | boolean | number | null;
+  liveExecutionEnabled?: boolean | string | number | null;
+  aiCallsEnabled?: boolean | string | number | null;
+  blockersCount?: number | string | null;
+  warningsCount?: number | string | null;
+  modulesPassing?: number | string | null;
+  modulesWarning?: number | string | null;
+  modulesFailing?: number | string | null;
+  modules?: ProductionHealthModule[] | null;
+  blockers?: unknown[] | null;
+  warnings?: unknown[] | null;
+  nextChecks?: unknown[] | null;
 };
 
 export type ActivityLog = {

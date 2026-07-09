@@ -1,31 +1,55 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
-import { deleteJson, getJson, postJson, putJson } from "./api";
+import {
+  aiGatewayApi,
+  alertCenterApi,
+  dataFreshnessApi,
+  deleteJson,
+  experimentsApi,
+  getJson,
+  postJson,
+  productionHealthApi,
+  putJson,
+  safetyControlApi
+} from "./api";
 import type {
   ActionLedgerRow,
   ActionLedgerSummary,
   ActivityLog,
   AnyRecord,
   ApiRows,
+  AiCostEstimate,
+  AiCostSummary,
+  AiGatewayStatus,
+  AiLedgerRow,
+  AlertEvent,
+  AlertSummary,
   CostCompletionQueueItem,
   CreativeRecommendation,
   CreativeRecommendationSummary,
   DailyOrchestratorRun,
   DailyOrchestratorStatus,
+  DataFreshnessRow,
+  DataFreshnessSummary,
   EngineRegistryItem,
   EngineRunLog,
   ExecutionAttempt,
   ExecutionGatewayStatus,
   Experiment,
+  ExperimentSummary,
   LearningEngineSummary,
   LearningEvent,
   LearningSummary,
   ListingDraft,
   ListingDraftSummary,
+  ProductionHealthModule,
+  ProductionHealthSummary,
   ProductEconomics,
   ProductPassport,
   Recommendation,
+  SafetyAuditEvent,
+  SafetyControlStatus,
   TodayCommandSummary
 } from "./types";
 
@@ -42,8 +66,13 @@ const tabs = [
   "Execution Gateway",
   "Listing Drafts",
   "Image + A+",
-  "CEO Report",
+  "Safety Control",
+  "Alert Center",
   "Experiments",
+  "Data Freshness",
+  "AI Gateway",
+  "Production Health",
+  "CEO Report",
   "Learning",
   "Settings",
   "Activity Logs"
@@ -166,11 +195,11 @@ function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: str
 
 function StatusBadge({ value }: { value: unknown }) {
   const label = formatEmpty(value).toUpperCase();
-  const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE", "LOW"].includes(label)
+  const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "RUNNING", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE", "LOW", "SAFE", "DISABLED", "REQUIRED", "FRESH", "WON"].includes(label)
     ? "good"
-    : ["WATCH", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL", "INCOMPLETE", "NEEDS_INPUT", "SUBCATEGORY MISSING", "MEDIUM", "APPROVAL REQUIRED", "APPROVAL_REQUIRED"].includes(label)
+    : ["WATCH", "WARN", "STALE", "UNKNOWN", "NEEDS_FIX", "MONITORING", "WARNING", "NEW", "DRAFT", "DRAFTED", "NEEDS_COST_DATA", "MISSING_COST_DATA", "PARTIAL", "INCOMPLETE", "NEEDS_INPUT", "SUBCATEGORY MISSING", "MEDIUM", "INCONCLUSIVE", "APPROVAL REQUIRED", "APPROVAL_REQUIRED"].includes(label)
       ? "watch"
-      : ["RISK", "ERROR", "FAILED", "REJECTED", "POOR", "BLOCKED", "HIGH", "VERY_HIGH", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(label)
+      : ["RISK", "ERROR", "FAIL", "FAILED", "REJECTED", "POOR", "BLOCKED", "HIGH", "CRITICAL", "VERY_HIGH", "LOST", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(label)
         ? "risk"
         : "neutral";
   return <Badge tone={tone}>{label}</Badge>;
@@ -362,8 +391,13 @@ function App() {
           {activeTab === "Execution Gateway" && <ExecutionGatewayPage />}
           {activeTab === "Listing Drafts" && <ListingDraftsPage setActiveTab={setActiveTab} />}
           {activeTab === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setActiveTab} />}
-          {activeTab === "CEO Report" && <CeoReportPage />}
+          {activeTab === "Safety Control" && <SafetyControlPage />}
+          {activeTab === "Alert Center" && <AlertCenterPage setActiveTab={setActiveTab} />}
           {activeTab === "Experiments" && <ExperimentsPage />}
+          {activeTab === "Data Freshness" && <DataFreshnessPage />}
+          {activeTab === "AI Gateway" && <AiGatewayPage />}
+          {activeTab === "Production Health" && <ProductionHealthPage />}
+          {activeTab === "CEO Report" && <CeoReportPage />}
           {activeTab === "Learning" && <LearningPage />}
           {activeTab === "Settings" && <SettingsPage />}
           {activeTab === "Activity Logs" && <ActivityLogsPage />}
@@ -377,9 +411,27 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
   const data = todayCommandSummaryOf(today.data);
   const systemStatus = recordOf(data.systemStatus ?? data.systemReadiness ?? data.readiness);
-  const topRisks = recordsOf(data.topRisks ?? data.risks).slice(0, 6);
+  const productionReadiness = recordOf(data.productionReadiness ?? data.productionHealth ?? data.readinessStatus ?? data.productionStatus);
+  const highAlerts = todayCommandNumber(data, ["highAlerts", "highAlertCount", "criticalAlerts", "criticalAlertCount"]);
+  const staleSources = todayCommandNumber(data, ["staleDataSources", "staleSources", "staleSourceCount"]);
+  const pendingApprovals = todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]);
+  const highRiskApprovals = todayCommandNumber(data, ["highRiskApprovals", "highRiskCount", "highRiskApprovalActions"]);
+  const productionRiskHints = [
+    highAlerts > 0 ? { title: "High severity open alerts", riskLevel: "HIGH", message: `${highAlerts} high or critical alerts need review.` } : null,
+    staleSources > 0 ? { title: "Stale critical data", riskLevel: "WATCH", message: `${staleSources} data sources are stale.` } : null,
+    pendingApprovals > 10 ? { title: "High pending approvals", riskLevel: "WATCH", message: `${pendingApprovals} approval actions are waiting for founder review.` } : null,
+    highRiskApprovals > 0 ? { title: "High risk approval actions", riskLevel: "HIGH", message: `${highRiskApprovals} high risk actions require careful review.` } : null
+  ].filter(Boolean) as AnyRecord[];
+  const topRisks = [...recordsOf(data.topRisks ?? data.risks), ...productionRiskHints].slice(0, 6);
   const priorities = recordsOf(data.todayPriorities ?? data.priorities).slice(0, 8);
-  const nextBestActions = dailyList(data.nextBestActions ?? data.actions).slice(0, 8);
+  const defaultNextBestActions = [
+    "Review open high severity alerts",
+    "Check stale data sources",
+    "Review running experiments",
+    "Keep live execution blocked until QA passes",
+    "Review AI gateway budget before enabling AI calls"
+  ];
+  const nextBestActions = [...dailyList(data.nextBestActions ?? data.actions), ...defaultNextBestActions].slice(0, 8);
   const statusCards = [
     { label: "Pending Approvals", keys: ["pendingApprovals", "pendingApprovalCount", "pendingCount"] },
     { label: "Approved Actions", keys: ["approvedActions", "approvedActionCount", "approvedCount"] },
@@ -396,6 +448,15 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "Listing Drafts", keys: ["listingDrafts", "totalListingDrafts"] },
     { label: "Creative Recommendations", keys: ["creativeRecommendations", "totalCreativeRecommendations"] }
   ];
+  const productionStatusCards = [
+    { label: "Open Alerts", keys: ["openAlerts", "openAlertCount", "openCount"] },
+    { label: "High Alerts", keys: ["highAlerts", "highAlertCount", "criticalAlerts", "criticalAlertCount"] },
+    { label: "Running Experiments", keys: ["runningExperiments", "activeExperiments", "runningCount"] },
+    { label: "Completed Experiments", keys: ["completedExperiments", "completedExperimentCount", "completedCount"] },
+    { label: "Stale Data Sources", keys: ["staleDataSources", "staleSources", "staleSourceCount"] },
+    { label: "AI Cost Today", keys: ["aiCostToday", "dailyAiCost", "dailyCost"] },
+    { label: "AI Cost Month", keys: ["aiCostMonth", "monthlyAiCost", "monthlyCost"] }
+  ];
   const readinessItems = [
     { label: "Action Ledger", keys: ["actionLedger", "actionLedgerReady"] },
     { label: "Approval Center", keys: ["approvalCenter", "approvalCenterReady"] },
@@ -405,7 +466,13 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "Product Passport", keys: ["productPassport", "productPassportReady"] },
     { label: "Product Economics", keys: ["productEconomics", "productEconomicsReady"] },
     { label: "Learning Loop", keys: ["learningLoop", "learningLoopReady"] },
-    { label: "Execution Gateway", keys: ["executionGateway", "executionGatewayReady"] }
+    { label: "Execution Gateway", keys: ["executionGateway", "executionGatewayReady"] },
+    { label: "Safety Control", keys: ["safetyControl", "safetyControlReady"] },
+    { label: "Alert Center", keys: ["alertCenter", "alertCenterReady"] },
+    { label: "Experiments", keys: ["experiments", "experimentsReady"] },
+    { label: "Data Freshness", keys: ["dataFreshness", "dataFreshnessReady"] },
+    { label: "AI Gateway", keys: ["aiGateway", "aiGatewayReady"] },
+    { label: "Production Health", keys: ["productionHealth", "productionHealthReady"] }
   ];
 
   return (
@@ -415,6 +482,21 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
         subtitle="Founder command center for today's risks, approvals, engines, learning, and shadow execution."
       />
       <SafetyBanner text="Shadow mode active. No Amazon, Ads, Listing, Image, A+, Store, or Social action is executed." />
+      <div className="summary-strip command-summary">
+        {productionStatusCards.map((card) => (
+          <MetricTile key={card.label} label={card.label} value={todayCommandNumber(data, card.keys)} />
+        ))}
+      </div>
+      <Card title="Production Readiness Quick Actions">
+        <div className="quick-link-grid command-quick-links">
+          <button type="button" onClick={() => setActiveTab("Safety Control")}>Open Safety Control</button>
+          <button type="button" onClick={() => setActiveTab("Alert Center")}>Open Alert Center</button>
+          <button type="button" onClick={() => setActiveTab("Experiments")}>Open Experiments</button>
+          <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
+          <button type="button" onClick={() => setActiveTab("AI Gateway")}>Open AI Gateway</button>
+          <button type="button" onClick={() => setActiveTab("Production Health")}>Open Production Health</button>
+        </div>
+      </Card>
       {today.loading ? <LoadingBlock /> : today.error ? <ErrorBlock text="Could not load today command summary." /> : (
         <div className="stack">
           <div className="summary-strip command-summary">
@@ -428,7 +510,7 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
               {readinessItems.map((item) => (
                 <div className="readiness-item" key={item.label}>
                   <span>{item.label}</span>
-                  <SystemReadinessBadge value={readFirst(systemStatus, item.keys)} />
+                  <SystemReadinessBadge value={readFirst(systemStatus, item.keys) ?? readFirst(productionReadiness, item.keys)} />
                 </div>
               ))}
             </div>
@@ -504,6 +586,12 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
               <button type="button" onClick={() => setActiveTab("Listing Drafts")}>Open Listing Drafts</button>
               <button type="button" onClick={() => setActiveTab("Image + A+")}>Open Creative Recommendations</button>
               <button type="button" onClick={() => setActiveTab("Product Passport")}>Open Product Passport Cost Queue</button>
+              <button type="button" onClick={() => setActiveTab("Safety Control")}>Open Safety Control</button>
+              <button type="button" onClick={() => setActiveTab("Alert Center")}>Open Alert Center</button>
+              <button type="button" onClick={() => setActiveTab("Experiments")}>Open Experiments</button>
+              <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
+              <button type="button" onClick={() => setActiveTab("AI Gateway")}>Open AI Gateway</button>
+              <button type="button" onClick={() => setActiveTab("Production Health")}>Open Production Health</button>
               <button type="button" onClick={() => setActiveTab("CEO Report")}>Open CEO Report</button>
             </div>
           </Card>
@@ -529,7 +617,17 @@ function todayCommandNumber(data: AnyRecord, keys: string[]): number {
     recordOf(data.learningCounts),
     recordOf(data.executionCounts),
     recordOf(data.listingDraftSummary),
-    recordOf(data.creativeRecommendationSummary)
+    recordOf(data.creativeRecommendationSummary),
+    recordOf(data.alertSummary),
+    recordOf(data.alertCenter),
+    recordOf(data.experimentSummary),
+    recordOf(data.experiments),
+    recordOf(data.dataFreshnessSummary),
+    recordOf(data.dataFreshness),
+    recordOf(data.aiCostSummary),
+    recordOf(data.aiGateway),
+    recordOf(data.productionHealthSummary),
+    recordOf(data.productionReadiness)
   ];
   for (const source of countSources) {
     const value = readFirst(source, keys);
@@ -2438,7 +2536,7 @@ function engineSortLabel(sortMode: EngineSortMode): string {
   return "Priority First";
 }
 
-function summaryNumber(source: unknown, keys: string[], fallback: number): number {
+function summaryNumber(source: unknown, keys: string[], fallback = 0): number {
   const value = readFirst(source, keys);
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -4038,6 +4136,314 @@ function ApprovalCenterPage() {
   );
 }
 
+function jsonText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "UNKNOWN";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function JsonSnippet({ value }: { value: unknown }) {
+  return <code className="json-snippet">{jsonText(value)}</code>;
+}
+
+function safeBooleanLabel(value: unknown, trueLabel = "WARNING", falseLabel = "SAFE") {
+  return readBoolean(value) ? trueLabel : falseLabel;
+}
+
+function SafetyControlPage() {
+  const status = useApi<SafetyControlStatus>(() => safetyControlApi.status(SELLER_ID));
+  const audits = useApi<ApiRows<SafetyAuditEvent>>(() => safetyControlApi.auditEvents(SELLER_ID));
+  const data = safetyControlStatusOf(status.data);
+  const settingsValue = readFirst(data, ["settings", "safetySettings", "controlSettings"]);
+  const settings = recordOf(settingsValue);
+  const hasSettings = settingsValue !== null && settingsValue !== undefined && Object.keys(settings).length > 0;
+  const auditRows = safetyAuditRowsOf(audits.data);
+  const [form, setForm] = useState({
+    maxDailyEngineRuns: "3",
+    maxDailyExecutionAttempts: "10",
+    maxDailyAiCost: "0",
+    safetyNotes: ""
+  });
+  const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
+
+  useEffect(() => {
+    if (!hasSettings) return;
+    setForm({
+      maxDailyEngineRuns: String(readFirst(settings, ["maxDailyEngineRuns"]) ?? 3),
+      maxDailyExecutionAttempts: String(readFirst(settings, ["maxDailyExecutionAttempts"]) ?? 10),
+      maxDailyAiCost: String(readFirst(settings, ["maxDailyAiCost"]) ?? 0),
+      safetyNotes: String(readFirst(settings, ["safetyNotes", "notes"]) ?? "")
+    });
+  }, [hasSettings, status.data]);
+
+  async function initialize() {
+    setActionState({ loading: true, message: "", error: "" });
+    try {
+      await safetyControlApi.initialize(SELLER_ID);
+      setActionState({ loading: false, message: "Safety Control initialized.", error: "" });
+      status.reload();
+      audits.reload();
+    } catch {
+      setActionState({ loading: false, message: "", error: "Could not initialize safety control" });
+    }
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setActionState({ loading: true, message: "", error: "" });
+    try {
+      await safetyControlApi.saveSettings(SELLER_ID, {
+        maxDailyEngineRuns: asInputNumber(form.maxDailyEngineRuns),
+        maxDailyExecutionAttempts: asInputNumber(form.maxDailyExecutionAttempts),
+        maxDailyAiCost: asInputNumber(form.maxDailyAiCost),
+        safetyNotes: form.safetyNotes
+      });
+      setActionState({ loading: false, message: "Safety settings saved.", error: "" });
+      status.reload();
+      audits.reload();
+    } catch {
+      setActionState({ loading: false, message: "", error: "Could not save safety settings" });
+    }
+  }
+
+  const statusCards = [
+    { label: "Global Mode", value: <StatusBadge value={readFirst(settings, ["globalMode", "mode"]) ?? "SHADOW"} /> },
+    { label: "Live Execution Enabled", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["liveExecutionEnabled"]), "WARNING", "SAFE")} /> },
+    { label: "PPC Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["ppcLiveExecution", "ppcLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
+    { label: "Listing Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["listingLiveExecution", "listingLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
+    { label: "Image Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["imageLiveExecution", "imageLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
+    { label: "A+ Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["aplusLiveExecution", "aPlusLiveExecution", "aplusLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
+    { label: "Social Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["socialLiveExecution", "socialLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
+    { label: "AI Calls Enabled", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["aiCallsEnabled"]), "WARNING", "DISABLED")} /> },
+    { label: "Approval Required", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["approvalRequired"]), "REQUIRED", "WARNING")} /> },
+    { label: "Founder Approval Required", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["founderApprovalRequired"]), "REQUIRED", "WARNING")} /> },
+    { label: "Max Daily Engine Runs", value: formatEmpty(readFirst(settings, ["maxDailyEngineRuns"])) },
+    { label: "Max Daily Execution Attempts", value: formatEmpty(readFirst(settings, ["maxDailyExecutionAttempts"])) },
+    { label: "Max Daily AI Cost", value: formatMoney(readFirst(settings, ["maxDailyAiCost"])) }
+  ];
+
+  return (
+    <div className="page">
+      <PageHeader title="Safety Control Center" subtitle="Control automation mode, approval rules, AI usage, and execution safety." />
+      <SafetyBanner text="Live execution is blocked in V1. Shadow mode and founder approval remain required." />
+      {status.loading || status.error ? (
+        <div className="stack">
+          <Card title="Locked Execution Controls">
+            <div className="readiness-grid">
+              {["Marketplace live execution", "Ads live execution", "Listing updates", "Image uploads", "A+ uploads", "External notifications", "AI calls"].map((label) => (
+                <div className="readiness-item" key={label}>
+                  <span>{label}</span>
+                  <Badge tone="good">Locked in V1</Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card title="Edit Safe Settings">
+            <form className="form-grid" onSubmit={save}>
+              <TextInput label="Max Daily Engine Runs" type="number" value={form.maxDailyEngineRuns} onChange={(value) => setForm({ ...form, maxDailyEngineRuns: value })} />
+              <TextInput label="Max Daily Execution Attempts" type="number" value={form.maxDailyExecutionAttempts} onChange={(value) => setForm({ ...form, maxDailyExecutionAttempts: value })} />
+              <TextInput label="Max Daily AI Cost" type="number" value={form.maxDailyAiCost} onChange={(value) => setForm({ ...form, maxDailyAiCost: value })} />
+              <TextArea label="Safety Notes" value={form.safetyNotes} onChange={(value) => setForm({ ...form, safetyNotes: value })} />
+              <div className="button-row"><button type="submit" disabled>Save Safety Settings</button></div>
+            </form>
+          </Card>
+        </div>
+      ) : null}
+      {status.loading ? <LoadingBlock text="Loading safety control..." /> : status.error ? <ErrorBlock text="Could not load safety control" /> : (
+        <div className="stack">
+          {!hasSettings ? (
+            <Card title="Initialize Safety Control" action={<button type="button" onClick={initialize} disabled={actionState.loading}>Initialize Safety Control</button>}>
+              <p className="section-note">Safety Control settings are not initialized yet. V1 remains blocked until founder-safe defaults are created.</p>
+            </Card>
+          ) : null}
+          <div className="summary-strip command-summary">
+            {statusCards.map((card) => <MetricTile key={card.label} label={card.label} value={card.value} />)}
+          </div>
+          <Card title="Locked Execution Controls">
+            <div className="readiness-grid">
+              {["Marketplace live execution", "Ads live execution", "Listing updates", "Image uploads", "A+ uploads", "External notifications", "AI calls"].map((label) => (
+                <div className="readiness-item" key={label}>
+                  <span>{label}</span>
+                  <Badge tone="good">Locked in V1</Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card title="Edit Safe Settings">
+            <form className="form-grid" onSubmit={save}>
+              <TextInput label="Max Daily Engine Runs" type="number" value={form.maxDailyEngineRuns} onChange={(value) => setForm({ ...form, maxDailyEngineRuns: value })} />
+              <TextInput label="Max Daily Execution Attempts" type="number" value={form.maxDailyExecutionAttempts} onChange={(value) => setForm({ ...form, maxDailyExecutionAttempts: value })} />
+              <TextInput label="Max Daily AI Cost" type="number" value={form.maxDailyAiCost} onChange={(value) => setForm({ ...form, maxDailyAiCost: value })} />
+              <TextArea label="Safety Notes" value={form.safetyNotes} onChange={(value) => setForm({ ...form, safetyNotes: value })} />
+              <div className="button-row">
+                <button type="submit" disabled={actionState.loading || !hasSettings}>Save Safety Settings</button>
+                {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
+                {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
+              </div>
+            </form>
+          </Card>
+          <Card title="Audit Events">
+            {audits.loading ? <LoadingBlock text="Loading safety audit events..." /> : audits.error ? <ErrorBlock text="Could not load safety audit events." /> : auditRows.length === 0 ? <EmptyBlock text="No safety audit events yet." /> : (
+              <div className="table-wrap command-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Created At</th>
+                      <th>Event Type</th>
+                      <th>Actor</th>
+                      <th>Note</th>
+                      <th>Before State</th>
+                      <th>After State</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditRows.map((row, index) => (
+                      <tr key={String(row.id ?? index)}>
+                        <td>{formatLocalDateTime(row.createdAt)}</td>
+                        <td>{formatEmpty(row.eventType)}</td>
+                        <td>{formatEmpty(row.actor)}</td>
+                        <td className="wrap-cell">{formatEmpty(row.note)}</td>
+                        <td><JsonSnippet value={row.beforeState} /></td>
+                        <td><JsonSnippet value={row.afterState} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlertCenterPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+  const summary = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
+  const events = useApi<ApiRows<AlertEvent>>(() => alertCenterApi.events(SELLER_ID));
+  const data = alertSummaryOf(summary.data);
+  const rows = alertRowsOf(events.data);
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [severityFilter, setSeverityFilter] = useState("ALL");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [query, setQuery] = useState("");
+  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
+
+  const filteredRows = rows.filter((row) => {
+    const matchesStatus = statusFilter === "ALL" || normalizeState(row.status) === statusFilter;
+    const matchesSeverity = severityFilter === "ALL" || normalizeState(row.severity) === severityFilter;
+    const matchesCategory = categoryFilter === "ALL" || normalizeState(row.category) === categoryFilter;
+    const haystack = `${row.title ?? ""} ${row.message ?? ""} ${row.sku ?? ""} ${row.asin ?? ""}`.toLowerCase();
+    return matchesStatus && matchesSeverity && matchesCategory && haystack.includes(query.trim().toLowerCase());
+  });
+
+  async function runAction(id: string, action: "acknowledge" | "resolve") {
+    if (action === "resolve" && !window.confirm("Resolve this internal alert?")) return;
+    setActionState({ id, message: "", error: "" });
+    try {
+      if (action === "acknowledge") await alertCenterApi.acknowledge(id);
+      else await alertCenterApi.resolve(id);
+      setActionState({ id: "", message: `Alert ${action}d.`, error: "" });
+      summary.reload();
+      events.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: `Could not ${action} alert.` });
+    }
+  }
+
+  async function seedRules() {
+    setActionState({ id: "seed", message: "", error: "" });
+    try {
+      await alertCenterApi.seedRules(SELLER_ID);
+      setActionState({ id: "", message: "Default alert rules seeded.", error: "" });
+      summary.reload();
+      events.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not seed default alert rules." });
+    }
+  }
+
+  async function generateAlerts() {
+    setActionState({ id: "generate", message: "", error: "" });
+    try {
+      await alertCenterApi.generate(SELLER_ID);
+      setActionState({ id: "", message: "Alerts generated.", error: "" });
+      summary.reload();
+      events.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not generate alerts." });
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Alert Center" subtitle="Internal founder alerts for risks, stale data, approvals, and blocked execution." />
+      <SafetyBanner text="Alerts are internal only. No email, WhatsApp, Slack, or external notification is sent." />
+      <div className="stack">
+        <div className="button-row">
+          <button type="button" onClick={seedRules} disabled={actionState.id !== ""}>Seed Default Rules</button>
+          <button type="button" onClick={generateAlerts} disabled={actionState.id !== ""}>Generate Alerts</button>
+          <button type="button" className="secondary" onClick={() => { summary.reload(); events.reload(); }}>Refresh Alerts</button>
+          {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
+          {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
+        </div>
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load alert summary." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="Open Alerts" value={summaryNumber(data, ["openAlerts", "openCount"])} />
+            <MetricTile label="High Alerts" value={summaryNumber(data, ["highAlerts", "highCount"])} />
+            <MetricTile label="Critical Alerts" value={summaryNumber(data, ["criticalAlerts", "criticalCount"])} />
+            <MetricTile label="Acknowledged Alerts" value={summaryNumber(data, ["acknowledgedAlerts", "acknowledgedCount"])} />
+            <MetricTile label="Resolved Alerts" value={summaryNumber(data, ["resolvedAlerts", "resolvedCount"])} />
+          </div>
+        )}
+        <Card title="Alert Filters">
+          <div className="form-grid filters-grid">
+            <SelectField label="Status" value={statusFilter} options={["ALL", ...uniqueTextValues(rows.map((row) => normalizeState(row.status)))]} onChange={setStatusFilter} />
+            <SelectField label="Severity" value={severityFilter} options={["ALL", ...uniqueTextValues(rows.map((row) => normalizeState(row.severity)))]} onChange={setSeverityFilter} />
+            <SelectField label="Category" value={categoryFilter} options={["ALL", ...uniqueTextValues(rows.map((row) => normalizeState(row.category)))]} onChange={setCategoryFilter} />
+            <TextInput label="Search Title, Message, SKU, ASIN" value={query} onChange={setQuery} />
+          </div>
+        </Card>
+        <Card title="Alerts">
+          {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock text="Could not load alert events." /> : filteredRows.length === 0 ? <EmptyBlock text="No founder alerts match these filters." /> : (
+            <div className="card-list command-card-list">
+              {filteredRows.map((row, index) => (
+                <article className="item-card command-item-card" key={String(row.id ?? index)}>
+                  <div className="item-top">
+                    <strong>{formatEmpty(row.title ?? "Alert")}</strong>
+                    <StatusBadge value={row.severity ?? "LOW"} />
+                  </div>
+                  <div className="badge-row">
+                    <StatusBadge value={row.category ?? "GENERAL"} />
+                    <StatusBadge value={row.status ?? "OPEN"} />
+                  </div>
+                  <p className="long-text">{formatEmpty(row.message)}</p>
+                  <div className="detail-grid">
+                    <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
+                    <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
+                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
+                    <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
+                  </div>
+                  <div className="button-row compact">
+                    {normalizeState(row.status) !== "RESOLVED" ? <button type="button" onClick={() => runAction(row.id, "acknowledge")} disabled={actionState.id === row.id}>Acknowledge</button> : null}
+                    {normalizeState(row.status) !== "RESOLVED" ? <button type="button" className="secondary" onClick={() => runAction(row.id, "resolve")} disabled={actionState.id === row.id}>Resolve</button> : null}
+                    {row.actionId ? <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function CeoReportPage() {
   const report = useApi<AnyRecord>(() => getJson(`/api/ceo-report/daily?sellerId=${SELLER_ID}&days=30`));
   const data = report.data ?? {};
@@ -4063,91 +4469,469 @@ function CeoReportPage() {
 }
 
 function ExperimentsPage() {
-  const experiments = useApi<ApiRows<Experiment>>(() => getJson(`/api/experiments?sellerId=${SELLER_ID}`));
-  const rows = rowsOf<Experiment>(experiments.data);
+  const summary = useApi<ExperimentSummary>(() => experimentsApi.summary(SELLER_ID));
+  const experiments = useApi<ApiRows<Experiment>>(() => experimentsApi.list(SELLER_ID));
+  const data = experimentSummaryOf(summary.data);
+  const rows = experimentRowsOf(experiments.data);
   const [form, setForm] = useState({
-    experimentName: "",
+    name: "",
+    description: "",
     experimentType: "PPC_KEYWORD_TEST",
-    campaignId: "",
-    adGroupId: "",
-    recommendationId: "",
+    sku: "",
+    asin: "",
     hypothesis: "",
-    expectedResult: "",
-    successMetric: "",
-    status: "PLANNED",
     priority: "MEDIUM"
   });
-
-  const counts = useMemo(() => ({
-    total: rows.length,
-    active: rows.filter((row) => row.status === "ACTIVE").length,
-    planned: rows.filter((row) => row.status === "PLANNED").length,
-    completed: rows.filter((row) => row.status === "COMPLETED").length
-  }), [rows]);
+  const [fromActionId, setFromActionId] = useState("");
+  const [completeForm, setCompleteForm] = useState({ id: "", resultStatus: "WON", resultSummary: "" });
+  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await postJson("/api/experiments", { sellerId: SELLER_ID, ...form });
-    setForm({ ...form, experimentName: "", campaignId: "", adGroupId: "", recommendationId: "", hypothesis: "", expectedResult: "", successMetric: "" });
-    experiments.reload();
+    setActionState({ id: "create", message: "", error: "" });
+    try {
+      await experimentsApi.create({
+        sellerId: SELLER_ID,
+        ...form,
+        experimentName: form.name
+      });
+      setForm({ ...form, name: "", description: "", sku: "", asin: "", hypothesis: "" });
+      setActionState({ id: "", message: "Experiment created.", error: "" });
+      summary.reload();
+      experiments.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not create experiment." });
+    }
   }
 
-  async function action(id: string, name: "start" | "complete" | "cancel") {
-    const body = name === "complete"
-      ? { resultSummary: "Completed from frontend.", learningNote: "Review performance after test.", afterMetrics: {} }
-      : name === "cancel"
-        ? { learningNote: "Cancelled from frontend." }
-        : {};
-    await postJson(`/api/experiments/${id}/${name}`, body);
-    experiments.reload();
+  async function createFromAction(event: FormEvent) {
+    event.preventDefault();
+    const actionId = fromActionId.trim();
+    if (!actionId) return;
+    setActionState({ id: "from-action", message: "", error: "" });
+    try {
+      await experimentsApi.createFromAction(actionId);
+      setFromActionId("");
+      setActionState({ id: "", message: "Experiment created from approval action.", error: "" });
+      summary.reload();
+      experiments.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not create experiment from action." });
+    }
+  }
+
+  async function action(id: string, name: "start" | "checkpoint" | "cancel") {
+    if (name === "cancel" && !window.confirm("Cancel this experiment? This only changes tracking status.")) return;
+    setActionState({ id, message: "", error: "" });
+    try {
+      if (name === "start") await experimentsApi.start(id);
+      else if (name === "checkpoint") await experimentsApi.recordCheckpoint(id, { sellerId: SELLER_ID, note: "Checkpoint recorded from frontend.", metrics: {} });
+      else await experimentsApi.cancel(id);
+      setActionState({ id: "", message: name === "checkpoint" ? "Checkpoint recorded." : `Experiment ${name}ed.`, error: "" });
+      summary.reload();
+      experiments.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: `Could not ${name} experiment.` });
+    }
+  }
+
+  async function complete(event: FormEvent) {
+    event.preventDefault();
+    if (!completeForm.id) return;
+    setActionState({ id: completeForm.id, message: "", error: "" });
+    try {
+      await experimentsApi.complete(completeForm.id, {
+        sellerId: SELLER_ID,
+        resultStatus: completeForm.resultStatus,
+        resultSummary: completeForm.resultSummary
+      });
+      setCompleteForm({ id: "", resultStatus: "WON", resultSummary: "" });
+      setActionState({ id: "", message: "Experiment completed.", error: "" });
+      summary.reload();
+      experiments.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not complete experiment." });
+    }
   }
 
   return (
     <div className="page">
-      <PageHeader title="Experiments" subtitle="Track approval-first tests and learn before scaling." />
-      <div className="summary-strip">
-        <MetricTile label="Total experiments" value={counts.total} />
-        <MetricTile label="Active" value={counts.active} />
-        <MetricTile label="Planned" value={counts.planned} />
-        <MetricTile label="Completed" value={counts.completed} />
+      <PageHeader title="Experiments" subtitle="Track before/after outcomes for PPC, listing, pricing, image, and content changes." />
+      <SafetyBanner text="Experiments track results only. They do not execute marketplace changes." />
+      <p className="section-note">Tracking actions include Start, Record Checkpoint, Complete, and Cancel. They only update experiment status and outcomes.</p>
+      {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load experiment summary." /> : (
+        <div className="summary-strip command-summary">
+          <MetricTile label="Total Experiments" value={summaryNumber(data, ["totalExperiments", "total"], rows.length)} />
+          <MetricTile label="Draft Experiments" value={summaryNumber(data, ["draftExperiments", "draftCount"], rows.filter((row) => normalizeState(row.status).includes("DRAFT")).length)} />
+          <MetricTile label="Running Experiments" value={summaryNumber(data, ["runningExperiments", "runningCount", "activeExperiments"], rows.filter((row) => ["RUNNING", "ACTIVE"].includes(normalizeState(row.status))).length)} />
+          <MetricTile label="Completed Experiments" value={summaryNumber(data, ["completedExperiments", "completedCount"], rows.filter((row) => normalizeState(row.status) === "COMPLETED").length)} />
+          <MetricTile label="Cancelled Experiments" value={summaryNumber(data, ["cancelledExperiments", "cancelledCount"], rows.filter((row) => normalizeState(row.status) === "CANCELLED").length)} />
+          <MetricTile label="Won" value={summaryNumber(data, ["won", "wonCount"], rows.filter((row) => normalizeState(row.resultStatus) === "WON").length)} />
+          <MetricTile label="Lost" value={summaryNumber(data, ["lost", "lostCount"], rows.filter((row) => normalizeState(row.resultStatus) === "LOST").length)} />
+          <MetricTile label="Inconclusive" value={summaryNumber(data, ["inconclusive", "inconclusiveCount"], rows.filter((row) => normalizeState(row.resultStatus) === "INCONCLUSIVE").length)} />
+        </div>
+      )}
+      <div className="stack">
+        <Card title="Experiment List">
+          {experiments.loading ? <LoadingBlock /> : experiments.error ? <ErrorBlock text="Could not load experiments." /> : rows.length === 0 ? <EmptyBlock text="No experiments yet. Create one from a safe tracking hypothesis or an approval action. Record Checkpoint controls appear after an experiment exists." /> : (
+            <div className="card-list command-card-list">
+              {rows.map((row) => {
+                const rowName = row.name ?? row.experimentName;
+                return (
+                  <article className="item-card command-item-card" key={row.id}>
+                    <div className="item-top"><strong>{formatEmpty(rowName)}</strong><StatusBadge value={row.status} /></div>
+                    <div className="badge-row">
+                      <StatusBadge value={row.experimentType ?? "OTHER"} />
+                      {row.resultStatus ? <StatusBadge value={row.resultStatus} /> : null}
+                      {row.priority ? <StatusBadge value={row.priority} /> : null}
+                    </div>
+                    <p className="long-text">{formatEmpty(row.hypothesis)}</p>
+                    <div className="detail-grid">
+                      <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                      <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
+                      <MetricRow label="Result Summary" value={formatEmpty(row.resultSummary)} />
+                      <MetricRow label="Started At" value={formatLocalDateTime(row.startedAt ?? row.startDate)} />
+                      <MetricRow label="Ended At" value={formatLocalDateTime(row.endedAt ?? row.endDate)} />
+                    </div>
+                    {completeForm.id === row.id ? (
+                      <form className="form-grid compact-form" onSubmit={complete}>
+                        <SelectField label="Result Status" value={completeForm.resultStatus} options={["WON", "LOST", "INCONCLUSIVE"]} onChange={(value) => setCompleteForm({ ...completeForm, resultStatus: value })} />
+                        <TextArea label="Result Summary" value={completeForm.resultSummary} onChange={(value) => setCompleteForm({ ...completeForm, resultSummary: value })} />
+                        <div className="button-row">
+                          <button type="submit" disabled={actionState.id === row.id}>Complete</button>
+                          <button type="button" className="secondary" onClick={() => setCompleteForm({ id: "", resultStatus: "WON", resultSummary: "" })}>Cancel Form</button>
+                        </div>
+                      </form>
+                    ) : null}
+                    <div className="button-row compact">
+                      <button type="button" onClick={() => action(row.id, "start")} disabled={actionState.id === row.id}>Start</button>
+                      <button type="button" className="secondary" onClick={() => action(row.id, "checkpoint")} disabled={actionState.id === row.id}>Record Checkpoint</button>
+                      <button type="button" className="secondary" onClick={() => setCompleteForm({ id: row.id, resultStatus: "WON", resultSummary: "" })}>Complete</button>
+                      <button type="button" className="danger-button secondary" onClick={() => action(row.id, "cancel")} disabled={actionState.id === row.id}>Cancel</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+        {actionState.message ? <div className="soft-state success-state">{actionState.message}</div> : null}
+        {actionState.error ? <div className="soft-state error-state">{actionState.error}</div> : null}
       </div>
-      <Card title="Experiment List">
-        {experiments.loading ? <LoadingBlock /> : experiments.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
-          <div className="card-list">
-            {rows.map((row) => (
-              <article className="item-card" key={row.id}>
-                <div className="item-top"><strong>{formatEmpty(row.experimentName)}</strong><StatusBadge value={row.status} /></div>
-                <div className="item-meta"><span>{formatEmpty(row.experimentType)}</span><span>{formatEmpty(row.priority)}</span></div>
-                <p>{formatEmpty(row.hypothesis)}</p>
-                <MetricRow label="Expected Result" value={formatEmpty(row.expectedResult)} />
-                <MetricRow label="Success Metric" value={formatEmpty(row.successMetric)} />
-                <MetricRow label="Start Date" value={formatEmpty(row.startDate)} />
-                <MetricRow label="End Date" value={formatEmpty(row.endDate)} />
-                <div className="button-row compact">
-                  <button type="button" onClick={() => action(row.id, "start")}>Start</button>
-                  <button type="button" onClick={() => action(row.id, "complete")}>Complete</button>
-                  <button type="button" onClick={() => action(row.id, "cancel")}>Cancel</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </Card>
       <Card title="Create Experiment">
         <form className="form-grid" onSubmit={submit}>
-          <TextInput label="Experiment Name" value={form.experimentName} onChange={(value) => setForm({ ...form, experimentName: value })} />
-          <SelectField label="Experiment Type" value={form.experimentType} options={["PPC_KEYWORD_TEST", "PPC_PRODUCT_TARGET_TEST", "LISTING_CONTENT_TEST", "IMAGE_TEST", "PRICE_TEST", "BUNDLE_TEST", "BRAND_CONTENT_TEST", "OTHER"]} onChange={(value) => setForm({ ...form, experimentType: value })} />
-          <TextInput label="Campaign Id" value={form.campaignId} onChange={(value) => setForm({ ...form, campaignId: value })} />
-          <TextInput label="Ad Group Id" value={form.adGroupId} onChange={(value) => setForm({ ...form, adGroupId: value })} />
-          <TextInput label="Recommendation Id" value={form.recommendationId} onChange={(value) => setForm({ ...form, recommendationId: value })} />
+          <TextInput label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+          <SelectField label="Experiment Type" value={form.experimentType} options={["PPC_BID_TEST", "PPC_KEYWORD_TEST", "LISTING_TITLE_TEST", "LISTING_IMAGE_TEST", "PRICING_TEST", "COUPON_TEST", "CONTENT_A_PLUS_TEST", "INVENTORY_REPLENISHMENT_TEST", "OTHER"]} onChange={(value) => setForm({ ...form, experimentType: value })} />
+          <TextInput label="SKU Optional" value={form.sku} onChange={(value) => setForm({ ...form, sku: value })} />
+          <TextInput label="ASIN Optional" value={form.asin} onChange={(value) => setForm({ ...form, asin: value })} />
+          <SelectField label="Priority Optional" value={form.priority} options={["LOW", "MEDIUM", "HIGH"]} onChange={(value) => setForm({ ...form, priority: value })} />
+          <TextArea label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
           <TextArea label="Hypothesis" value={form.hypothesis} onChange={(value) => setForm({ ...form, hypothesis: value })} />
-          <TextArea label="Expected Result" value={form.expectedResult} onChange={(value) => setForm({ ...form, expectedResult: value })} />
-          <TextInput label="Success Metric" value={form.successMetric} onChange={(value) => setForm({ ...form, successMetric: value })} />
-          <SelectField label="Status" value={form.status} options={["PLANNED", "ACTIVE", "PAUSED", "COMPLETED", "FAILED", "CANCELLED"]} onChange={(value) => setForm({ ...form, status: value })} />
-          <SelectField label="Priority" value={form.priority} options={["LOW", "MEDIUM", "HIGH"]} onChange={(value) => setForm({ ...form, priority: value })} />
-          <button type="submit">Create Experiment</button>
+          <div className="button-row"><button type="submit" disabled={actionState.id === "create"}>Create Experiment</button></div>
         </form>
       </Card>
+      <Card title="Create From Action">
+        <form className="form-grid" onSubmit={createFromAction}>
+          <TextInput label="Action ID" value={fromActionId} onChange={setFromActionId} />
+          <div className="button-row"><button type="submit" disabled={actionState.id === "from-action"}>Create Experiment From Action</button></div>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
+function DataFreshnessPage() {
+  const summary = useApi<DataFreshnessSummary>(() => dataFreshnessApi.summary(SELLER_ID));
+  const data = dataFreshnessSummaryOf(summary.data);
+  const rows = dataFreshnessRowsOf(summary.data);
+  const warnings = dailyList(readFirst(data, ["warnings"]));
+  const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
+
+  async function runCheck() {
+    setActionState({ loading: true, message: "", error: "" });
+    try {
+      await dataFreshnessApi.check(SELLER_ID);
+      setActionState({ loading: false, message: "Freshness check completed.", error: "" });
+      summary.reload();
+    } catch {
+      setActionState({ loading: false, message: "", error: "Could not run freshness check." });
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Data Freshness Guardrails" subtitle="Check whether Amazon, Ads, Product Passport, Economics, Engines, and AI-CGO data are fresh." />
+      <SafetyBanner text="No external sync is triggered here. This only checks freshness status." />
+      <div className="stack">
+        <div className="button-row">
+          <button type="button" onClick={runCheck} disabled={actionState.loading}>Run Freshness Check</button>
+          <button type="button" className="secondary" onClick={summary.reload}>Refresh Summary</button>
+          {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
+          {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
+        </div>
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load data freshness summary." /> : (
+          <>
+            <div className="summary-strip command-summary">
+              <MetricTile label="Total Sources" value={summaryNumber(data, ["totalSources", "total"], rows.length)} />
+              <MetricTile label="Fresh Sources" value={summaryNumber(data, ["freshSources", "fresh"], rows.filter((row) => normalizeState(row.status) === "FRESH").length)} />
+              <MetricTile label="Stale Sources" value={summaryNumber(data, ["staleSources", "stale"], rows.filter((row) => normalizeState(row.status) === "STALE").length)} />
+              <MetricTile label="Unknown Sources" value={summaryNumber(data, ["unknownSources", "unknown"], rows.filter((row) => normalizeState(row.status) === "UNKNOWN").length)} />
+              <MetricTile label="Error Sources" value={summaryNumber(data, ["errorSources", "errors"], rows.filter((row) => normalizeState(row.status) === "ERROR").length)} />
+            </div>
+            <Card title="Freshness Rows">
+              {rows.length === 0 ? <EmptyBlock text="No data freshness rows returned yet." /> : (
+                <div className="table-wrap command-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Data Source</th>
+                        <th>Status</th>
+                        <th>Last Success At</th>
+                        <th>Last Attempt At</th>
+                        <th>Freshness Minutes</th>
+                        <th>Stale After Minutes</th>
+                        <th>Last Error</th>
+                        <th>Updated At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr key={String(row.id ?? row.dataSource ?? index)}>
+                          <td>{formatEmpty(row.dataSource)}</td>
+                          <td><StatusBadge value={row.status ?? "UNKNOWN"} /></td>
+                          <td>{formatLocalDateTime(row.lastSuccessAt)}</td>
+                          <td>{formatLocalDateTime(row.lastAttemptAt)}</td>
+                          <td>{formatEmpty(row.freshnessMinutes)}</td>
+                          <td>{formatEmpty(row.staleAfterMinutes)}</td>
+                          <td className="wrap-cell">{formatEmpty(row.lastError)}</td>
+                          <td>{formatLocalDateTime(row.updatedAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+            <Card title="Warnings">
+              {warnings.length === 0 ? <EmptyBlock text="No freshness warnings returned." /> : (
+                <ul className="clean-list">
+                  {warnings.map((warning, index) => <li key={index}>{formatDailyListItem(warning)}</li>)}
+                </ul>
+              )}
+            </Card>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AiGatewayPage() {
+  const status = useApi<AiGatewayStatus>(() => aiGatewayApi.status(SELLER_ID));
+  const costSummary = useApi<AiCostSummary>(() => aiGatewayApi.costSummary(SELLER_ID));
+  const ledger = useApi<ApiRows<AiLedgerRow>>(() => aiGatewayApi.ledger(SELLER_ID));
+  const statusData = aiGatewayStatusOf(status.data);
+  const costData = aiCostSummaryOf(costSummary.data);
+  const ledgerRows = aiLedgerRowsOf(ledger.data);
+  const [estimateForm, setEstimateForm] = useState({
+    moduleName: "",
+    purpose: "",
+    estimatedInputTokens: "0",
+    estimatedOutputTokens: "0",
+    provider: "",
+    modelName: ""
+  });
+  const [blockedForm, setBlockedForm] = useState({ moduleName: "", purpose: "", blockedReason: "AI calls disabled in V1." });
+  const [estimateResult, setEstimateResult] = useState<AiCostEstimate | null>(null);
+  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
+
+  async function estimate(event: FormEvent) {
+    event.preventDefault();
+    setActionState({ id: "estimate", message: "", error: "" });
+    setEstimateResult(null);
+    try {
+      const result = await aiGatewayApi.estimate({
+        sellerId: SELLER_ID,
+        moduleName: estimateForm.moduleName,
+        purpose: estimateForm.purpose,
+        estimatedInputTokens: asInputNumber(estimateForm.estimatedInputTokens) ?? 0,
+        estimatedOutputTokens: asInputNumber(estimateForm.estimatedOutputTokens) ?? 0,
+        provider: estimateForm.provider || undefined,
+        modelName: estimateForm.modelName || undefined
+      });
+      setEstimateResult(aiCostEstimateOf(result));
+      setActionState({ id: "", message: "AI cost estimate calculated.", error: "" });
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not estimate AI cost." });
+    }
+  }
+
+  async function recordBlocked(event: FormEvent) {
+    event.preventDefault();
+    setActionState({ id: "blocked", message: "", error: "" });
+    try {
+      await aiGatewayApi.recordBlocked({ sellerId: SELLER_ID, ...blockedForm });
+      setBlockedForm({ moduleName: "", purpose: "", blockedReason: "AI calls disabled in V1." });
+      setActionState({ id: "", message: "Blocked AI attempt recorded.", error: "" });
+      status.reload();
+      costSummary.reload();
+      ledger.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not record blocked AI attempt." });
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="AI Gateway + Cost Ledger" subtitle="Cost-controlled AI usage foundation. AI calls are disabled in V1." />
+      <SafetyBanner text="AI calls are disabled in V1. This page only estimates and records cost-control events." />
+      <div className="stack">
+        {status.loading || costSummary.loading ? <LoadingBlock /> : status.error || costSummary.error ? <ErrorBlock text="Could not load AI gateway status." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="AI Calls Enabled" value={<StatusBadge value={safeBooleanLabel(readFirst(statusData, ["aiCallsEnabled"]), "WARNING", "DISABLED")} />} />
+            <MetricTile label="Daily Budget" value={formatMoney(readFirst(statusData, ["dailyBudget", "dailyAiBudget"]))} />
+            <MetricTile label="Monthly Budget" value={formatMoney(readFirst(statusData, ["monthlyBudget", "monthlyAiBudget"]))} />
+            <MetricTile label="Daily Cost" value={formatMoney(readFirst(costData, ["dailyCost", "costToday"]))} />
+            <MetricTile label="Monthly Cost" value={formatMoney(readFirst(costData, ["monthlyCost", "costThisMonth"]))} />
+            <MetricTile label="Requests Today" value={summaryNumber({ ...statusData, ...costData }, ["requestsToday"])} />
+            <MetricTile label="Requests This Month" value={summaryNumber({ ...statusData, ...costData }, ["requestsThisMonth"])} />
+          </div>
+        )}
+        <div className="dashboard-grid today">
+          <Card title="Estimate Cost">
+            <form className="form-grid" onSubmit={estimate}>
+              <TextInput label="Module Name" value={estimateForm.moduleName} onChange={(value) => setEstimateForm({ ...estimateForm, moduleName: value })} />
+              <TextInput label="Purpose" value={estimateForm.purpose} onChange={(value) => setEstimateForm({ ...estimateForm, purpose: value })} />
+              <TextInput label="Estimated Input Tokens" type="number" value={estimateForm.estimatedInputTokens} onChange={(value) => setEstimateForm({ ...estimateForm, estimatedInputTokens: value })} />
+              <TextInput label="Estimated Output Tokens" type="number" value={estimateForm.estimatedOutputTokens} onChange={(value) => setEstimateForm({ ...estimateForm, estimatedOutputTokens: value })} />
+              <TextInput label="Provider Optional" value={estimateForm.provider} onChange={(value) => setEstimateForm({ ...estimateForm, provider: value })} />
+              <TextInput label="Model Name Optional" value={estimateForm.modelName} onChange={(value) => setEstimateForm({ ...estimateForm, modelName: value })} />
+              <div className="button-row"><button type="submit" disabled={actionState.id === "estimate"}>Estimate Cost</button></div>
+            </form>
+            {estimateResult ? (
+              <div className="gateway-result">
+                <MetricRow label="Estimated Cost" value={formatMoney(estimateResult.estimatedCost)} />
+                <MetricRow label="Status" value={<StatusBadge value={estimateResult.status ?? "ESTIMATED"} />} />
+                <MetricRow label="Blocked Reason" value={formatEmpty(estimateResult.blockedReason)} />
+              </div>
+            ) : null}
+          </Card>
+          <Card title="Record Blocked Attempt">
+            <form className="form-grid" onSubmit={recordBlocked}>
+              <TextInput label="Module Name" value={blockedForm.moduleName} onChange={(value) => setBlockedForm({ ...blockedForm, moduleName: value })} />
+              <TextInput label="Purpose" value={blockedForm.purpose} onChange={(value) => setBlockedForm({ ...blockedForm, purpose: value })} />
+              <TextArea label="Blocked Reason" value={blockedForm.blockedReason} onChange={(value) => setBlockedForm({ ...blockedForm, blockedReason: value })} />
+              <div className="button-row"><button type="submit" disabled={actionState.id === "blocked"}>Record Blocked AI Attempt</button></div>
+            </form>
+          </Card>
+        </div>
+        {actionState.message ? <div className="soft-state success-state">{actionState.message}</div> : null}
+        {actionState.error ? <div className="soft-state error-state">{actionState.error}</div> : null}
+        <Card title="Cost Ledger">
+          {ledger.loading ? <LoadingBlock /> : ledger.error ? <ErrorBlock text="Could not load AI ledger." /> : ledgerRows.length === 0 ? <EmptyBlock text="No AI cost ledger rows yet." /> : (
+            <div className="table-wrap command-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Created At</th>
+                    <th>Module Name</th>
+                    <th>Purpose</th>
+                    <th>Provider</th>
+                    <th>Model Name</th>
+                    <th>Input Tokens</th>
+                    <th>Output Tokens</th>
+                    <th>Estimated Cost</th>
+                    <th>Status</th>
+                    <th>Blocked Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledgerRows.map((row, index) => (
+                    <tr key={String(row.id ?? index)}>
+                      <td>{formatLocalDateTime(row.createdAt)}</td>
+                      <td>{formatEmpty(row.moduleName)}</td>
+                      <td className="wrap-cell">{formatEmpty(row.purpose)}</td>
+                      <td>{formatEmpty(row.provider)}</td>
+                      <td>{formatEmpty(row.modelName)}</td>
+                      <td>{formatEmpty(row.inputTokens)}</td>
+                      <td>{formatEmpty(row.outputTokens)}</td>
+                      <td>{formatMoney(row.estimatedCost)}</td>
+                      <td><StatusBadge value={row.status ?? "UNKNOWN"} /></td>
+                      <td className="wrap-cell">{formatEmpty(row.blockedReason)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ProductionHealthPage() {
+  const summary = useApi<ProductionHealthSummary>(() => productionHealthApi.summary(SELLER_ID));
+  const data = productionHealthSummaryOf(summary.data);
+  const modules = productionHealthModulesOf(summary.data);
+  const blockers = dailyList(readFirst(data, ["blockers"]));
+  const warnings = dailyList(readFirst(data, ["warnings"]));
+  const nextChecks = dailyList(readFirst(data, ["nextChecks"]));
+
+  return (
+    <div className="page">
+      <PageHeader title="Production Health" subtitle="One health check across backend, data, engines, approvals, safety, and shadow execution." />
+      <SafetyBanner text="Production Health does not execute changes. It only checks readiness." />
+      <div className="stack">
+        <div className="button-row"><button type="button" onClick={summary.reload}>Refresh Health</button></div>
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load production health." /> : (
+          <>
+            <div className="summary-strip command-summary">
+              <MetricTile label="Overall Status" value={<StatusBadge value={readFirst(data, ["overallStatus", "status"]) ?? "UNKNOWN"} />} />
+              <MetricTile label="Mode" value={<StatusBadge value={readFirst(data, ["mode"]) ?? "SHADOW"} />} />
+              <MetricTile label="Blockers Count" value={summaryNumber(data, ["blockersCount"], blockers.length)} />
+              <MetricTile label="Warnings Count" value={summaryNumber(data, ["warningsCount"], warnings.length)} />
+              <MetricTile label="Modules Passing" value={summaryNumber(data, ["modulesPassing", "passingModules"], modules.filter((row) => normalizeState(row.status) === "PASS").length)} />
+              <MetricTile label="Modules Warning" value={summaryNumber(data, ["modulesWarning", "warningModules"], modules.filter((row) => ["WARN", "WARNING"].includes(normalizeState(row.status))).length)} />
+              <MetricTile label="Modules Failing" value={summaryNumber(data, ["modulesFailing", "failingModules"], modules.filter((row) => normalizeState(row.status) === "FAIL").length)} />
+            </div>
+            <Card title="Safety State">
+              <div className="readiness-grid">
+                <div className="readiness-item"><span>Shadow Mode</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["shadowMode"]), "SHADOW", "UNKNOWN")} /></div>
+                <div className="readiness-item"><span>External Execution</span><StatusBadge value={readFirst(data, ["externalExecution"]) ?? "BLOCKED"} /></div>
+                <div className="readiness-item"><span>Live Execution Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["liveExecutionEnabled"]), "WARNING", "SAFE")} /></div>
+                <div className="readiness-item"><span>AI Calls Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["aiCallsEnabled"]), "WARNING", "DISABLED")} /></div>
+              </div>
+            </Card>
+            <Card title="Module Health">
+              {modules.length === 0 ? <EmptyBlock text="No production health modules returned." /> : (
+                <div className="card-list command-card-list">
+                  {modules.map((module, index) => (
+                    <article className="item-card command-item-card" key={String(module.key ?? module.name ?? index)}>
+                      <div className="item-top">
+                        <strong>{formatEmpty(module.name ?? module.key)}</strong>
+                        <StatusBadge value={module.status ?? "UNKNOWN"} />
+                      </div>
+                      <p className="long-text">{formatEmpty(module.message)}</p>
+                      <div className="detail-grid">
+                        <MetricRow label="Key" value={formatEmpty(module.key)} />
+                        <MetricRow label="Critical" value={readBoolean(module.critical) ? "Yes" : "No"} />
+                        <MetricRow label="Counts" value={<JsonSnippet value={module.counts} />} />
+                        <MetricRow label="Last Checked At" value={formatLocalDateTime(module.lastCheckedAt)} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </Card>
+            <div className="dashboard-grid today">
+              <ListTextCard title="Blockers" rows={blockers} emptyText="No production blockers returned." />
+              <ListTextCard title="Warnings" rows={warnings} emptyText="No production warnings returned." />
+            </div>
+            <ListTextCard title="Next Checks" rows={nextChecks} emptyText="No next checks returned." />
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -4728,6 +5512,127 @@ function creativeSummaryOf(value: unknown): CreativeRecommendationSummary {
 
 function creativeRecommendationRowsOf(value: unknown): CreativeRecommendation[] {
   return firstRecordRows<CreativeRecommendation>(value, recordOf(value).recommendations, recordOf(value).creativeRecommendations);
+}
+
+function safetyControlStatusOf(value: unknown): SafetyControlStatus {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.safetyControl ?? root.safety ?? data.safetyControl ?? result.safetyControl ?? data.status ?? result.status ?? root) as SafetyControlStatus;
+}
+
+function safetyAuditRowsOf(value: unknown): SafetyAuditEvent[] {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  return firstRecordRows<SafetyAuditEvent>(value, root.auditEvents, root.events, data.auditEvents, data.events);
+}
+
+function alertSummaryOf(value: unknown): AlertSummary {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.summary ?? root.alertSummary ?? data.summary ?? result.summary ?? root) as AlertSummary;
+}
+
+function alertRowsOf(value: unknown): AlertEvent[] {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return firstRecordRows<AlertEvent>(value, root.events, root.alerts, data.events, data.alerts, result.events, result.alerts);
+}
+
+function experimentSummaryOf(value: unknown): ExperimentSummary {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.summary ?? root.experimentSummary ?? data.summary ?? result.summary ?? root) as ExperimentSummary;
+}
+
+function experimentRowsOf(value: unknown): Experiment[] {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return firstRecordRows<Experiment>(value, root.experiments, root.items, data.experiments, data.items, result.experiments, result.items);
+}
+
+function dataFreshnessSummaryOf(value: unknown): DataFreshnessSummary {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.summary ?? root.dataFreshness ?? data.summary ?? result.summary ?? root) as DataFreshnessSummary;
+}
+
+function dataFreshnessRowsOf(value: unknown): DataFreshnessRow[] {
+  const root = recordOf(value);
+  const summary = recordOf(root.summary);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return firstRecordRows<DataFreshnessRow>(
+    value,
+    root.rows,
+    root.sources,
+    root.dataSources,
+    summary.rows,
+    summary.sources,
+    data.rows,
+    data.sources,
+    data.dataSources,
+    result.rows,
+    result.sources
+  );
+}
+
+function aiGatewayStatusOf(value: unknown): AiGatewayStatus {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.status ?? root.aiGatewayStatus ?? data.status ?? result.status ?? root) as AiGatewayStatus;
+}
+
+function aiCostSummaryOf(value: unknown): AiCostSummary {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.summary ?? root.costSummary ?? data.summary ?? result.summary ?? root) as AiCostSummary;
+}
+
+function aiCostEstimateOf(value: unknown): AiCostEstimate {
+  const root = recordOf(value);
+  return recordOf(root.estimate ?? root.result ?? root.data ?? root) as AiCostEstimate;
+}
+
+function aiLedgerRowsOf(value: unknown): AiLedgerRow[] {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return firstRecordRows<AiLedgerRow>(value, root.ledger, root.rows, data.ledger, data.rows, result.ledger, result.rows);
+}
+
+function productionHealthSummaryOf(value: unknown): ProductionHealthSummary {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.summary ?? root.health ?? data.summary ?? result.summary ?? root) as ProductionHealthSummary;
+}
+
+function productionHealthModulesOf(value: unknown): ProductionHealthModule[] {
+  const root = recordOf(value);
+  const summary = recordOf(root.summary);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return firstRecordRows<ProductionHealthModule>(root.modules, summary.modules, data.modules, result.modules);
+}
+
+function ListTextCard({ title, rows, emptyText }: { title: string; rows: unknown[]; emptyText: string }) {
+  return (
+    <Card title={title}>
+      {rows.length === 0 ? <EmptyBlock text={emptyText} /> : (
+        <ul className="clean-list">
+          {rows.map((row, index) => <li key={index}>{formatDailyListItem(row)}</li>)}
+        </ul>
+      )}
+    </Card>
+  );
 }
 
 function uniqueTextValues(values: unknown[]): string[] {
