@@ -291,3 +291,124 @@ export type AutomationSettings = {
   shadowModeDays?: number;
   notes?: string | null;
 };
+
+export type TodayCommandSummary = AnyRecord & {
+  systemStatus?: AnyRecord | null;
+  topRisks?: AnyRecord[] | null;
+  todayPriorities?: AnyRecord[] | null;
+  nextBestActions?: AnyRecord[] | string[] | null;
+};
+
+export type LearningEngineSummary = AnyRecord & {
+  engineKey?: string | null;
+  usefulnessScore?: number | string | null;
+  confidenceScore?: number | string | null;
+  approvedCount?: number | string | null;
+  completedCount?: number | string | null;
+  rejectedCount?: number | string | null;
+  failedCount?: number | string | null;
+  noActionCount?: number | string | null;
+  lastEventAt?: string | null;
+};
+
+export type LearningSummary = AnyRecord & {
+  totalLearningEvents?: number | string | null;
+  enginesTracked?: number | string | null;
+  approvedCount?: number | string | null;
+  rejectedCount?: number | string | null;
+  monitoringCount?: number | string | null;
+  completedCount?: number | string | null;
+  noActionCount?: number | string | null;
+  failedCount?: number | string | null;
+  topUsefulEngines?: LearningEngineSummary[] | null;
+  weakestEngines?: LearningEngineSummary[] | null;
+};
+
+export type LearningEvent = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  eventType?: string | null;
+  engineKey?: string | null;
+  actionType?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  actor?: string | null;
+  note?: string | null;
+};
+
+export type ExecutionGatewayStatus = AnyRecord & {
+  mode?: string | null;
+  liveExecutionEnabled?: boolean | string | number | null;
+  message?: string | null;
+  totalAttempts?: number | string | null;
+  shadowCompleted?: number | string | null;
+  liveBlocked?: number | string | null;
+  failedAttempts?: number | string | null;
+};
+
+export type ExecutionAttempt = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  actionId?: string | null;
+  actionType?: string | null;
+  executionMode?: string | null;
+  executionStatus?: string | null;
+  actor?: string | null;
+  blockedReason?: string | null;
+  resultMessage?: string | null;
+  errorMessage?: string | null;
+};
+
+export type ListingDraftSummary = AnyRecord & {
+  totalDrafts?: number | string | null;
+  drafted?: number | string | null;
+  actionCreated?: number | string | null;
+  approved?: number | string | null;
+  rejected?: number | string | null;
+  titleDrafts?: number | string | null;
+  bulletDrafts?: number | string | null;
+  backendKeywordDrafts?: number | string | null;
+  descriptionDrafts?: number | string | null;
+};
+
+export type ListingDraft = AnyRecord & {
+  id: string;
+  sku?: string | null;
+  asin?: string | null;
+  productName?: string | null;
+  draftType?: string | null;
+  currentValue?: string | null;
+  proposedValue?: string | null;
+  reason?: string | null;
+  confidenceLabel?: string | null;
+  riskLevel?: string | null;
+  status?: string | null;
+  actionId?: string | null;
+};
+
+export type CreativeRecommendationSummary = AnyRecord & {
+  totalRecommendations?: number | string | null;
+  drafted?: number | string | null;
+  actionCreated?: number | string | null;
+  mainImageReviews?: number | string | null;
+  infographicReviews?: number | string | null;
+  lifestyleReviews?: number | string | null;
+  sizeChartReviews?: number | string | null;
+  aplusContentReviews?: number | string | null;
+  brandStoryReviews?: number | string | null;
+};
+
+export type CreativeRecommendation = AnyRecord & {
+  id: string;
+  sku?: string | null;
+  asin?: string | null;
+  productName?: string | null;
+  recommendationType?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  recommendedAction?: string | null;
+  confidenceLabel?: string | null;
+  riskLevel?: string | null;
+  status?: string | null;
+  actionId?: string | null;
+};

@@ -389,6 +389,123 @@
   font-weight: 800;
 }
 
+.safety-banner {
+  margin-bottom: 18px;
+}
+
+.command-summary {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.command-summary .metric-tile {
+  min-height: 86px;
+}
+
+.command-summary .metric-tile strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 21px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.readiness-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #edf2ea;
+  border-radius: 10px;
+  background: #fbfdf9;
+  padding: 10px 12px;
+}
+
+.readiness-item span {
+  color: #526057;
+  font-weight: 800;
+}
+
+.command-card-list {
+  align-items: start;
+}
+
+.command-item-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.command-item-card .metric-row strong,
+.command-item-card .item-top strong,
+.long-text,
+.wrap-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.filters-grid {
+  margin-bottom: 14px;
+  align-items: end;
+}
+
+.command-table table {
+  min-width: 980px;
+}
+
+.gateway-buttons {
+  align-self: end;
+  margin-top: 0;
+}
+
+.gateway-result {
+  margin-top: 12px;
+  border-top: 1px solid #edf2ea;
+  padding-top: 12px;
+}
+
+.live-block-button {
+  background: #fff0ed;
+}
+
+.text-diff {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  border-top: 1px solid #edf2ea;
+  padding-top: 12px;
+}
+
+.text-diff div {
+  min-width: 0;
+}
+
+.text-diff span {
+  display: block;
+  margin-bottom: 4px;
+  color: #65756b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.text-diff p {
+  margin: 0;
+  color: #34473c;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.command-quick-links {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .daily-result-grid {
   margin-top: 10px;
 }
@@ -1654,6 +1771,10 @@ textarea {
   }
 
   .quick-link-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .command-quick-links {
     grid-template-columns: 1fr;
   }
 

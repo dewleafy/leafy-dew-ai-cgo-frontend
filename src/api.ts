@@ -12,10 +12,20 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
   });
 
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
 
   if (!response.ok) {
-    const message = typeof data?.message === "string" ? data.message : "Unable to load this section.";
+    const message =
+      data && typeof data === "object" && "message" in data && typeof data.message === "string"
+        ? data.message
+        : "Unable to load this section.";
     throw new Error(message);
   }
 
