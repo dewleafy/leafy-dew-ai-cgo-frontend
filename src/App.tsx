@@ -2,23 +2,30 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import {
+  activityLogsApi,
+  approvalExecutionApi,
   aiGatewayApi,
   alertCenterApi,
   dataFreshnessApi,
-  deleteJson,
   experimentsApi,
   getJson,
+  maintenanceApi,
   postJson,
   productionHealthApi,
   putJson,
+  qaSmokeApi,
+  rollbackApi,
   safetyControlApi
 } from "./api";
 import type {
   ActionLedgerRow,
   ActionLedgerSummary,
-  ActivityLog,
+  ActivityLogEvent,
+  ActivityLogSummary,
   AnyRecord,
   ApiRows,
+  ApprovalExecutionSummary,
+  ApprovalReadyAction,
   AiCostEstimate,
   AiCostSummary,
   AiGatewayStatus,
@@ -43,11 +50,18 @@ import type {
   LearningSummary,
   ListingDraft,
   ListingDraftSummary,
+  MaintenanceRun,
+  MaintenanceSummary,
   ProductionHealthModule,
   ProductionHealthSummary,
   ProductEconomics,
   ProductPassport,
+  QaSmokeCheck,
+  QaSmokeLatest,
+  QaSmokeRun,
   Recommendation,
+  RollbackSnapshot,
+  RollbackSummary,
   SafetyAuditEvent,
   SafetyControlStatus,
   TodayCommandSummary
@@ -63,7 +77,9 @@ const tabs = [
   "PPC Recommendations",
   "Engine Command Center",
   "Approval Center",
+  "Approval Execution",
   "Execution Gateway",
+  "Rollback Center",
   "Listing Drafts",
   "Image + A+",
   "Safety Control",
@@ -72,10 +88,12 @@ const tabs = [
   "Data Freshness",
   "AI Gateway",
   "Production Health",
+  "QA Smoke",
+  "Maintenance",
   "CEO Report",
   "Learning",
-  "Settings",
-  "Activity Logs"
+  "Activity Logs",
+  "Settings"
 ] as const;
 
 type Tab = (typeof tabs)[number];
@@ -388,7 +406,9 @@ function App() {
           {activeTab === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setActiveTab} />}
           {activeTab === "Engine Command Center" && <EngineCommandCenterPage />}
           {activeTab === "Approval Center" && <ApprovalCenterPage />}
+          {activeTab === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setActiveTab} />}
           {activeTab === "Execution Gateway" && <ExecutionGatewayPage />}
+          {activeTab === "Rollback Center" && <RollbackCenterPage />}
           {activeTab === "Listing Drafts" && <ListingDraftsPage setActiveTab={setActiveTab} />}
           {activeTab === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setActiveTab} />}
           {activeTab === "Safety Control" && <SafetyControlPage />}
@@ -397,10 +417,12 @@ function App() {
           {activeTab === "Data Freshness" && <DataFreshnessPage />}
           {activeTab === "AI Gateway" && <AiGatewayPage />}
           {activeTab === "Production Health" && <ProductionHealthPage />}
+          {activeTab === "QA Smoke" && <QaSmokePage />}
+          {activeTab === "Maintenance" && <MaintenancePage />}
           {activeTab === "CEO Report" && <CeoReportPage />}
           {activeTab === "Learning" && <LearningPage />}
-          {activeTab === "Settings" && <SettingsPage />}
           {activeTab === "Activity Logs" && <ActivityLogsPage />}
+          {activeTab === "Settings" && <SettingsPage />}
         </div>
       </main>
     </div>
@@ -416,7 +438,26 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const staleSources = todayCommandNumber(data, ["staleDataSources", "staleSources", "staleSourceCount"]);
   const pendingApprovals = todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]);
   const highRiskApprovals = todayCommandNumber(data, ["highRiskApprovals", "highRiskCount", "highRiskApprovalActions"]);
+  const qaFailCount = todayCommandNumber(data, ["qaFailCount", "qaSmokeFailCount", "failCount", "failedChecks"]);
+  const productionBlockerList = dailyList(readFirst(data, ["productionHealth.blockers", "productionHealthSummary.blockers", "blockers"]));
+  const productionBlockers = Math.max(todayCommandNumber(data, ["productionHealthBlockers", "productionBlockers", "blockersCount", "criticalBlockers"]), productionBlockerList.length);
+  const latestMaintenanceStatus = readFirst(data, [
+    "latestMaintenanceStatus",
+    "maintenanceStatus",
+    "maintenance.latestRunStatus",
+    "maintenanceSummary.latestRunStatus",
+    "maintenance.latestRun.runStatus"
+  ]);
+  const latestQaStatus = readFirst(data, [
+    "latestQaStatus",
+    "qaSmokeStatus",
+    "qaSmoke.runStatus",
+    "qaSmokeLatest.runStatus",
+    "qaSmoke.latest.runStatus"
+  ]);
   const productionRiskHints = [
+    qaFailCount > 0 ? { title: "QA smoke failed checks", riskLevel: "HIGH", message: `${qaFailCount} QA smoke checks are failing.` } : null,
+    productionBlockers > 0 ? { title: "Production health blockers", riskLevel: "HIGH", message: `${productionBlockers} production blockers need attention.` } : null,
     highAlerts > 0 ? { title: "High severity open alerts", riskLevel: "HIGH", message: `${highAlerts} high or critical alerts need review.` } : null,
     staleSources > 0 ? { title: "Stale critical data", riskLevel: "WATCH", message: `${staleSources} data sources are stale.` } : null,
     pendingApprovals > 10 ? { title: "High pending approvals", riskLevel: "WATCH", message: `${pendingApprovals} approval actions are waiting for founder review.` } : null,
@@ -425,11 +466,14 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
   const topRisks = [...recordsOf(data.topRisks ?? data.risks), ...productionRiskHints].slice(0, 6);
   const priorities = recordsOf(data.todayPriorities ?? data.priorities).slice(0, 8);
   const defaultNextBestActions = [
+    "Run maintenance if it has not run today",
+    "Run QA smoke test before enabling execution",
+    "Review approved actions ready for shadow execution",
+    "Capture rollback snapshots before live execution",
+    "Keep live execution blocked until QA smoke is PASS",
     "Review open high severity alerts",
     "Check stale data sources",
-    "Review running experiments",
-    "Keep live execution blocked until QA passes",
-    "Review AI gateway budget before enabling AI calls"
+    "Review running experiments"
   ];
   const nextBestActions = [...dailyList(data.nextBestActions ?? data.actions), ...defaultNextBestActions].slice(0, 8);
   const statusCards = [
@@ -455,7 +499,17 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "Completed Experiments", keys: ["completedExperiments", "completedExperimentCount", "completedCount"] },
     { label: "Stale Data Sources", keys: ["staleDataSources", "staleSources", "staleSourceCount"] },
     { label: "AI Cost Today", keys: ["aiCostToday", "dailyAiCost", "dailyCost"] },
-    { label: "AI Cost Month", keys: ["aiCostMonth", "monthlyAiCost", "monthlyCost"] }
+    { label: "AI Cost Month", keys: ["aiCostMonth", "monthlyAiCost", "monthlyCost"] },
+    { label: "Activity Events Today", keys: ["activityEventsToday", "todayEvents", "activityLogEventsToday"] },
+    { label: "Rollback Snapshots", keys: ["rollbackSnapshots", "totalSnapshots", "snapshotCount"] },
+    { label: "Executable Approved Actions", keys: ["executableApprovedActions", "readyActions", "readyActionCount"] },
+    { label: "QA Pass Count", keys: ["qaPassCount", "passCount"] },
+    { label: "QA Warn Count", keys: ["qaWarnCount", "warnCount"] },
+    { label: "QA Fail Count", keys: ["qaFailCount", "failCount"] }
+  ];
+  const hardeningStatusCards = [
+    { label: "Latest Maintenance Status", value: <StatusBadge value={latestMaintenanceStatus ?? "UNKNOWN"} /> },
+    { label: "Latest QA Status", value: <StatusBadge value={latestQaStatus ?? "UNKNOWN"} /> }
   ];
   const readinessItems = [
     { label: "Action Ledger", keys: ["actionLedger", "actionLedgerReady"] },
@@ -472,7 +526,12 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "Experiments", keys: ["experiments", "experimentsReady"] },
     { label: "Data Freshness", keys: ["dataFreshness", "dataFreshnessReady"] },
     { label: "AI Gateway", keys: ["aiGateway", "aiGatewayReady"] },
-    { label: "Production Health", keys: ["productionHealth", "productionHealthReady"] }
+    { label: "Production Health", keys: ["productionHealth", "productionHealthReady"] },
+    { label: "Activity Logs", keys: ["activityLogs", "activityLogsReady"] },
+    { label: "Rollback", keys: ["rollback", "rollbackReady"] },
+    { label: "Approval Execution", keys: ["approvalExecution", "approvalExecutionReady", "approvalExecutionBridge"] },
+    { label: "Maintenance", keys: ["maintenance", "maintenanceReady"] },
+    { label: "QA Smoke", keys: ["qaSmoke", "qaSmokeReady"] }
   ];
 
   return (
@@ -486,6 +545,9 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
         {productionStatusCards.map((card) => (
           <MetricTile key={card.label} label={card.label} value={todayCommandNumber(data, card.keys)} />
         ))}
+        {hardeningStatusCards.map((card) => (
+          <MetricTile key={card.label} label={card.label} value={card.value} />
+        ))}
       </div>
       <Card title="Production Readiness Quick Actions">
         <div className="quick-link-grid command-quick-links">
@@ -495,6 +557,11 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
           <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
           <button type="button" onClick={() => setActiveTab("AI Gateway")}>Open AI Gateway</button>
           <button type="button" onClick={() => setActiveTab("Production Health")}>Open Production Health</button>
+          <button type="button" onClick={() => setActiveTab("Activity Logs")}>Open Activity Logs</button>
+          <button type="button" onClick={() => setActiveTab("Rollback Center")}>Open Rollback Center</button>
+          <button type="button" onClick={() => setActiveTab("Approval Execution")}>Open Approval Execution</button>
+          <button type="button" onClick={() => setActiveTab("Maintenance")}>Open Maintenance</button>
+          <button type="button" onClick={() => setActiveTab("QA Smoke")}>Open QA Smoke</button>
         </div>
       </Card>
       {today.loading ? <LoadingBlock /> : today.error ? <ErrorBlock text="Could not load today command summary." /> : (
@@ -592,6 +659,11 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
               <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
               <button type="button" onClick={() => setActiveTab("AI Gateway")}>Open AI Gateway</button>
               <button type="button" onClick={() => setActiveTab("Production Health")}>Open Production Health</button>
+              <button type="button" onClick={() => setActiveTab("Activity Logs")}>Open Activity Logs</button>
+              <button type="button" onClick={() => setActiveTab("Rollback Center")}>Open Rollback Center</button>
+              <button type="button" onClick={() => setActiveTab("Approval Execution")}>Open Approval Execution</button>
+              <button type="button" onClick={() => setActiveTab("Maintenance")}>Open Maintenance</button>
+              <button type="button" onClick={() => setActiveTab("QA Smoke")}>Open QA Smoke</button>
               <button type="button" onClick={() => setActiveTab("CEO Report")}>Open CEO Report</button>
             </div>
           </Card>
@@ -627,7 +699,18 @@ function todayCommandNumber(data: AnyRecord, keys: string[]): number {
     recordOf(data.aiCostSummary),
     recordOf(data.aiGateway),
     recordOf(data.productionHealthSummary),
-    recordOf(data.productionReadiness)
+    recordOf(data.productionReadiness),
+    recordOf(data.activityLogs),
+    recordOf(data.activityLogsSummary),
+    recordOf(data.rollback),
+    recordOf(data.rollbackSummary),
+    recordOf(data.approvalExecution),
+    recordOf(data.approvalExecutionSummary),
+    recordOf(data.maintenance),
+    recordOf(data.maintenanceSummary),
+    recordOf(data.qaSmoke),
+    recordOf(data.qaSmokeLatest),
+    recordOf(data.qaSmokeSummary)
   ];
   for (const source of countSources) {
     const value = readFirst(source, keys);
@@ -4877,6 +4960,13 @@ function ProductionHealthPage() {
   const blockers = dailyList(readFirst(data, ["blockers"]));
   const warnings = dailyList(readFirst(data, ["warnings"]));
   const nextChecks = dailyList(readFirst(data, ["nextChecks"]));
+  const overallStatus = readFirst(data, ["overallStatus", "status"]) ?? "UNKNOWN";
+  const passModules = summaryNumber(data, ["modulesPassing", "passingModules", "passModules"], modules.filter((row) => normalizeState(row.status) === "PASS").length);
+  const warnModules = summaryNumber(data, ["modulesWarning", "warningModules", "warnModules"], modules.filter((row) => ["WARN", "WARNING"].includes(normalizeState(row.status))).length);
+  const failModules = summaryNumber(data, ["modulesFailing", "failingModules", "failModules"], modules.filter((row) => normalizeState(row.status) === "FAIL").length);
+  const criticalBlockers = summaryNumber(data, ["criticalBlockers", "blockersCount"], blockers.length);
+  const warningCount = summaryNumber(data, ["warningsCount"], warnings.length);
+  const safetyFlags = recordOf(readFirst(data, ["safetyFlags", "safety", "flags"]));
 
   return (
     <div className="page">
@@ -4887,20 +4977,31 @@ function ProductionHealthPage() {
         {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load production health." /> : (
           <>
             <div className="summary-strip command-summary">
-              <MetricTile label="Overall Status" value={<StatusBadge value={readFirst(data, ["overallStatus", "status"]) ?? "UNKNOWN"} />} />
-              <MetricTile label="Mode" value={<StatusBadge value={readFirst(data, ["mode"]) ?? "SHADOW"} />} />
-              <MetricTile label="Blockers Count" value={summaryNumber(data, ["blockersCount"], blockers.length)} />
-              <MetricTile label="Warnings Count" value={summaryNumber(data, ["warningsCount"], warnings.length)} />
-              <MetricTile label="Modules Passing" value={summaryNumber(data, ["modulesPassing", "passingModules"], modules.filter((row) => normalizeState(row.status) === "PASS").length)} />
-              <MetricTile label="Modules Warning" value={summaryNumber(data, ["modulesWarning", "warningModules"], modules.filter((row) => ["WARN", "WARNING"].includes(normalizeState(row.status))).length)} />
-              <MetricTile label="Modules Failing" value={summaryNumber(data, ["modulesFailing", "failingModules"], modules.filter((row) => normalizeState(row.status) === "FAIL").length)} />
+              <MetricTile label="Overall Status" value={<StatusBadge value={overallStatus} />} />
+              <MetricTile label="PASS Modules" value={passModules} />
+              <MetricTile label="WARN Modules" value={warnModules} />
+              <MetricTile label="FAIL Modules" value={failModules} />
+              <MetricTile label="Critical Blockers" value={criticalBlockers} />
+              <MetricTile label="Warnings" value={warningCount} />
+              <MetricTile label="Live Execution Enabled" value={<StatusBadge value={safeBooleanLabel(readFirst(data, ["liveExecutionEnabled"]), "WARNING", "BLOCKED")} />} />
+              <MetricTile label="AI Calls Enabled" value={<StatusBadge value={safeBooleanLabel(readFirst(data, ["aiCallsEnabled"]), "WARNING", "DISABLED")} />} />
             </div>
+            {normalizeState(overallStatus) === "WARN" ? (
+              <div className="soft-state compact-state">Warnings need attention, but system is reachable.</div>
+            ) : null}
             <Card title="Safety State">
               <div className="readiness-grid">
+                <div className="readiness-item"><span>Mode</span><StatusBadge value={readFirst(data, ["mode"]) ?? "SHADOW"} /></div>
                 <div className="readiness-item"><span>Shadow Mode</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["shadowMode"]), "SHADOW", "UNKNOWN")} /></div>
                 <div className="readiness-item"><span>External Execution</span><StatusBadge value={readFirst(data, ["externalExecution"]) ?? "BLOCKED"} /></div>
-                <div className="readiness-item"><span>Live Execution Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["liveExecutionEnabled"]), "WARNING", "SAFE")} /></div>
+                <div className="readiness-item"><span>Live Execution Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["liveExecutionEnabled"]), "WARNING", "BLOCKED")} /></div>
                 <div className="readiness-item"><span>AI Calls Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["aiCallsEnabled"]), "WARNING", "DISABLED")} /></div>
+                {Object.entries(safetyFlags).map(([key, value]) => (
+                  <div className="readiness-item" key={key}>
+                    <span>{labelize(key)}</span>
+                    <StatusBadge value={typeof value === "boolean" ? safeBooleanLabel(value, "WARNING", "SAFE") : value} />
+                  </div>
+                ))}
               </div>
             </Card>
             <Card title="Module Health">
@@ -4925,7 +5026,7 @@ function ProductionHealthPage() {
               )}
             </Card>
             <div className="dashboard-grid today">
-              <ListTextCard title="Blockers" rows={blockers} emptyText="No production blockers returned." />
+              <ListTextCard title="Blockers" rows={blockers} emptyText="No production blockers found." />
               <ListTextCard title="Warnings" rows={warnings} emptyText="No production warnings returned." />
             </div>
             <ListTextCard title="Next Checks" rows={nextChecks} emptyText="No next checks returned." />
@@ -5746,69 +5847,606 @@ function SettingsPage() {
   );
 }
 
-function ActivityLogsPage() {
-  const logs = useApi<ApiRows<ActivityLog>>(() => getJson(`/api/activity-logs?sellerId=${SELLER_ID}`));
-  const rows = rowsOf<ActivityLog>(logs.data);
+function hardeningSummaryOf<T extends AnyRecord>(value: unknown): T {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.summary ?? data.summary ?? result.summary ?? root.health ?? root.latest ?? root.data ?? root.result ?? root) as T;
+}
 
-  async function createTestLog() {
-    await postJson("/api/activity-logs", {
-      sellerId: SELLER_ID,
-      eventType: "FRONTEND_TEST",
-      entityType: "SYSTEM",
-      entityLabel: "Frontend activity test",
-      action: "CREATE_FRONTEND_TEST_LOG",
-      status: "SUCCESS",
-      message: "Frontend activity log test created successfully.",
-      metadata: { source: "frontend" },
-      userNote: "Created from frontend"
-    });
-    logs.reload();
+function qaSmokeLatestOf(value: unknown): QaSmokeLatest {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(root.latestRun ?? data.latestRun ?? result.latestRun ?? root.latest ?? data.latest ?? result.latest ?? root) as QaSmokeLatest;
+}
+
+function hardeningResultOf(value: unknown): AnyRecord {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return recordOf(
+    root.preview ??
+      root.execution ??
+      root.rollback ??
+      root.run ??
+      root.latestRun ??
+      data.preview ??
+      result.preview ??
+      data.execution ??
+      result.execution ??
+      data.rollback ??
+      result.rollback ??
+      data.run ??
+      result.run ??
+      data.latestRun ??
+      result.latestRun ??
+      root.result ??
+      root.data ??
+      root
+  );
+}
+
+function hardeningRowsOf<T extends AnyRecord>(value: unknown, ...sources: unknown[]): T[] {
+  const root = recordOf(value);
+  const data = recordOf(root.data);
+  const result = recordOf(root.result);
+  return firstRecordRows<T>(
+    ...sources,
+    root.events,
+    root.latestEvents,
+    root.snapshots,
+    root.latestSnapshots,
+    root.actions,
+    root.readyActions,
+    root.latestReadyActions,
+    root.runs,
+    root.latestRuns,
+    root.checks,
+    root.rows,
+    root.items,
+    data.events,
+    data.latestEvents,
+    data.snapshots,
+    data.latestSnapshots,
+    data.actions,
+    data.readyActions,
+    data.latestReadyActions,
+    data.runs,
+    data.latestRuns,
+    data.checks,
+    data.rows,
+    result.events,
+    result.latestEvents,
+    result.snapshots,
+    result.latestSnapshots,
+    result.actions,
+    result.readyActions,
+    result.latestReadyActions,
+    result.runs,
+    result.latestRuns,
+    result.checks,
+    result.rows,
+    value
+  );
+}
+
+function responseWasBlocked(value: unknown): boolean {
+  const root = recordOf(value);
+  const result = hardeningResultOf(value);
+  return root.ok === false || result.ok === false || normalizeState(result.status).includes("BLOCK");
+}
+
+function actionIdOf(row: AnyRecord): string {
+  return String(row.actionId ?? row.id ?? "").trim();
+}
+
+function snapshotIdOf(row: RollbackSnapshot): string {
+  return String(row.snapshotId ?? row.id ?? "").trim();
+}
+
+function SeverityBadge({ value }: { value: unknown }) {
+  const label = normalizeState(value || "INFO");
+  const tone = label === "INFO" ? "good" : label === "WARNING" || label === "WARN" ? "watch" : label === "ERROR" || label === "CRITICAL" ? "risk" : "neutral";
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
+function ResultPanel({ title, result }: { title: string; result: AnyRecord | null }) {
+  if (!result) return null;
+  return (
+    <Card title={title}>
+      <div className="detail-grid">
+        {Object.entries(result).slice(0, 12).map(([key, value]) => (
+          <MetricRow key={key} label={labelize(key)} value={typeof value === "object" ? <JsonSnippet value={value} /> : formatObjectValue(value)} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function ActivityLogsPage() {
+  const summary = useApi<ActivityLogSummary>(() => activityLogsApi.summary(SELLER_ID));
+  const events = useApi<ApiRows<ActivityLogEvent>>(() => activityLogsApi.events(SELLER_ID, 100));
+  const data = hardeningSummaryOf<ActivityLogSummary>(summary.data);
+  const rows = hardeningRowsOf<ActivityLogEvent>(events.data);
+  const [severity, setSeverity] = useState("All");
+  const [category, setCategory] = useState("All");
+  const [module, setModule] = useState("All");
+  const [eventType, setEventType] = useState("All");
+  const [search, setSearch] = useState("");
+  const filteredRows = rows.filter((row) => {
+    const haystack = [row.title, row.message, row.sku, row.asin, row.actionId].map((value) => String(value ?? "").toLowerCase()).join(" ");
+    return (severity === "All" || normalizeState(row.severity) === severity) &&
+      (category === "All" || String(row.eventCategory ?? "") === category) &&
+      (module === "All" || String(row.sourceModule ?? "") === module) &&
+      (eventType === "All" || String(row.eventType ?? "") === eventType) &&
+      (!search.trim() || haystack.includes(search.trim().toLowerCase()));
+  });
+  const refresh = () => {
+    summary.reload();
+    events.reload();
+  };
+
+  return (
+    <div className="page">
+      <PageHeader title="Activity Logs" subtitle="Founder-visible system timeline for approvals, engines, execution, alerts, maintenance, and QA." />
+      <SafetyBanner text="Activity logs are internal only. No external action is executed." />
+      <div className="stack">
+        <div className="button-row"><button type="button" onClick={refresh}>Refresh</button></div>
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load activity log summary." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="Total Events" value={summaryNumber(data, ["totalEvents", "total"], rows.length)} />
+            <MetricTile label="Info Count" value={summaryNumber(data, ["infoCount"], rows.filter((row) => normalizeState(row.severity) === "INFO").length)} />
+            <MetricTile label="Warning Count" value={summaryNumber(data, ["warningCount", "warnCount"], rows.filter((row) => ["WARNING", "WARN"].includes(normalizeState(row.severity))).length)} />
+            <MetricTile label="Error Count" value={summaryNumber(data, ["errorCount"], rows.filter((row) => normalizeState(row.severity) === "ERROR").length)} />
+            <MetricTile label="Critical Count" value={summaryNumber(data, ["criticalCount"], rows.filter((row) => normalizeState(row.severity) === "CRITICAL").length)} />
+            <MetricTile label="Today Events" value={summaryNumber(data, ["todayEvents", "eventsToday"], 0)} />
+          </div>
+        )}
+        <Card title="Latest Events">
+          <div className="form-grid filters-grid">
+            <SelectField label="Severity" value={severity} options={["All", ...uniqueTextValues(rows.map((row) => normalizeState(row.severity || "INFO")))]} onChange={setSeverity} />
+            <SelectField label="Event Category" value={category} options={["All", ...uniqueTextValues(rows.map((row) => row.eventCategory))]} onChange={setCategory} />
+            <SelectField label="Source Module" value={module} options={["All", ...uniqueTextValues(rows.map((row) => row.sourceModule))]} onChange={setModule} />
+            <SelectField label="Event Type" value={eventType} options={["All", ...uniqueTextValues(rows.map((row) => row.eventType))]} onChange={setEventType} />
+            <TextInput label="Search" value={search} onChange={setSearch} />
+          </div>
+          {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock text="Could not load activity log events." /> : filteredRows.length === 0 ? <EmptyBlock text="No activity events match these filters." /> : (
+            <div className="card-list command-card-list">
+              {filteredRows.map((row, index) => (
+                <article className="item-card command-item-card" key={String(row.id ?? `${row.eventType}-${index}`)}>
+                  <div className="item-top">
+                    <strong>{formatEmpty(row.title ?? row.eventType)}</strong>
+                    <SeverityBadge value={row.severity} />
+                  </div>
+                  <p className="long-text">{formatEmpty(row.message)}</p>
+                  <div className="detail-grid">
+                    <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
+                    <MetricRow label="Category" value={formatEmpty(row.eventCategory)} />
+                    <MetricRow label="Event Type" value={formatEmpty(row.eventType)} />
+                    <MetricRow label="Actor" value={formatEmpty(row.actor)} />
+                    <MetricRow label="Source Module" value={formatEmpty(row.sourceModule)} />
+                    <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
+                    <MetricRow label="Entity ID" value={formatEmpty(row.entityId)} />
+                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
+                    <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function RollbackCenterPage() {
+  const summary = useApi<RollbackSummary>(() => rollbackApi.summary(SELLER_ID));
+  const snapshots = useApi<ApiRows<RollbackSnapshot>>(() => rollbackApi.snapshots(SELLER_ID, 100));
+  const data = hardeningSummaryOf<RollbackSummary>(summary.data);
+  const rows = hardeningRowsOf<RollbackSnapshot>(snapshots.data);
+  const [actionId, setActionId] = useState("");
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [processing, setProcessing] = useState("");
+
+  const refresh = () => {
+    summary.reload();
+    snapshots.reload();
+  };
+
+  async function captureSnapshot() {
+    const trimmed = actionId.trim();
+    if (!trimmed) {
+      setError("Action ID is required.");
+      return;
+    }
+    setProcessing("capture");
+    setError("");
+    setMessage("");
+    try {
+      setResult(hardeningResultOf(await rollbackApi.capture(trimmed)));
+      setMessage("Rollback snapshot captured.");
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
   }
 
-  async function remove(id: string) {
-    await deleteJson(`/api/activity-logs/${id}`);
-    logs.reload();
+  async function runSnapshot(snapshotId: string, mode: "preview" | "execute") {
+    if (!snapshotId) return;
+    if (mode === "execute" && !window.confirm("Rollback execution is blocked in V1. This will only test the safety block.")) return;
+    setProcessing(`${mode}:${snapshotId}`);
+    setError("");
+    setMessage("");
+    try {
+      const response = mode === "preview" ? await rollbackApi.preview(snapshotId) : await rollbackApi.execute(snapshotId);
+      setResult(hardeningResultOf(response));
+      setMessage(mode === "execute" && responseWasBlocked(response) ? "Safety block working. Rollback execution is disabled." : "Rollback preview response received.");
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
   }
 
   return (
     <div className="page">
-      <PageHeader title="Activity Logs" subtitle="Audit trail for founder actions and system events." />
-      <Card title="Logs" action={<button type="button" onClick={createTestLog}>Create Test Log</button>}>
-        {logs.loading ? <LoadingBlock /> : logs.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Created At</th>
-                  <th>Event Type</th>
-                  <th>Entity Type</th>
-                  <th>Entity Label</th>
-                  <th>Action</th>
-                  <th>Status</th>
-                  <th>Message</th>
-                  <th>User Note</th>
-                  <th>Cleanup</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatEmpty(row.createdAt)}</td>
-                    <td>{formatEmpty(row.eventType)}</td>
-                    <td>{formatEmpty(row.entityType)}</td>
-                    <td>{formatEmpty(row.entityLabel)}</td>
-                    <td>{formatEmpty(row.action)}</td>
-                    <td><StatusBadge value={row.status} /></td>
-                    <td>{formatEmpty(row.message)}</td>
-                    <td>{formatEmpty(row.userNote)}</td>
-                    <td><button type="button" className="secondary" onClick={() => remove(row.id)}>Delete</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <PageHeader title="Rollback Center" subtitle="Capture and preview rollback snapshots before any future live execution. Rollback execution is blocked in V1." />
+      <SafetyBanner text="Rollback execution is blocked in V1. Preview only. No marketplace changes are made." />
+      <div className="stack">
+        <div className="summary-strip command-summary">
+          <MetricTile label="Total Snapshots" value={summaryNumber(data, ["totalSnapshots", "total"], rows.length)} />
+          <MetricTile label="Captured Snapshots" value={summaryNumber(data, ["capturedSnapshots", "capturedCount"], rows.filter((row) => normalizeState(row.snapshotStatus).includes("CAPTURE")).length)} />
+          <MetricTile label="Previewed Snapshots" value={summaryNumber(data, ["previewedSnapshots", "previewedCount"], rows.filter((row) => normalizeState(row.snapshotStatus).includes("PREVIEW")).length)} />
+          <MetricTile label="Executed Rollbacks" value={summaryNumber(data, ["executedRollbacks", "executedCount"], 0)} />
+          <MetricTile label="Blocked Rollbacks" value={summaryNumber(data, ["blockedRollbacks", "blockedCount", "notExecutedCount"], rows.filter((row) => normalizeState(row.rollbackStatus).includes("BLOCK")).length)} />
+          <MetricTile label="Latest Snapshot At" value={formatLocalDateTime(readFirst(data, ["latestSnapshotAt"]))} />
+        </div>
+        <Card title="Capture Snapshot">
+          <div className="form-grid">
+            <TextInput label="Action ID" value={actionId} onChange={setActionId} />
+            <div className="button-row gateway-buttons">
+              <button type="button" onClick={captureSnapshot} disabled={processing === "capture"}>Capture Snapshot</button>
+              <button type="button" className="secondary" onClick={refresh}>Refresh</button>
+            </div>
           </div>
+          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        </Card>
+        <ResultPanel title="Rollback Result" result={result} />
+        <Card title="Snapshots">
+          {snapshots.loading || summary.loading ? <LoadingBlock /> : snapshots.error || summary.error ? <ErrorBlock text="Could not load rollback snapshots." /> : rows.length === 0 ? (
+            <div className="soft-state">
+              <p>No rollback snapshots yet. Capture a snapshot by action ID before previewing a rollback plan.</p>
+              <div className="button-row compact">
+                <button type="button" disabled>Preview Rollback</button>
+                <button type="button" className="danger-button live-block-button" disabled>Execute Rollback Block Test</button>
+              </div>
+              <p className="section-note">Rollback execution is blocked in V1. Disabled controls are shown here as a safety cue until a snapshot exists.</p>
+            </div>
+          ) : (
+            <div className="card-list command-card-list">
+              {rows.map((row, index) => {
+                const snapshotId = snapshotIdOf(row);
+                return (
+                  <article className="item-card command-item-card" key={String(snapshotId || index)}>
+                    <div className="item-top">
+                      <strong>{formatShortId(snapshotId)}</strong>
+                      <StatusBadge value={row.rollbackStatus ?? row.snapshotStatus ?? "CAPTURED"} />
+                    </div>
+                    <div className="detail-grid">
+                      <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
+                      <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
+                      <MetricRow label="Source Module" value={formatEmpty(row.sourceModule)} />
+                      <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
+                      <MetricRow label="Entity ID" value={formatEmpty(row.entityId)} />
+                      <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                      <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
+                      <MetricRow label="Snapshot Type" value={formatEmpty(row.snapshotType)} />
+                      <MetricRow label="Snapshot Status" value={<StatusBadge value={row.snapshotStatus ?? "UNKNOWN"} />} />
+                      <MetricRow label="Rollback Status" value={<StatusBadge value={row.rollbackStatus ?? "BLOCKED"} />} />
+                      <MetricRow label="Captured By" value={formatEmpty(row.capturedBy)} />
+                      <MetricRow label="Notes" value={<span className="long-text">{formatEmpty(row.notes)}</span>} />
+                    </div>
+                    <div className="button-row compact">
+                      <button type="button" onClick={() => runSnapshot(snapshotId, "preview")} disabled={!snapshotId || processing === `preview:${snapshotId}`}>Preview Rollback</button>
+                      <button type="button" className="danger-button live-block-button" onClick={() => runSnapshot(snapshotId, "execute")} disabled={!snapshotId || processing === `execute:${snapshotId}`}>Execute Rollback Block Test</button>
+                    </div>
+                    <p className="section-note">Rollback execution is blocked in V1. This button only tests the safety block.</p>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+  const summary = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
+  const actions = useApi<ApiRows<ApprovalReadyAction>>(() => approvalExecutionApi.readyActions(SELLER_ID, 100));
+  const data = hardeningSummaryOf<ApprovalExecutionSummary>(summary.data);
+  const rows = hardeningRowsOf<ApprovalReadyAction>(actions.data);
+  const [actionType, setActionType] = useState("All");
+  const [riskLevel, setRiskLevel] = useState("All");
+  const [source, setSource] = useState("All");
+  const [search, setSearch] = useState("");
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [processing, setProcessing] = useState("");
+  const filteredRows = rows.filter((row) => {
+    const haystack = [row.sku, row.asin].map((value) => String(value ?? "").toLowerCase()).join(" ");
+    return (actionType === "All" || String(row.actionType ?? "") === actionType) &&
+      (riskLevel === "All" || normalizeState(row.riskLevel) === riskLevel) &&
+      (source === "All" || String(row.source ?? "") === source) &&
+      (!search.trim() || haystack.includes(search.trim().toLowerCase()));
+  });
+
+  async function runAction(row: ApprovalReadyAction, mode: "preview" | "shadow" | "live") {
+    const id = actionIdOf(row);
+    if (!id) return;
+    if (mode === "shadow" && !window.confirm("Run shadow execution? No external action will be executed.")) return;
+    if (mode === "live" && !window.confirm("Live execution is blocked in V1. This only tests the block.")) return;
+    setProcessing(`${mode}:${id}`);
+    setError("");
+    setMessage("");
+    try {
+      const response = mode === "preview" ? await approvalExecutionApi.preview(id) : mode === "shadow" ? await approvalExecutionApi.executeShadow(id) : await approvalExecutionApi.executeLive(id);
+      setResult(hardeningResultOf(response));
+      setMessage(mode === "live" && responseWasBlocked(response) ? "Safety block working. Live execution remains disabled." : "Approval execution response received.");
+      summary.reload();
+      actions.reload();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Approval Execution Bridge" subtitle="Approved actions ready for preview or shadow execution. Live execution is blocked." />
+      <SafetyBanner text="Only approved actions can be previewed or shadow-executed. Live execution is blocked." />
+      <div className="stack">
+        <div className="button-row">
+          <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
+          <button type="button" className="secondary" onClick={() => { summary.reload(); actions.reload(); }}>Refresh</button>
+        </div>
+        <div className="summary-strip command-summary">
+          <MetricTile label="Ready Actions" value={summaryNumber(data, ["readyActions", "readyActionCount", "readyCount"], rows.length)} />
+          <MetricTile label="Previewed Actions" value={summaryNumber(data, ["previewedActions", "previewedCount"], 0)} />
+          <MetricTile label="Shadow Executions" value={summaryNumber(data, ["shadowExecutions", "shadowExecutionCount"], 0)} />
+          <MetricTile label="Live Blocked Attempts" value={summaryNumber(data, ["liveBlockedAttempts", "liveBlockedCount"], 0)} />
+          <MetricTile label="Unsupported Actions" value={summaryNumber(data, ["unsupportedActions", "unsupportedCount"], 0)} />
+          <MetricTile label="High Risk Ready Actions" value={summaryNumber(data, ["highRiskReadyActions", "highRiskCount", "highRiskReadyCount"], rows.filter((row) => normalizeState(row.riskLevel).includes("HIGH")).length)} />
+        </div>
+        {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        <ResultPanel title="Execution Result" result={result} />
+        <Card title="Ready Actions">
+          <div className="form-grid filters-grid">
+            <SelectField label="Action Type" value={actionType} options={["All", ...uniqueTextValues(rows.map((row) => row.actionType))]} onChange={setActionType} />
+            <SelectField label="Risk Level" value={riskLevel} options={["All", ...uniqueTextValues(rows.map((row) => normalizeState(row.riskLevel || "UNKNOWN")))]} onChange={setRiskLevel} />
+            <SelectField label="Source" value={source} options={["All", ...uniqueTextValues(rows.map((row) => row.source))]} onChange={setSource} />
+            <TextInput label="SKU/ASIN Search" value={search} onChange={setSearch} />
+          </div>
+          {actions.loading || summary.loading ? <LoadingBlock /> : actions.error || summary.error ? <ErrorBlock text="Could not load approval execution data." /> : filteredRows.length === 0 ? <EmptyBlock text="No approved actions are ready for execution bridge review." /> : (
+            <div className="card-list command-card-list">
+              {filteredRows.map((row, index) => {
+                const id = actionIdOf(row);
+                return (
+                  <article className="item-card command-item-card" key={String(id || index)}>
+                    <div className="item-top">
+                      <strong>{formatEmpty(row.title ?? row.actionType)}</strong>
+                      <StatusBadge value={row.riskLevel ?? "UNKNOWN"} />
+                    </div>
+                    <p className="long-text">{formatEmpty(row.summary)}</p>
+                    <div className="detail-grid">
+                      <MetricRow label="Action ID" value={formatShortId(id)} />
+                      <MetricRow label="Action Type" value={formatEmpty(row.actionType)} />
+                      <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
+                      <MetricRow label="Entity ID" value={formatEmpty(row.entityId)} />
+                      <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                      <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
+                      <MetricRow label="Approval Status" value={<StatusBadge value={row.approvalStatus ?? "APPROVED"} />} />
+                      <MetricRow label="State" value={<StatusBadge value={row.state ?? "READY"} />} />
+                      <MetricRow label="Source" value={formatEmpty(row.source)} />
+                      <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
+                    </div>
+                    <div className="button-row compact">
+                      <button type="button" onClick={() => runAction(row, "preview")} disabled={!id || processing === `preview:${id}`}>Preview</button>
+                      <button type="button" onClick={() => runAction(row, "shadow")} disabled={!id || processing === `shadow:${id}`}>Execute Shadow</button>
+                      <button type="button" className="danger-button live-block-button" onClick={() => runAction(row, "live")} disabled={!id || processing === `live:${id}`}>Try Live Block</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function MaintenancePage() {
+  const summary = useApi<MaintenanceSummary>(() => maintenanceApi.summary(SELLER_ID));
+  const runs = useApi<ApiRows<MaintenanceRun>>(() => maintenanceApi.runs(SELLER_ID, 50));
+  const data = hardeningSummaryOf<MaintenanceSummary>(summary.data);
+  const latestRun = recordOf(readFirst(data, ["latestRun"]));
+  const rows = hardeningRowsOf<MaintenanceRun>(runs.data);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [error, setError] = useState("");
+
+  async function runMaintenance() {
+    if (!window.confirm("Run safe maintenance now? No external action will be executed.")) return;
+    setRunning(true);
+    setError("");
+    try {
+      setResult(hardeningResultOf(await maintenanceApi.run(SELLER_ID)));
+      summary.reload();
+      runs.reload();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Maintenance Runner" subtitle="Run safe internal housekeeping: safety setup, alert generation, data freshness, learning rebuild, and health check." />
+      <SafetyBanner text="Maintenance runs internal checks only. No Amazon, Ads, listing, image, A+, social, notification, or AI action is executed." />
+      <div className="stack">
+        <div className="button-row"><button type="button" onClick={runMaintenance} disabled={running}>{running ? "Running maintenance..." : "Run Maintenance"}</button></div>
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        <div className="summary-strip command-summary">
+          <MetricTile label="Latest Run Status" value={<StatusBadge value={readFirst(latestRun, ["runStatus"]) ?? readFirst(data, ["latestRunStatus", "runStatus"]) ?? "UNKNOWN"} />} />
+          <MetricTile label="Runs Today" value={summaryNumber(data, ["runsToday", "todayRuns", "totalRuns"], 0)} />
+          <MetricTile label="Alerts Generated" value={summaryNumber(latestRun, ["alertsGenerated"], summaryNumber(data, ["alertsGenerated"], 0))} />
+          <MetricTile label="Data Sources Checked" value={summaryNumber(latestRun, ["dataSourcesChecked"], summaryNumber(data, ["dataSourcesChecked"], 0))} />
+          <MetricTile label="Learning Rebuilt" value={<StatusBadge value={safeBooleanLabel(readFirst(latestRun, ["learningRebuilt"]) ?? readFirst(data, ["learningRebuilt"]), "YES", "NO")} />} />
+          <MetricTile label="Health Status" value={<StatusBadge value={readFirst(latestRun, ["healthStatus"]) ?? readFirst(data, ["healthStatus"]) ?? "UNKNOWN"} />} />
+        </div>
+        <ResultPanel title="Maintenance Result" result={result} />
+        <Card title="Runs">
+          {runs.loading || summary.loading ? <LoadingBlock text={running ? "Running maintenance..." : "Loading maintenance runs..."} /> : runs.error || summary.error ? <ErrorBlock text="Could not load maintenance runs." /> : rows.length === 0 ? <EmptyBlock text="No maintenance runs yet." /> : (
+            <div className="card-list command-card-list">
+              {rows.map((row, index) => (
+                <article className="item-card command-item-card" key={String(row.runId ?? row.id ?? index)}>
+                  <div className="item-top">
+                    <strong>{formatShortId(row.runId ?? row.id)}</strong>
+                    <StatusBadge value={row.runStatus ?? "UNKNOWN"} />
+                  </div>
+                  <div className="detail-grid">
+                    <MetricRow label="Started At" value={formatLocalDateTime(row.startedAt)} />
+                    <MetricRow label="Finished At" value={formatLocalDateTime(row.finishedAt)} />
+                    <MetricRow label="Run Type" value={formatEmpty(row.runType)} />
+                    <MetricRow label="Safety Initialized" value={readBoolean(row.safetyInitialized) ? "Yes" : "No"} />
+                    <MetricRow label="Alert Rules Seeded" value={readBoolean(row.alertRulesSeeded) ? "Yes" : "No"} />
+                    <MetricRow label="Alerts Generated" value={formatEmpty(row.alertsGenerated)} />
+                    <MetricRow label="Data Sources Checked" value={formatEmpty(row.dataSourcesChecked)} />
+                    <MetricRow label="Learning Rebuilt" value={readBoolean(row.learningRebuilt) ? "Yes" : "No"} />
+                    <MetricRow label="Health Status" value={<StatusBadge value={row.healthStatus ?? "UNKNOWN"} />} />
+                    <MetricRow label="Warnings" value={<JsonSnippet value={row.warnings ?? []} />} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function QaSmokePage() {
+  const latest = useApi<QaSmokeLatest>(() => qaSmokeApi.latest(SELLER_ID));
+  const runs = useApi<ApiRows<QaSmokeRun>>(() => qaSmokeApi.runs(SELLER_ID, 20));
+  const latestData = qaSmokeLatestOf(latest.data);
+  const runRows = hardeningRowsOf<QaSmokeRun>(runs.data);
+  const checks = hardeningRowsOf<QaSmokeCheck>(latest.data, latestData.checks);
+  const blockers = dailyList(readFirst(latestData, ["blockers"]));
+  const warnings = dailyList(readFirst(latestData, ["warnings"]));
+  const totalChecks = summaryNumber(latestData, ["totalChecks"], checks.length);
+  const failCount = summaryNumber(latestData, ["failCount"], checks.filter((row) => normalizeState(row.status) === "FAIL").length);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+
+  async function runSmoke() {
+    if (!window.confirm("Run QA smoke test now? This checks internal APIs only.")) return;
+    setRunning(true);
+    setError("");
+    try {
+      await qaSmokeApi.run(SELLER_ID);
+      latest.reload();
+      runs.reload();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="QA Smoke Test Center" subtitle="Run backend smoke tests across all critical modules before enabling future execution." />
+      <SafetyBanner text="QA Smoke only checks system readiness. It does not execute marketplace changes." />
+      <div className="stack">
+        <div className="button-row"><button type="button" onClick={runSmoke} disabled={running}>{running ? "Running QA smoke..." : "Run QA Smoke Test"}</button></div>
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        {totalChecks === 23 && failCount === 0 ? <div className="soft-state success-state compact-state">QA Smoke PASS</div> : null}
+        {latest.loading ? <LoadingBlock /> : latest.error ? <ErrorBlock text="Could not load latest QA smoke result." /> : (
+          <>
+            <div className="summary-strip command-summary">
+              <MetricTile label="Run Status" value={<StatusBadge value={readFirst(latestData, ["runStatus"]) ?? "UNKNOWN"} />} />
+              <MetricTile label="Total Checks" value={totalChecks} />
+              <MetricTile label="Pass Count" value={summaryNumber(latestData, ["passCount"], checks.filter((row) => normalizeState(row.status) === "PASS").length)} />
+              <MetricTile label="Warn Count" value={summaryNumber(latestData, ["warnCount"], checks.filter((row) => ["WARN", "WARNING"].includes(normalizeState(row.status))).length)} />
+              <MetricTile label="Fail Count" value={failCount} />
+              <MetricTile label="Blockers Count" value={summaryNumber(latestData, ["blockersCount"], blockers.length)} />
+              <MetricTile label="Warnings Count" value={summaryNumber(latestData, ["warningsCount"], warnings.length)} />
+            </div>
+            <Card title="Checks">
+              {checks.length === 0 ? <EmptyBlock text="No QA smoke checks returned yet." /> : (
+                <div className="card-list command-card-list">
+                  {checks.map((row, index) => (
+                    <article className="item-card command-item-card" key={String(row.key ?? index)}>
+                      <div className="item-top">
+                        <strong>{formatEmpty(row.name ?? row.key)}</strong>
+                        <StatusBadge value={row.status ?? "UNKNOWN"} />
+                      </div>
+                      <p className="long-text">{formatEmpty(row.message)}</p>
+                      <div className="detail-grid">
+                        <MetricRow label="Key" value={formatEmpty(row.key)} />
+                        <MetricRow label="Critical" value={readBoolean(row.critical) ? "Yes" : "No"} />
+                        <MetricRow label="Duration Ms" value={formatEmpty(row.durationMs)} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </Card>
+            <div className="dashboard-grid today">
+              <ListTextCard title="Blockers" rows={blockers} emptyText="No QA blockers returned." />
+              <ListTextCard title="Warnings" rows={warnings} emptyText="No QA warnings returned." />
+            </div>
+          </>
         )}
-      </Card>
+        <Card title="Previous Runs">
+          {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock text="Could not load previous QA smoke runs." /> : runRows.length === 0 ? <EmptyBlock text="No previous QA smoke runs yet." /> : (
+            <div className="card-list command-card-list">
+              {runRows.map((row, index) => (
+                <article className="item-card command-item-card" key={String(row.runId ?? row.id ?? index)}>
+                  <div className="item-top">
+                    <strong>{formatShortId(row.runId ?? row.id)}</strong>
+                    <StatusBadge value={row.runStatus ?? "UNKNOWN"} />
+                  </div>
+                  <div className="detail-grid">
+                    <MetricRow label="Started At" value={formatLocalDateTime(row.startedAt)} />
+                    <MetricRow label="Finished At" value={formatLocalDateTime(row.finishedAt)} />
+                    <MetricRow label="Total Checks" value={formatEmpty(row.totalChecks)} />
+                    <MetricRow label="Pass Count" value={formatEmpty(row.passCount)} />
+                    <MetricRow label="Warn Count" value={formatEmpty(row.warnCount)} />
+                    <MetricRow label="Fail Count" value={formatEmpty(row.failCount)} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,8 @@
 import type {
+  ActivityLogEvent,
+  ActivityLogSummary,
+  ApprovalExecutionSummary,
+  ApprovalReadyAction,
   AiCostEstimate,
   AiCostSummary,
   AiGatewayStatus,
@@ -9,7 +13,13 @@ import type {
   DataFreshnessSummary,
   Experiment,
   ExperimentSummary,
+  MaintenanceRun,
+  MaintenanceSummary,
   ProductionHealthSummary,
+  QaSmokeLatest,
+  QaSmokeRun,
+  RollbackSnapshot,
+  RollbackSummary,
   SafetyAuditEvent,
   SafetyControlSettingsPayload,
   SafetyControlStatus
@@ -127,4 +137,45 @@ export const aiGatewayApi = {
 
 export const productionHealthApi = {
   summary: (sellerId: string) => getJson<ProductionHealthSummary>(`/api/production-health/summary?sellerId=${sellerId}`)
+};
+
+export const activityLogsApi = {
+  summary: (sellerId: string) => getJson<ActivityLogSummary>(`/api/activity-logs/summary?sellerId=${sellerId}`),
+  events: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<ActivityLogEvent>>(`/api/activity-logs/events?sellerId=${sellerId}&limit=${limit}`),
+  record: (body: Record<string, unknown>) => postJson<ActivityLogEvent>("/api/activity-logs/record", body)
+};
+
+export const rollbackApi = {
+  summary: (sellerId: string) => getJson<RollbackSummary>(`/api/rollback/summary?sellerId=${sellerId}`),
+  snapshots: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<RollbackSnapshot>>(`/api/rollback/snapshots?sellerId=${sellerId}&limit=${limit}`),
+  action: (actionId: string, sellerId: string) =>
+    getJson<unknown>(`/api/rollback/action/${encodeURIComponent(actionId)}?sellerId=${sellerId}`),
+  capture: (actionId: string) => postJson<unknown>(`/api/rollback/capture/${encodeURIComponent(actionId)}`, {}),
+  preview: (snapshotId: string) => postJson<unknown>(`/api/rollback/preview/${encodeURIComponent(snapshotId)}`, {}),
+  execute: (snapshotId: string) => postJson<unknown>(`/api/rollback/execute/${encodeURIComponent(snapshotId)}`, {})
+};
+
+export const approvalExecutionApi = {
+  readyActions: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<ApprovalReadyAction>>(`/api/approval-execution/ready-actions?sellerId=${sellerId}&limit=${limit}`),
+  summary: (sellerId: string) => getJson<ApprovalExecutionSummary>(`/api/approval-execution/summary?sellerId=${sellerId}`),
+  preview: (actionId: string) => postJson<unknown>(`/api/approval-execution/preview/${encodeURIComponent(actionId)}`, {}),
+  executeShadow: (actionId: string) =>
+    postJson<unknown>(`/api/approval-execution/execute-shadow/${encodeURIComponent(actionId)}`, {}),
+  executeLive: (actionId: string) =>
+    postJson<unknown>(`/api/approval-execution/execute-live/${encodeURIComponent(actionId)}`, {})
+};
+
+export const maintenanceApi = {
+  run: (sellerId: string) => postJson<unknown>(`/api/maintenance/run?sellerId=${sellerId}`, {}),
+  runs: (sellerId: string, limit = 50) => getJson<ApiRows<MaintenanceRun>>(`/api/maintenance/runs?sellerId=${sellerId}&limit=${limit}`),
+  summary: (sellerId: string) => getJson<MaintenanceSummary>(`/api/maintenance/summary?sellerId=${sellerId}`)
+};
+
+export const qaSmokeApi = {
+  run: (sellerId: string) => postJson<unknown>(`/api/qa-smoke/run?sellerId=${sellerId}`, {}),
+  runs: (sellerId: string, limit = 20) => getJson<ApiRows<QaSmokeRun>>(`/api/qa-smoke/runs?sellerId=${sellerId}&limit=${limit}`),
+  latest: (sellerId: string) => getJson<QaSmokeLatest>(`/api/qa-smoke/latest?sellerId=${sellerId}`)
 };

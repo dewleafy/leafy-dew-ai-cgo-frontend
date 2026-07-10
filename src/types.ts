@@ -370,6 +370,144 @@ export type ActivityLog = {
   userNote?: string | null;
 };
 
+export type ActivityLogSummary = AnyRecord & {
+  totalEvents?: number | string | null;
+  infoCount?: number | string | null;
+  warningCount?: number | string | null;
+  errorCount?: number | string | null;
+  criticalCount?: number | string | null;
+  todayEvents?: number | string | null;
+};
+
+export type ActivityLogEvent = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  severity?: string | null;
+  eventCategory?: string | null;
+  eventType?: string | null;
+  title?: string | null;
+  message?: string | null;
+  actor?: string | null;
+  sourceModule?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  actionId?: string | null;
+};
+
+export type RollbackSummary = AnyRecord & {
+  totalSnapshots?: number | string | null;
+  capturedSnapshots?: number | string | null;
+  previewedSnapshots?: number | string | null;
+  executedRollbacks?: number | string | null;
+  blockedRollbacks?: number | string | null;
+  latestSnapshotAt?: string | null;
+};
+
+export type RollbackSnapshot = AnyRecord & {
+  id?: string | null;
+  snapshotId?: string | null;
+  createdAt?: string | null;
+  actionId?: string | null;
+  sourceModule?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  snapshotType?: string | null;
+  snapshotStatus?: string | null;
+  rollbackStatus?: string | null;
+  capturedBy?: string | null;
+  notes?: string | null;
+};
+
+export type ApprovalExecutionSummary = AnyRecord & {
+  readyActions?: number | string | null;
+  previewedActions?: number | string | null;
+  shadowExecutions?: number | string | null;
+  liveBlockedAttempts?: number | string | null;
+  unsupportedActions?: number | string | null;
+  highRiskReadyActions?: number | string | null;
+};
+
+export type ApprovalReadyAction = AnyRecord & {
+  id?: string | null;
+  actionId?: string | null;
+  actionType?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  riskLevel?: string | null;
+  approvalStatus?: string | null;
+  state?: string | null;
+  source?: string | null;
+  createdAt?: string | null;
+};
+
+export type MaintenanceSummary = AnyRecord & {
+  latestRunStatus?: string | null;
+  runsToday?: number | string | null;
+  alertsGenerated?: number | string | null;
+  dataSourcesChecked?: number | string | null;
+  learningRebuilt?: boolean | string | number | null;
+  healthStatus?: string | null;
+};
+
+export type MaintenanceRun = AnyRecord & {
+  id?: string | null;
+  runId?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  runStatus?: string | null;
+  runType?: string | null;
+  safetyInitialized?: boolean | string | number | null;
+  alertRulesSeeded?: boolean | string | number | null;
+  alertsGenerated?: number | string | null;
+  dataSourcesChecked?: number | string | null;
+  learningRebuilt?: boolean | string | number | null;
+  healthStatus?: string | null;
+  warnings?: unknown[] | string | null;
+};
+
+export type QaSmokeCheck = AnyRecord & {
+  key?: string | null;
+  name?: string | null;
+  status?: string | null;
+  critical?: boolean | string | number | null;
+  message?: string | null;
+  durationMs?: number | string | null;
+};
+
+export type QaSmokeLatest = AnyRecord & {
+  runId?: string | null;
+  runStatus?: string | null;
+  totalChecks?: number | string | null;
+  passCount?: number | string | null;
+  warnCount?: number | string | null;
+  failCount?: number | string | null;
+  blockersCount?: number | string | null;
+  warningsCount?: number | string | null;
+  checks?: QaSmokeCheck[] | null;
+  blockers?: unknown[] | null;
+  warnings?: unknown[] | null;
+};
+
+export type QaSmokeRun = AnyRecord & {
+  id?: string | null;
+  runId?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  runStatus?: string | null;
+  totalChecks?: number | string | null;
+  passCount?: number | string | null;
+  warnCount?: number | string | null;
+  failCount?: number | string | null;
+};
+
 export type EngineRegistryItem = AnyRecord & {
   engineKey?: string | null;
   engineName?: string | null;
