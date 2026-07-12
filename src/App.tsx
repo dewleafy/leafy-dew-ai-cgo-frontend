@@ -9,13 +9,19 @@ import {
   dataFreshnessApi,
   experimentsApi,
   getJson,
+  launchChecklistApi,
+  launchGateApi,
+  liveExecutionApi,
   maintenanceApi,
+  notificationOutboxApi,
   postJson,
   productionHealthApi,
   putJson,
   qaSmokeApi,
   rollbackApi,
-  safetyControlApi
+  safetyControlApi,
+  schedulerControlApi,
+  securityGuardrailsApi
 } from "./api";
 import type {
   ActionLedgerRow,
@@ -48,10 +54,19 @@ import type {
   LearningEngineSummary,
   LearningEvent,
   LearningSummary,
+  LaunchChecklistItem,
+  LaunchChecklistSummary,
+  LaunchGateCheck,
+  LaunchGateSummary,
+  LiveExecutionRun,
+  LiveExecutionStatus,
   ListingDraft,
   ListingDraftSummary,
   MaintenanceRun,
   MaintenanceSummary,
+  NotificationMessage,
+  NotificationSettings,
+  NotificationSummary,
   ProductionHealthModule,
   ProductionHealthSummary,
   ProductEconomics,
@@ -64,6 +79,10 @@ import type {
   RollbackSummary,
   SafetyAuditEvent,
   SafetyControlStatus,
+  SchedulerJob,
+  SchedulerSummary,
+  SecurityAuditEvent,
+  SecurityGuardrailSummary,
   TodayCommandSummary
 } from "./types";
 
@@ -79,10 +98,16 @@ const tabs = [
   "Approval Center",
   "Approval Execution",
   "Execution Gateway",
+  "Live Execution",
   "Rollback Center",
   "Listing Drafts",
   "Image + A+",
   "Safety Control",
+  "Launch Gate",
+  "Launch Checklist",
+  "Scheduler",
+  "Notification Outbox",
+  "Security Guardrails",
   "Alert Center",
   "Experiments",
   "Data Freshness",
@@ -408,10 +433,16 @@ function App() {
           {activeTab === "Approval Center" && <ApprovalCenterPage />}
           {activeTab === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setActiveTab} />}
           {activeTab === "Execution Gateway" && <ExecutionGatewayPage />}
+          {activeTab === "Live Execution" && <LiveExecutionPage />}
           {activeTab === "Rollback Center" && <RollbackCenterPage />}
           {activeTab === "Listing Drafts" && <ListingDraftsPage setActiveTab={setActiveTab} />}
           {activeTab === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setActiveTab} />}
           {activeTab === "Safety Control" && <SafetyControlPage />}
+          {activeTab === "Launch Gate" && <LaunchGatePage />}
+          {activeTab === "Launch Checklist" && <LaunchChecklistPage />}
+          {activeTab === "Scheduler" && <SchedulerControlPage />}
+          {activeTab === "Notification Outbox" && <NotificationOutboxPage />}
+          {activeTab === "Security Guardrails" && <SecurityGuardrailsPage />}
           {activeTab === "Alert Center" && <AlertCenterPage setActiveTab={setActiveTab} />}
           {activeTab === "Experiments" && <ExperimentsPage />}
           {activeTab === "Data Freshness" && <DataFreshnessPage />}
@@ -455,7 +486,16 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     "qaSmokeLatest.runStatus",
     "qaSmoke.latest.runStatus"
   ]);
+  const launchBlockers = Math.max(
+    todayCommandNumber(data, ["launchBlockers", "launchBlockersCount", "launchGateBlockers", "blockersCount"]),
+    dailyList(readFirst(data, ["launchGate.blockers", "launchGateSummary.blockers", "launchChecklist.blockers"])).length
+  );
+  const securityBlockedEvents = todayCommandNumber(data, ["securityBlockedEvents", "securityBlocks", "blockedSecurityEvents", "blocked"]);
+  const liveAdapterMissing = readBoolean(readFirst(data, ["liveAdapterMissing", "liveExecution.liveAdapterMissing", "productionHealth.liveAdapterMissing"]));
   const productionRiskHints = [
+    launchBlockers > 0 ? { title: "Launch blockers", riskLevel: "HIGH", message: `${launchBlockers} launch blockers need resolution before any limited live test.` } : null,
+    securityBlockedEvents > 0 ? { title: "Security blocks", riskLevel: "HIGH", message: `${securityBlockedEvents} dangerous actions were blocked by security guardrails.` } : null,
+    liveAdapterMissing ? { title: "Live adapter missing", riskLevel: "WATCH", message: "A live marketplace adapter is missing or disabled; keep live execution locked." } : null,
     qaFailCount > 0 ? { title: "QA smoke failed checks", riskLevel: "HIGH", message: `${qaFailCount} QA smoke checks are failing.` } : null,
     productionBlockers > 0 ? { title: "Production health blockers", riskLevel: "HIGH", message: `${productionBlockers} production blockers need attention.` } : null,
     highAlerts > 0 ? { title: "High severity open alerts", riskLevel: "HIGH", message: `${highAlerts} high or critical alerts need review.` } : null,
@@ -463,9 +503,15 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     pendingApprovals > 10 ? { title: "High pending approvals", riskLevel: "WATCH", message: `${pendingApprovals} approval actions are waiting for founder review.` } : null,
     highRiskApprovals > 0 ? { title: "High risk approval actions", riskLevel: "HIGH", message: `${highRiskApprovals} high risk actions require careful review.` } : null
   ].filter(Boolean) as AnyRecord[];
-  const topRisks = [...recordsOf(data.topRisks ?? data.risks), ...productionRiskHints].slice(0, 6);
+  const topRisks = [...recordsOf(data.topRisks ?? data.risks), ...productionRiskHints].slice(0, 8);
   const priorities = recordsOf(data.todayPriorities ?? data.priorities).slice(0, 8);
   const defaultNextBestActions = [
+    "Run Launch Checklist",
+    "Run Launch Gate",
+    "Run QA Smoke",
+    "Run Maintenance",
+    "Dry-run one approved low-risk action",
+    "Keep live execution locked until ready",
     "Run maintenance if it has not run today",
     "Run QA smoke test before enabling execution",
     "Review approved actions ready for shadow execution",
@@ -493,6 +539,10 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "Creative Recommendations", keys: ["creativeRecommendations", "totalCreativeRecommendations"] }
   ];
   const productionStatusCards = [
+    { label: "Scheduler Jobs", keys: ["schedulerJobs", "totalJobs", "scheduler.totalJobs", "schedulerSummary.totalJobs"] },
+    { label: "Notification Queued", keys: ["notificationQueued", "queued", "notificationOutbox.queued", "notificationSummary.queued"] },
+    { label: "Live Execution Runs", keys: ["liveExecutionRuns", "totalLiveRuns", "liveExecution.totalLiveRuns", "liveExecutionSummary.totalLiveRuns"] },
+    { label: "Security Blocked Events", keys: ["securityBlockedEvents", "securityBlocks", "securityGuardrails.blocked", "securityGuardrailSummary.blocked"] },
     { label: "Open Alerts", keys: ["openAlerts", "openAlertCount", "openCount"] },
     { label: "High Alerts", keys: ["highAlerts", "highAlertCount", "criticalAlerts", "criticalAlertCount"] },
     { label: "Running Experiments", keys: ["runningExperiments", "activeExperiments", "runningCount"] },
@@ -508,6 +558,12 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "QA Fail Count", keys: ["qaFailCount", "failCount"] }
   ];
   const hardeningStatusCards = [
+    { label: "Launch Gate Status", value: <StatusBadge value={readFirst(data, ["launchGateStatus", "launchGate.overallStatus", "launchGateSummary.overallStatus"]) ?? "UNKNOWN"} /> },
+    { label: "Launch Checklist Status", value: <StatusBadge value={readFirst(data, ["launchChecklistStatus", "launchChecklist.overallLaunchStatus", "launchChecklistSummary.overallLaunchStatus"]) ?? "UNKNOWN"} /> },
+    { label: "Live Eligible", value: <StatusBadge value={readBoolean(readFirst(data, ["liveEligible", "launchGate.liveEligible", "liveExecution.liveEligible"])) ? "PASS" : "LOCKED"} /> },
+    { label: "PPC Live Eligible", value: <StatusBadge value={readBoolean(readFirst(data, ["ppcLiveEligible", "launchGate.ppcLiveEligible", "liveExecution.ppcLiveEligible"])) ? "PASS" : "LOCKED"} /> },
+    { label: "Listing Live Eligible", value: <StatusBadge value={readBoolean(readFirst(data, ["listingLiveEligible", "launchGate.listingLiveEligible", "liveExecution.listingLiveEligible"])) ? "PASS" : "LOCKED"} /> },
+    { label: "Latest Dry Run Status", value: <StatusBadge value={readFirst(data, ["latestDryRunStatus", "liveExecution.latestDryRunStatus", "latestDryRun.status"]) ?? "UNKNOWN"} /> },
     { label: "Latest Maintenance Status", value: <StatusBadge value={latestMaintenanceStatus ?? "UNKNOWN"} /> },
     { label: "Latest QA Status", value: <StatusBadge value={latestQaStatus ?? "UNKNOWN"} /> }
   ];
@@ -521,7 +577,13 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
     { label: "Product Economics", keys: ["productEconomics", "productEconomicsReady"] },
     { label: "Learning Loop", keys: ["learningLoop", "learningLoopReady"] },
     { label: "Execution Gateway", keys: ["executionGateway", "executionGatewayReady"] },
+    { label: "Live Execution", keys: ["liveExecution", "liveExecutionReady"] },
     { label: "Safety Control", keys: ["safetyControl", "safetyControlReady"] },
+    { label: "Launch Gate", keys: ["launchGate", "launchGateReady"] },
+    { label: "Launch Checklist", keys: ["launchChecklist", "launchChecklistReady"] },
+    { label: "Scheduler", keys: ["scheduler", "schedulerReady", "schedulerControl"] },
+    { label: "Notification Outbox", keys: ["notificationOutbox", "notificationOutboxReady"] },
+    { label: "Security Guardrails", keys: ["securityGuardrails", "securityGuardrailsReady"] },
     { label: "Alert Center", keys: ["alertCenter", "alertCenterReady"] },
     { label: "Experiments", keys: ["experiments", "experimentsReady"] },
     { label: "Data Freshness", keys: ["dataFreshness", "dataFreshnessReady"] },
@@ -552,6 +614,12 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
       <Card title="Production Readiness Quick Actions">
         <div className="quick-link-grid command-quick-links">
           <button type="button" onClick={() => setActiveTab("Safety Control")}>Open Safety Control</button>
+          <button type="button" onClick={() => setActiveTab("Live Execution")}>Open Live Execution</button>
+          <button type="button" onClick={() => setActiveTab("Launch Gate")}>Open Launch Gate</button>
+          <button type="button" onClick={() => setActiveTab("Launch Checklist")}>Open Launch Checklist</button>
+          <button type="button" onClick={() => setActiveTab("Scheduler")}>Open Scheduler</button>
+          <button type="button" onClick={() => setActiveTab("Notification Outbox")}>Open Notification Outbox</button>
+          <button type="button" onClick={() => setActiveTab("Security Guardrails")}>Open Security Guardrails</button>
           <button type="button" onClick={() => setActiveTab("Alert Center")}>Open Alert Center</button>
           <button type="button" onClick={() => setActiveTab("Experiments")}>Open Experiments</button>
           <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
@@ -650,6 +718,12 @@ function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
               <button type="button" onClick={() => setActiveTab("Engine Command Center")}>Open Engine Command Center</button>
               <button type="button" onClick={() => setActiveTab("Learning")}>Open Learning</button>
               <button type="button" onClick={() => setActiveTab("Execution Gateway")}>Open Execution Gateway</button>
+              <button type="button" onClick={() => setActiveTab("Live Execution")}>Open Live Execution</button>
+              <button type="button" onClick={() => setActiveTab("Launch Gate")}>Open Launch Gate</button>
+              <button type="button" onClick={() => setActiveTab("Launch Checklist")}>Open Launch Checklist</button>
+              <button type="button" onClick={() => setActiveTab("Scheduler")}>Open Scheduler</button>
+              <button type="button" onClick={() => setActiveTab("Notification Outbox")}>Open Notification Outbox</button>
+              <button type="button" onClick={() => setActiveTab("Security Guardrails")}>Open Security Guardrails</button>
               <button type="button" onClick={() => setActiveTab("Listing Drafts")}>Open Listing Drafts</button>
               <button type="button" onClick={() => setActiveTab("Image + A+")}>Open Creative Recommendations</button>
               <button type="button" onClick={() => setActiveTab("Product Passport")}>Open Product Passport Cost Queue</button>
@@ -706,6 +780,19 @@ function todayCommandNumber(data: AnyRecord, keys: string[]): number {
     recordOf(data.rollbackSummary),
     recordOf(data.approvalExecution),
     recordOf(data.approvalExecutionSummary),
+    recordOf(data.liveExecution),
+    recordOf(data.liveExecutionSummary),
+    recordOf(data.launchGate),
+    recordOf(data.launchGateSummary),
+    recordOf(data.launchChecklist),
+    recordOf(data.launchChecklistSummary),
+    recordOf(data.scheduler),
+    recordOf(data.schedulerSummary),
+    recordOf(data.schedulerControl),
+    recordOf(data.notificationOutbox),
+    recordOf(data.notificationSummary),
+    recordOf(data.securityGuardrails),
+    recordOf(data.securityGuardrailSummary),
     recordOf(data.maintenance),
     recordOf(data.maintenanceSummary),
     recordOf(data.qaSmoke),
@@ -4825,7 +4912,14 @@ function AiGatewayPage() {
     modelName: ""
   });
   const [blockedForm, setBlockedForm] = useState({ moduleName: "", purpose: "", blockedReason: "AI calls disabled in V1." });
+  const [generateForm, setGenerateForm] = useState({
+    moduleName: "",
+    purpose: "",
+    estimatedInputTokens: "",
+    estimatedOutputTokens: ""
+  });
   const [estimateResult, setEstimateResult] = useState<AiCostEstimate | null>(null);
+  const [generateResult, setGenerateResult] = useState<AnyRecord | null>(null);
   const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
 
   async function estimate(event: FormEvent) {
@@ -4861,6 +4955,39 @@ function AiGatewayPage() {
       ledger.reload();
     } catch {
       setActionState({ id: "", message: "", error: "Could not record blocked AI attempt." });
+    }
+  }
+
+  async function testGenerateGuardrail(event: FormEvent) {
+    event.preventDefault();
+    setActionState({ id: "generate", message: "", error: "" });
+    setGenerateResult(null);
+    try {
+      const response = await aiGatewayApi.generate({
+        sellerId: SELLER_ID,
+        moduleName: generateForm.moduleName,
+        purpose: generateForm.purpose,
+        prompt: generateForm.purpose,
+        estimatedInputTokens: asInputNumber(generateForm.estimatedInputTokens),
+        estimatedOutputTokens: asInputNumber(generateForm.estimatedOutputTokens)
+      });
+      setGenerateResult(hardeningResultOf(response));
+      setActionState({
+        id: "",
+        message: responseWasBlocked(response) ? "AI generation blocked safely because AI calls are disabled." : "AI generate guardrail response received.",
+        error: ""
+      });
+      status.reload();
+      costSummary.reload();
+      ledger.reload();
+    } catch (requestError) {
+      const sanitized = sanitizeActionError(requestError);
+      const isDisabledBlock = normalizeState(sanitized).includes("AI_CALLS_DISABLED") || normalizeState(sanitized).includes("AI CALLS DISABLED");
+      setActionState({
+        id: "",
+        message: isDisabledBlock ? "AI generation blocked safely because AI calls are disabled." : "",
+        error: isDisabledBlock ? "" : sanitized
+      });
     }
   }
 
@@ -4906,6 +5033,17 @@ function AiGatewayPage() {
               <TextArea label="Blocked Reason" value={blockedForm.blockedReason} onChange={(value) => setBlockedForm({ ...blockedForm, blockedReason: value })} />
               <div className="button-row"><button type="submit" disabled={actionState.id === "blocked"}>Record Blocked AI Attempt</button></div>
             </form>
+          </Card>
+          <Card title="Generate Guardrail Test">
+            <form className="form-grid" onSubmit={testGenerateGuardrail}>
+              <TextInput label="Module Name" value={generateForm.moduleName} onChange={(value) => setGenerateForm({ ...generateForm, moduleName: value })} />
+              <TextArea label="Purpose / Prompt" value={generateForm.purpose} onChange={(value) => setGenerateForm({ ...generateForm, purpose: value })} />
+              <TextInput label="Estimated Input Tokens Optional" type="number" value={generateForm.estimatedInputTokens} onChange={(value) => setGenerateForm({ ...generateForm, estimatedInputTokens: value })} />
+              <TextInput label="Estimated Output Tokens Optional" type="number" value={generateForm.estimatedOutputTokens} onChange={(value) => setGenerateForm({ ...generateForm, estimatedOutputTokens: value })} />
+              <div className="button-row"><button type="submit" disabled={actionState.id === "generate"}>Test AI Generate Guardrail</button></div>
+            </form>
+            <p className="section-note">Expected safe default: blocked AI_CALLS_DISABLED. This control is a guardrail test, not a real generation shortcut.</p>
+            {generateResult ? <div className="gateway-result"><JsonSnippet value={generateResult} /></div> : null}
           </Card>
         </div>
         {actionState.message ? <div className="soft-state success-state">{actionState.message}</div> : null}
@@ -4967,6 +5105,24 @@ function ProductionHealthPage() {
   const criticalBlockers = summaryNumber(data, ["criticalBlockers", "blockersCount"], blockers.length);
   const warningCount = summaryNumber(data, ["warningsCount"], warnings.length);
   const safetyFlags = recordOf(readFirst(data, ["safetyFlags", "safety", "flags"]));
+  const moduleStatus = (keys: string[], fallback = "UNKNOWN") => {
+    const match = modules.find((module) => {
+      const normalizedKey = normalizeState(module.key ?? module.name).replace(/\s+/g, "_");
+      return keys.some((key) => normalizedKey.includes(normalizeState(key).replace(/\s+/g, "_")));
+    });
+    return match?.status ?? readFirst(data, keys) ?? fallback;
+  };
+  const finalHealthModules = [
+    { label: "Live Execution", value: moduleStatus(["liveExecution", "live_execution"], readBoolean(readFirst(data, ["liveExecutionEnabled"])) ? "WARN" : "SAFE") },
+    { label: "Launch Gate", value: moduleStatus(["launchGate", "launch_gate"]) },
+    { label: "Scheduler Control", value: moduleStatus(["schedulerControl", "scheduler_control", "scheduler"]) },
+    { label: "Notification Outbox", value: moduleStatus(["notificationOutbox", "notification_outbox"]) },
+    { label: "Security Guardrails", value: moduleStatus(["securityGuardrails", "security_guardrails"]) },
+    { label: "Launch Checklist", value: moduleStatus(["launchChecklist", "launch_checklist"]) },
+    { label: "AI Gateway Generate", value: readBoolean(readFirst(data, ["aiCallsEnabled", "aiGateway.aiCallsEnabled"])) ? moduleStatus(["aiGatewayGenerate", "ai_generate"], "WARN") : "DISABLED" },
+    { label: "PPC Live Adapter", value: moduleStatus(["ppcLiveAdapter", "ppc_live_adapter"], readBoolean(readFirst(data, ["ppcLiveExecutionEnabled", "ppcLiveAdapterEnabled"])) ? "WARN" : "SAFE") },
+    { label: "Listing Live Adapter", value: moduleStatus(["listingLiveAdapter", "listing_live_adapter"], readBoolean(readFirst(data, ["listingLiveExecutionEnabled", "listingLiveAdapterEnabled"])) ? "WARN" : "SAFE") }
+  ];
 
   return (
     <div className="page">
@@ -5032,6 +5188,17 @@ function ProductionHealthPage() {
             <ListTextCard title="Next Checks" rows={nextChecks} emptyText="No next checks returned." />
           </>
         )}
+        <Card title="Launch Control Health">
+          <div className="readiness-grid">
+            {finalHealthModules.map((item) => (
+              <div className="readiness-item" key={item.label}>
+                <span>{item.label}</span>
+                <StatusBadge value={item.value} />
+              </div>
+            ))}
+          </div>
+          <p className="section-note">Disabled live execution is SAFE unless the launch objective explicitly requires live eligibility.</p>
+        </Card>
       </div>
     </div>
   );
@@ -6034,6 +6201,675 @@ function ActivityLogsPage() {
                   </div>
                 </article>
               ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+const LIVE_EXECUTE_CONFIRM_TEXT = "EXECUTE LIVE APPROVED ACTION";
+const guardrailActions = [
+  "LIVE_PPC_EXECUTION",
+  "LIVE_LISTING_EXECUTION",
+  "LIVE_ROLLBACK_EXECUTION",
+  "AI_GENERATE",
+  "NOTIFICATION_SEND",
+  "SAFETY_SETTING_UPDATE"
+];
+
+function liveExecutionStatusOf(value: unknown): LiveExecutionStatus {
+  return hardeningSummaryOf<LiveExecutionStatus>(value);
+}
+
+function liveExecutionRunsOf(value: unknown): LiveExecutionRun[] {
+  return hardeningRowsOf<LiveExecutionRun>(value);
+}
+
+function launchGateSummaryOf(value: unknown): LaunchGateSummary {
+  return hardeningSummaryOf<LaunchGateSummary>(value);
+}
+
+function launchGateChecksOf(value: unknown): LaunchGateCheck[] {
+  const data = launchGateSummaryOf(value);
+  return hardeningRowsOf<LaunchGateCheck>(value, data.checks);
+}
+
+function launchChecklistSummaryOf(value: unknown): LaunchChecklistSummary {
+  return hardeningSummaryOf<LaunchChecklistSummary>(value);
+}
+
+function launchChecklistItemsOf(value: unknown): LaunchChecklistItem[] {
+  const data = launchChecklistSummaryOf(value);
+  return hardeningRowsOf<LaunchChecklistItem>(value, data.items, data.checklist);
+}
+
+function schedulerSummaryOf(value: unknown): SchedulerSummary {
+  return hardeningSummaryOf<SchedulerSummary>(value);
+}
+
+function schedulerJobsOf(value: unknown): SchedulerJob[] {
+  return hardeningRowsOf<SchedulerJob>(value);
+}
+
+function notificationSummaryOf(value: unknown): NotificationSummary {
+  return hardeningSummaryOf<NotificationSummary>(value);
+}
+
+function notificationSettingsOf(value: unknown): NotificationSettings {
+  return hardeningSummaryOf<NotificationSettings>(value);
+}
+
+function notificationMessagesOf(value: unknown): NotificationMessage[] {
+  return hardeningRowsOf<NotificationMessage>(value);
+}
+
+function securityGuardrailSummaryOf(value: unknown): SecurityGuardrailSummary {
+  return hardeningSummaryOf<SecurityGuardrailSummary>(value);
+}
+
+function securityAuditEventsOf(value: unknown): SecurityAuditEvent[] {
+  return hardeningRowsOf<SecurityAuditEvent>(value);
+}
+
+function blockedOutcomeMessage(value: unknown, fallback: string): string {
+  return responseWasBlocked(value) ? fallback : "Backend response received.";
+}
+
+function LiveExecutionPage() {
+  const status = useApi<LiveExecutionStatus>(() => liveExecutionApi.status(SELLER_ID));
+  const runs = useApi<ApiRows<LiveExecutionRun>>(() => liveExecutionApi.runs(SELLER_ID, 100));
+  const data = liveExecutionStatusOf(status.data);
+  const rows = liveExecutionRunsOf(runs.data);
+  const [actionId, setActionId] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [domainFilter, setDomainFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [actionTypeFilter, setActionTypeFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [processing, setProcessing] = useState("");
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const liveEligible = readBoolean(readFirst(data, ["liveExecutionEnabled", "settings.liveExecutionEnabled"]));
+  const filteredRows = rows.filter((row) => {
+    const rowStatus = String(row.liveStatus ?? row.dryRunStatus ?? "UNKNOWN");
+    const haystack = `${row.sku ?? ""} ${row.asin ?? ""}`.toLowerCase();
+    return (domainFilter === "All" || String(row.executionDomain ?? "UNKNOWN") === domainFilter) &&
+      (statusFilter === "All" || rowStatus === statusFilter) &&
+      (actionTypeFilter === "All" || String(row.actionType ?? "UNKNOWN") === actionTypeFilter) &&
+      (!search.trim() || haystack.includes(search.trim().toLowerCase()));
+  });
+
+  async function runAction(kind: "preflight" | "dry-run" | "live") {
+    const id = actionId.trim();
+    if (!id) {
+      setError("Action ID is required.");
+      setMessage("");
+      return;
+    }
+    if (kind === "live") {
+      if (confirmText.trim() !== LIVE_EXECUTE_CONFIRM_TEXT) {
+        setError(`Exact confirm text required: ${LIVE_EXECUTE_CONFIRM_TEXT}`);
+        setMessage("");
+        return;
+      }
+      if (!window.confirm("This can change the Amazon account if all gates pass. Continue only for an approved controlled test.")) return;
+    }
+    setProcessing(kind);
+    setError("");
+    setMessage("");
+    try {
+      const response = kind === "preflight"
+        ? await liveExecutionApi.preflight(id)
+        : kind === "dry-run"
+          ? await liveExecutionApi.dryRun(id)
+          : await liveExecutionApi.executeLive(id, { sellerId: SELLER_ID, actor: "founder", confirmText: LIVE_EXECUTE_CONFIRM_TEXT });
+      setResult(hardeningResultOf(response));
+      setMessage(kind === "live" ? blockedOutcomeMessage(response, "Live execution blocked safely.") : "Live execution check response received.");
+      status.reload();
+      runs.reload();
+    } catch (requestError) {
+      const sanitized = sanitizeActionError(requestError);
+      const safeBlock = kind === "live" && ["BLOCK", "LOCK", "DISABLED", "NOT ELIGIBLE", "GATE"].some((term) => normalizeState(sanitized).includes(term));
+      if (safeBlock) {
+        setMessage("Live execution blocked safely.");
+        setError("");
+      } else {
+        setError(sanitized);
+      }
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Controlled Live Execution Center" subtitle="Run preflight, dry-run, and tightly gated live execution for approved Amazon PPC/listing actions." />
+      <SafetyBanner text="Live execution is locked unless Safety Control, QA Smoke, Production Health, Rollback, Dry Run, and explicit founder confirmation all pass." />
+      <div className="stack">
+        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock text="Could not load live execution status." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="Mode" value={<StatusBadge value={readFirst(data, ["mode"]) ?? "LOCKED"} />} />
+            <MetricTile label="Live Execution Enabled" value={<StatusBadge value={liveEligible ? "ELIGIBLE" : "LOCKED"} />} />
+            <MetricTile label="PPC Live Execution Enabled" value={<StatusBadge value={readBoolean(readFirst(data, ["ppcLiveExecutionEnabled", "ppcLiveExecution"])) ? "ELIGIBLE" : "LOCKED"} />} />
+            <MetricTile label="Listing Live Execution Enabled" value={<StatusBadge value={readBoolean(readFirst(data, ["listingLiveExecutionEnabled", "listingLiveExecution"])) ? "ELIGIBLE" : "LOCKED"} />} />
+            <MetricTile label="AI Calls Enabled" value={<StatusBadge value={readBoolean(readFirst(data, ["aiCallsEnabled"])) ? "ENABLED" : "DISABLED"} />} />
+            <MetricTile label="Message" value={formatEmpty(readFirst(data, ["message"]) ?? "Live execution is locked.")} />
+            <MetricTile label="Total Live Runs" value={summaryNumber(data, ["totalLiveRuns"], rows.length)} />
+            <MetricTile label="Dry Runs" value={summaryNumber(data, ["dryRuns", "dryRunCount"], rows.filter((row) => row.dryRunStatus).length)} />
+            <MetricTile label="Blocked Runs" value={summaryNumber(data, ["blockedRuns", "blockedCount"], rows.filter((row) => normalizeState(row.liveStatus).includes("BLOCK")).length)} />
+            <MetricTile label="Successful Live Runs" value={summaryNumber(data, ["successfulLiveRuns", "successLiveRuns"], rows.filter((row) => normalizeState(row.liveStatus) === "SUCCESS").length)} />
+            <MetricTile label="Failed Runs" value={summaryNumber(data, ["failedRuns", "failedCount"], rows.filter((row) => normalizeState(row.liveStatus) === "FAILED").length)} />
+          </div>
+        )}
+        <Card title="Action Controls">
+          <div className="form-grid">
+            <TextInput label="Action ID" value={actionId} onChange={setActionId} />
+            <TextInput label="Confirm Text" value={confirmText} onChange={setConfirmText} />
+            <div className="button-row gateway-buttons">
+              <button type="button" onClick={() => runAction("preflight")} disabled={processing !== ""}>Run Preflight</button>
+              <button type="button" onClick={() => runAction("dry-run")} disabled={processing !== ""}>Run Dry-Run</button>
+              <button type="button" className="danger-button live-block-button" onClick={() => runAction("live")} disabled={processing !== "" || confirmText.trim() !== LIVE_EXECUTE_CONFIRM_TEXT}>
+                Execute Live Locked
+              </button>
+            </div>
+          </div>
+          <p className="section-note">Execute Live requires exact founder confirmation and remains locked unless the backend returns eligibility.</p>
+          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        </Card>
+        <ResultPanel title="Result" result={result} />
+        <Card title="Runs">
+          <div className="form-grid filters-grid">
+            <SelectField label="Domain" value={domainFilter} options={["All", ...uniqueTextValues(rows.map((row) => row.executionDomain ?? "UNKNOWN"))]} onChange={setDomainFilter} />
+            <SelectField label="Status" value={statusFilter} options={["All", ...uniqueTextValues(rows.map((row) => row.liveStatus ?? row.dryRunStatus ?? "UNKNOWN"))]} onChange={setStatusFilter} />
+            <SelectField label="Action Type" value={actionTypeFilter} options={["All", ...uniqueTextValues(rows.map((row) => row.actionType ?? "UNKNOWN"))]} onChange={setActionTypeFilter} />
+            <TextInput label="SKU/ASIN Search" value={search} onChange={setSearch} />
+          </div>
+          {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock text="Could not load live execution runs." /> : filteredRows.length === 0 ? <EmptyBlock text="No live execution runs match these filters." /> : (
+            <div className="card-list command-card-list">
+              {filteredRows.map((row, index) => (
+                <article className="item-card command-item-card" key={String(row.id ?? `${row.actionId}-${index}`)}>
+                  <div className="item-top">
+                    <strong>{formatShortId(row.actionId)}</strong>
+                    <StatusBadge value={row.liveStatus ?? row.dryRunStatus ?? "UNKNOWN"} />
+                  </div>
+                  <div className="detail-grid">
+                    <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
+                    <MetricRow label="Execution Domain" value={formatEmpty(row.executionDomain)} />
+                    <MetricRow label="Action Type" value={formatEmpty(row.actionType)} />
+                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
+                    <MetricRow label="Live Status" value={<StatusBadge value={row.liveStatus ?? "UNKNOWN"} />} />
+                    <MetricRow label="Dry Run Status" value={<StatusBadge value={row.dryRunStatus ?? "UNKNOWN"} />} />
+                    <MetricRow label="Blocked Reason" value={<span className="long-text">{formatEmpty(row.blockedReason)}</span>} />
+                    <MetricRow label="Error Message" value={<span className="long-text">{formatEmpty(row.errorMessage)}</span>} />
+                    <MetricRow label="Actor" value={formatEmpty(row.actor)} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function LaunchGatePage() {
+  const summary = useApi<LaunchGateSummary>(() => launchGateApi.summary(SELLER_ID));
+  const data = launchGateSummaryOf(summary.data);
+  const checks = launchGateChecksOf(summary.data);
+  const blockers = dailyList(readFirst(data, ["blockers"]));
+  const warnings = dailyList(readFirst(data, ["warnings"]));
+  const nextSteps = dailyList(readFirst(data, ["nextSteps"]));
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [error, setError] = useState("");
+
+  async function runGate() {
+    setRunning(true);
+    setError("");
+    try {
+      const response = await launchGateApi.run(SELLER_ID);
+      setResult(hardeningResultOf(response));
+      summary.reload();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Launch Gate" subtitle="Final gatekeeper before any limited live test." />
+      <SafetyBanner text="Launch Gate does not enable live execution. It only checks eligibility." />
+      <div className="stack">
+        <div className="button-row"><button type="button" onClick={runGate} disabled={running}>{running ? "Running Launch Gate..." : "Run Launch Gate"}</button></div>
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load launch gate summary." /> : (
+          <>
+            <div className="summary-strip command-summary">
+              <MetricTile label="Overall Status" value={<StatusBadge value={readFirst(data, ["overallStatus", "status"]) ?? "UNKNOWN"} />} />
+              <MetricTile label="Live Eligible" value={<StatusBadge value={readBoolean(readFirst(data, ["liveEligible"])) ? "PASS" : "LOCKED"} />} />
+              <MetricTile label="PPC Live Eligible" value={<StatusBadge value={readBoolean(readFirst(data, ["ppcLiveEligible"])) ? "PASS" : "LOCKED"} />} />
+              <MetricTile label="Listing Live Eligible" value={<StatusBadge value={readBoolean(readFirst(data, ["listingLiveEligible"])) ? "PASS" : "LOCKED"} />} />
+              <MetricTile label="Blockers Count" value={summaryNumber(data, ["blockersCount"], blockers.length)} />
+              <MetricTile label="Warnings Count" value={summaryNumber(data, ["warningsCount"], warnings.length)} />
+            </div>
+            <ResultPanel title="Launch Gate Result" result={result} />
+            <Card title="Checks">
+              {checks.length === 0 ? <EmptyBlock text="No Launch Gate checks returned yet." /> : (
+                <div className="card-list command-card-list">
+                  {checks.map((check, index) => (
+                    <article className="item-card command-item-card" key={String(check.checkKey ?? index)}>
+                      <div className="item-top">
+                        <strong>{formatEmpty(check.checkName ?? check.checkKey)}</strong>
+                        <StatusBadge value={check.status ?? "UNKNOWN"} />
+                      </div>
+                      <p className="long-text">{formatEmpty(check.message)}</p>
+                      <div className="detail-grid">
+                        <MetricRow label="Check Key" value={formatEmpty(check.checkKey)} />
+                        <MetricRow label="Severity" value={<StatusBadge value={check.severity ?? "UNKNOWN"} />} />
+                        <MetricRow label="Last Checked At" value={formatLocalDateTime(check.lastCheckedAt)} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </Card>
+            <div className="dashboard-grid today">
+              <ListTextCard title="Blockers" rows={blockers} emptyText="No launch blockers returned." />
+              <ListTextCard title="Warnings" rows={warnings} emptyText="No launch warnings returned." />
+            </div>
+            <ListTextCard title="Next Steps" rows={nextSteps} emptyText="No launch next steps returned." />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LaunchChecklistPage() {
+  const summary = useApi<LaunchChecklistSummary>(() => launchChecklistApi.summary(SELLER_ID));
+  const data = launchChecklistSummaryOf(summary.data);
+  const items = launchChecklistItemsOf(summary.data);
+  const nextSteps = dailyList(readFirst(data, ["nextSteps"]));
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [error, setError] = useState("");
+
+  async function runChecklist() {
+    setRunning(true);
+    setError("");
+    try {
+      const response = await launchChecklistApi.run(SELLER_ID);
+      setResult(hardeningResultOf(response));
+      summary.reload();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Production Launch Checklist" subtitle="Complete readiness checklist for shadow launch and limited live test." />
+      <SafetyBanner text="Checklist statuses: NOT_READY, READY_FOR_SHADOW_LAUNCH, READY_FOR_LIMITED_LIVE_TEST." />
+      <div className="stack">
+        <div className="button-row"><button type="button" onClick={runChecklist} disabled={running}>{running ? "Running Launch Checklist..." : "Run Launch Checklist"}</button></div>
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load launch checklist summary." /> : (
+          <>
+            <div className="summary-strip command-summary">
+              <MetricTile label="Overall Launch Status" value={<StatusBadge value={readFirst(data, ["overallLaunchStatus", "status"]) ?? "UNKNOWN"} />} />
+              <MetricTile label="Ready Items" value={summaryNumber(data, ["readyItems"], items.filter((item) => normalizeState(item.status).includes("READY")).length)} />
+              <MetricTile label="Warning Items" value={summaryNumber(data, ["warningItems"], items.filter((item) => ["WARN", "WARNING"].includes(normalizeState(item.status))).length)} />
+              <MetricTile label="Failed Items" value={summaryNumber(data, ["failedItems"], items.filter((item) => ["FAIL", "FAILED", "NOT_READY"].includes(normalizeState(item.status))).length)} />
+              <MetricTile label="Ready For Shadow Launch" value={<StatusBadge value={readBoolean(readFirst(data, ["readyForShadowLaunch"])) ? "READY" : "NOT_READY"} />} />
+              <MetricTile label="Ready For Limited Live Test" value={<StatusBadge value={readBoolean(readFirst(data, ["readyForLimitedLiveTest"])) ? "READY" : "NOT_READY"} />} />
+            </div>
+            <ResultPanel title="Launch Checklist Result" result={result} />
+            <Card title="Checklist">
+              {items.length === 0 ? <EmptyBlock text="No launch checklist items returned yet." /> : (
+                <div className="card-list command-card-list">
+                  {items.map((item, index) => (
+                    <article className="item-card command-item-card" key={String(item.key ?? index)}>
+                      <div className="item-top">
+                        <strong>{formatEmpty(item.label ?? item.key)}</strong>
+                        <StatusBadge value={item.status ?? "UNKNOWN"} />
+                      </div>
+                      <p className="long-text">{formatEmpty(item.message)}</p>
+                      <div className="detail-grid">
+                        <MetricRow label="Key" value={formatEmpty(item.key)} />
+                        <MetricRow label="Critical" value={readBoolean(item.critical) ? "Yes" : "No"} />
+                        <MetricRow label="Updated At" value={formatLocalDateTime(item.updatedAt)} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </Card>
+            <ListTextCard title="Next Steps" rows={nextSteps} emptyText="No checklist next steps returned." />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SchedulerControlPage() {
+  const summary = useApi<SchedulerSummary>(() => schedulerControlApi.summary(SELLER_ID));
+  const jobs = useApi<ApiRows<SchedulerJob>>(() => schedulerControlApi.jobs(SELLER_ID));
+  const data = schedulerSummaryOf(summary.data);
+  const rows = schedulerJobsOf(jobs.data);
+  const [processing, setProcessing] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  function refresh() {
+    summary.reload();
+    jobs.reload();
+  }
+
+  async function seedJobs() {
+    setProcessing("seed");
+    setMessage("");
+    setError("");
+    try {
+      await schedulerControlApi.seedJobs(SELLER_ID);
+      setMessage("Default scheduler jobs seeded.");
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  async function runJob(jobKey: string) {
+    setProcessing(`run:${jobKey}`);
+    setMessage("");
+    setError("");
+    try {
+      await schedulerControlApi.runJob(jobKey, SELLER_ID);
+      setMessage(`Scheduler job ${formatShortId(jobKey)} run requested.`);
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  async function toggleJob(row: SchedulerJob) {
+    const jobKey = String(row.jobKey ?? row.id ?? "").trim();
+    if (!jobKey) return;
+    setProcessing(`toggle:${jobKey}`);
+    setMessage("");
+    setError("");
+    try {
+      await schedulerControlApi.updateJob(jobKey, SELLER_ID, { enabled: !readBoolean(row.enabled) });
+      setMessage(`Scheduler job ${formatShortId(jobKey)} updated.`);
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Scheduler Control" subtitle="Manage safe recurring internal jobs for sync, AI-CGO, maintenance, QA, alerts, and freshness." />
+      <SafetyBanner text="Scheduler jobs run internal checks/orchestrations. They do not execute live marketplace mutations." />
+      <div className="stack">
+        <div className="button-row">
+          <button type="button" onClick={seedJobs} disabled={processing !== ""}>Seed Default Jobs</button>
+          <button type="button" className="secondary" onClick={refresh}>Refresh Jobs</button>
+        </div>
+        {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load scheduler summary." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="Total Jobs" value={summaryNumber(data, ["totalJobs"], rows.length)} />
+            <MetricTile label="Enabled Jobs" value={summaryNumber(data, ["enabledJobs"], rows.filter((row) => readBoolean(row.enabled)).length)} />
+            <MetricTile label="Disabled Jobs" value={summaryNumber(data, ["disabledJobs"], rows.filter((row) => !readBoolean(row.enabled)).length)} />
+            <MetricTile label="Last Run Status" value={<StatusBadge value={readFirst(data, ["lastRunStatus"]) ?? "UNKNOWN"} />} />
+            <MetricTile label="Failed Runs" value={summaryNumber(data, ["failedRuns"], 0)} />
+            <MetricTile label="Successful Runs" value={summaryNumber(data, ["successfulRuns"], 0)} />
+          </div>
+        )}
+        <Card title="Jobs">
+          {jobs.loading ? <LoadingBlock /> : jobs.error ? <ErrorBlock text="Could not load scheduler jobs." /> : rows.length === 0 ? <EmptyBlock text="No scheduler jobs returned. Seed default jobs when the backend is ready." /> : (
+            <div className="card-list command-card-list">
+              {rows.map((row, index) => {
+                const jobKey = String(row.jobKey ?? row.id ?? "").trim();
+                return (
+                  <article className="item-card command-item-card" key={String(jobKey || index)}>
+                    <div className="item-top">
+                      <strong>{formatEmpty(row.jobName ?? row.jobKey)}</strong>
+                      <StatusBadge value={readBoolean(row.enabled) ? "ENABLED" : "DISABLED"} />
+                    </div>
+                    <div className="detail-grid">
+                      <MetricRow label="Job Key" value={formatEmpty(jobKey)} />
+                      <MetricRow label="Job Type" value={formatEmpty(row.jobType)} />
+                      <MetricRow label="Schedule Hint" value={formatEmpty(row.scheduleHint)} />
+                      <MetricRow label="Last Run At" value={formatLocalDateTime(row.lastRunAt)} />
+                      <MetricRow label="Last Run Status" value={<StatusBadge value={row.lastRunStatus ?? "UNKNOWN"} />} />
+                    </div>
+                    <div className="button-row compact">
+                      <button type="button" onClick={() => runJob(jobKey)} disabled={!jobKey || processing !== ""}>Run Now</button>
+                      <button type="button" className="secondary" onClick={() => toggleJob(row)} disabled={!jobKey || processing !== ""}>{readBoolean(row.enabled) ? "Disable" : "Enable"}</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function NotificationOutboxPage() {
+  const summary = useApi<NotificationSummary>(() => notificationOutboxApi.summary(SELLER_ID));
+  const messages = useApi<ApiRows<NotificationMessage>>(() => notificationOutboxApi.messages(SELLER_ID, 100));
+  const settings = useApi<NotificationSettings>(() => notificationOutboxApi.settings(SELLER_ID));
+  const data = notificationSummaryOf(summary.data);
+  const settingsData = notificationSettingsOf(settings.data);
+  const rows = notificationMessagesOf(messages.data);
+  const settingsMissing = !settings.loading && (settings.error || Object.keys(settingsData).length === 0);
+  const [processing, setProcessing] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  function refresh() {
+    summary.reload();
+    messages.reload();
+    settings.reload();
+  }
+
+  async function initialize() {
+    setProcessing("initialize");
+    setMessage("");
+    setError("");
+    try {
+      await notificationOutboxApi.initialize(SELLER_ID);
+      setMessage("Notification settings initialized.");
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  async function sendMessage(id: string) {
+    setProcessing(`send:${id}`);
+    setMessage("");
+    setError("");
+    try {
+      const response = await notificationOutboxApi.send(id);
+      setMessage(blockedOutcomeMessage(response, "Notification sending blocked safely."));
+      refresh();
+    } catch (requestError) {
+      const sanitized = sanitizeActionError(requestError);
+      const safeBlock = ["BLOCK", "DISABLED", "PROVIDER", "MISSING", "NOT CONFIGURED"].some((term) => normalizeState(sanitized).includes(term));
+      if (safeBlock) {
+        setMessage("Notification sending blocked safely.");
+        setError("");
+      } else {
+        setError(sanitized);
+      }
+    } finally {
+      setProcessing("");
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Notification Outbox" subtitle="Queued founder notifications. External sending is disabled unless explicitly configured." />
+      <SafetyBanner text="No email, WhatsApp, or Slack is sent unless settings and provider are configured." />
+      <div className="stack">
+        {settingsMissing ? <div className="button-row"><button type="button" onClick={initialize} disabled={processing !== ""}>Initialize Notification Settings</button></div> : null}
+        {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load notification summary." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="Queued" value={summaryNumber(data, ["queued", "queuedCount"], rows.filter((row) => normalizeState(row.status) === "QUEUED").length)} />
+            <MetricTile label="Sent" value={summaryNumber(data, ["sent", "sentCount"], rows.filter((row) => normalizeState(row.status) === "SENT").length)} />
+            <MetricTile label="Blocked" value={summaryNumber(data, ["blocked", "blockedCount"], rows.filter((row) => normalizeState(row.status).includes("BLOCK")).length)} />
+            <MetricTile label="Failed" value={summaryNumber(data, ["failed", "failedCount"], rows.filter((row) => normalizeState(row.status) === "FAILED").length)} />
+            <MetricTile label="External Notifications Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["externalNotificationsEnabled"]) ?? readFirst(data, ["externalNotificationsEnabled"])) ? "ENABLED" : "DISABLED"} />} />
+            <MetricTile label="Email Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["emailEnabled"]) ?? readFirst(data, ["emailEnabled"])) ? "ENABLED" : "DISABLED"} />} />
+            <MetricTile label="WhatsApp Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["whatsappEnabled"]) ?? readFirst(data, ["whatsAppEnabled"])) ? "ENABLED" : "DISABLED"} />} />
+            <MetricTile label="Slack Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["slackEnabled"]) ?? readFirst(data, ["slackEnabled"])) ? "ENABLED" : "DISABLED"} />} />
+          </div>
+        )}
+        <Card title="Messages">
+          {messages.loading ? <LoadingBlock /> : messages.error ? <ErrorBlock text="Could not load notification messages." /> : rows.length === 0 ? <EmptyBlock text="No queued founder notifications yet." /> : (
+            <div className="card-list command-card-list">
+              {rows.map((row, index) => {
+                const id = String(row.id ?? "").trim();
+                return (
+                  <article className="item-card command-item-card" key={String(id || index)}>
+                    <div className="item-top">
+                      <strong>{formatEmpty(row.subject ?? row.sourceModule ?? row.channel)}</strong>
+                      <StatusBadge value={row.status ?? "UNKNOWN"} />
+                    </div>
+                    <p className="long-text">{formatEmpty(row.message)}</p>
+                    <div className="detail-grid">
+                      <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
+                      <MetricRow label="Channel" value={formatEmpty(row.channel)} />
+                      <MetricRow label="Recipient" value={formatEmpty(row.recipient)} />
+                      <MetricRow label="Severity" value={<SeverityBadge value={row.severity} />} />
+                      <MetricRow label="Source Module" value={formatEmpty(row.sourceModule)} />
+                      <MetricRow label="Send Attempts" value={formatEmpty(row.sendAttempts)} />
+                      <MetricRow label="Last Error" value={<span className="long-text">{formatEmpty(row.lastError)}</span>} />
+                    </div>
+                    <div className="button-row compact">
+                      <button type="button" onClick={() => sendMessage(id)} disabled={!id || processing !== ""}>Send/Test Block</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function SecurityGuardrailsPage() {
+  const summary = useApi<SecurityGuardrailSummary>(() => securityGuardrailsApi.summary(SELLER_ID));
+  const audit = useApi<ApiRows<SecurityAuditEvent>>(() => securityGuardrailsApi.audit(SELLER_ID, 100));
+  const data = securityGuardrailSummaryOf(summary.data);
+  const rows = securityAuditEventsOf(audit.data);
+  const [form, setForm] = useState({ action: "LIVE_PPC_EXECUTION", actor: "founder", confirmText: "" });
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState<AnyRecord | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function runCheck(event: FormEvent) {
+    event.preventDefault();
+    setProcessing(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await securityGuardrailsApi.check({ sellerId: SELLER_ID, ...form });
+      setResult(hardeningResultOf(response));
+      setMessage(responseWasBlocked(response) ? "Security guardrail blocked this action safely." : "Security guardrail check completed.");
+      summary.reload();
+      audit.reload();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader title="Security Guardrails" subtitle="Audit and block dangerous actions unless founder, confirmation, and safety checks pass." />
+      <SafetyBanner text="Security guardrails do not replace authentication, but they provide backend safety auditing." />
+      <div className="stack">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load security guardrail summary." /> : (
+          <div className="summary-strip command-summary">
+            <MetricTile label="Total Checks" value={summaryNumber(data, ["totalChecks"], rows.length)} />
+            <MetricTile label="Allowed" value={summaryNumber(data, ["allowed", "allowedCount"], rows.filter((row) => readBoolean(row.allowed)).length)} />
+            <MetricTile label="Blocked" value={summaryNumber(data, ["blocked", "blockedCount"], rows.filter((row) => !readBoolean(row.allowed)).length)} />
+            <MetricTile label="Dangerous Blocks" value={summaryNumber(data, ["dangerousBlocks"], 0)} />
+            <MetricTile label="Latest Blocked Action" value={formatEmpty(readFirst(data, ["latestBlockedAction"]) ?? rows.find((row) => !readBoolean(row.allowed))?.action)} />
+          </div>
+        )}
+        <Card title="Manual Check">
+          <form className="form-grid" onSubmit={runCheck}>
+            <SelectField label="Action" value={form.action} options={guardrailActions} onChange={(value) => setForm({ ...form, action: value })} />
+            <TextInput label="Actor" value={form.actor} onChange={(value) => setForm({ ...form, actor: value })} />
+            <TextInput label="Confirm Text" value={form.confirmText} onChange={(value) => setForm({ ...form, confirmText: value })} />
+            <div className="button-row"><button type="submit" disabled={processing}>Run Guardrail Check</button></div>
+          </form>
+          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+        </Card>
+        <ResultPanel title="Guardrail Result" result={result} />
+        <Card title="Audit">
+          {audit.loading ? <LoadingBlock /> : audit.error ? <ErrorBlock text="Could not load security audit events." /> : rows.length === 0 ? <EmptyBlock text="No security guardrail events yet." /> : (
+            <div className="table-wrap command-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Created At</th>
+                    <th>Actor</th>
+                    <th>Event Type</th>
+                    <th>Route</th>
+                    <th>Action</th>
+                    <th>Allowed</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, index) => (
+                    <tr key={String(row.id ?? `${row.action}-${index}`)}>
+                      <td>{formatLocalDateTime(row.createdAt)}</td>
+                      <td>{formatEmpty(row.actor)}</td>
+                      <td>{formatEmpty(row.eventType)}</td>
+                      <td className="wrap-cell">{formatEmpty(row.route)}</td>
+                      <td>{formatEmpty(row.action)}</td>
+                      <td><StatusBadge value={readBoolean(row.allowed) ? "ALLOWED" : "BLOCKED"} /></td>
+                      <td className="wrap-cell">{formatEmpty(row.reason)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </Card>

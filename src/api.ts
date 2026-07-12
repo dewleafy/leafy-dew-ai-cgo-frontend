@@ -13,8 +13,15 @@ import type {
   DataFreshnessSummary,
   Experiment,
   ExperimentSummary,
+  LaunchChecklistSummary,
+  LaunchGateSummary,
+  LiveExecutionRun,
+  LiveExecutionStatus,
   MaintenanceRun,
   MaintenanceSummary,
+  NotificationMessage,
+  NotificationSettings,
+  NotificationSummary,
   ProductionHealthSummary,
   QaSmokeLatest,
   QaSmokeRun,
@@ -22,7 +29,11 @@ import type {
   RollbackSummary,
   SafetyAuditEvent,
   SafetyControlSettingsPayload,
-  SafetyControlStatus
+  SafetyControlStatus,
+  SchedulerJob,
+  SchedulerSummary,
+  SecurityAuditEvent,
+  SecurityGuardrailSummary
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "" : "https://api.leafydew.in");
@@ -132,6 +143,7 @@ export const aiGatewayApi = {
   costSummary: (sellerId: string) => getJson<AiCostSummary>(`/api/ai-gateway/cost-summary?sellerId=${sellerId}`),
   ledger: (sellerId: string, limit = 100) => getJson<ApiRows<AiLedgerRow>>(`/api/ai-gateway/ledger?sellerId=${sellerId}&limit=${limit}`),
   estimate: (body: Record<string, unknown>) => postJson<AiCostEstimate>("/api/ai-gateway/estimate", body),
+  generate: (body: Record<string, unknown>) => postJson<unknown>("/api/ai-gateway/generate", body),
   recordBlocked: (body: Record<string, unknown>) => postJson("/api/ai-gateway/record-blocked", body)
 };
 
@@ -166,6 +178,55 @@ export const approvalExecutionApi = {
     postJson<unknown>(`/api/approval-execution/execute-shadow/${encodeURIComponent(actionId)}`, {}),
   executeLive: (actionId: string) =>
     postJson<unknown>(`/api/approval-execution/execute-live/${encodeURIComponent(actionId)}`, {})
+};
+
+export const liveExecutionApi = {
+  status: (sellerId: string) => getJson<LiveExecutionStatus>(`/api/live-execution/status?sellerId=${sellerId}`),
+  runs: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<LiveExecutionRun>>(`/api/live-execution/runs?sellerId=${sellerId}&limit=${limit}`),
+  action: (actionId: string, sellerId: string) =>
+    getJson<unknown>(`/api/live-execution/action/${encodeURIComponent(actionId)}?sellerId=${sellerId}`),
+  preflight: (actionId: string) => postJson<unknown>(`/api/live-execution/preflight/${encodeURIComponent(actionId)}`, {}),
+  dryRun: (actionId: string) => postJson<unknown>(`/api/live-execution/dry-run/${encodeURIComponent(actionId)}`, {}),
+  executeLive: (actionId: string, body: Record<string, unknown>) =>
+    postJson<unknown>(`/api/live-execution/execute-live/${encodeURIComponent(actionId)}`, body)
+};
+
+export const launchGateApi = {
+  summary: (sellerId: string) => getJson<LaunchGateSummary>(`/api/launch-gate/summary?sellerId=${sellerId}`),
+  run: (sellerId: string) => postJson<LaunchGateSummary>(`/api/launch-gate/run?sellerId=${sellerId}`, {})
+};
+
+export const launchChecklistApi = {
+  summary: (sellerId: string) => getJson<LaunchChecklistSummary>(`/api/launch-checklist/summary?sellerId=${sellerId}`),
+  run: (sellerId: string) => postJson<LaunchChecklistSummary>(`/api/launch-checklist/run?sellerId=${sellerId}`, {})
+};
+
+export const schedulerControlApi = {
+  summary: (sellerId: string) => getJson<SchedulerSummary>(`/api/scheduler-control/summary?sellerId=${sellerId}`),
+  jobs: (sellerId: string) => getJson<ApiRows<SchedulerJob>>(`/api/scheduler-control/jobs?sellerId=${sellerId}`),
+  seedJobs: (sellerId: string) => postJson<unknown>(`/api/scheduler-control/seed-jobs?sellerId=${sellerId}`, {}),
+  runJob: (jobKey: string, sellerId: string) =>
+    postJson<unknown>(`/api/scheduler-control/run/${encodeURIComponent(jobKey)}?sellerId=${sellerId}`, {}),
+  updateJob: (jobKey: string, sellerId: string, body: Record<string, unknown>) =>
+    patchJson<unknown>(`/api/scheduler-control/jobs/${encodeURIComponent(jobKey)}?sellerId=${sellerId}`, body)
+};
+
+export const notificationOutboxApi = {
+  summary: (sellerId: string) => getJson<NotificationSummary>(`/api/notification-outbox/summary?sellerId=${sellerId}`),
+  messages: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<NotificationMessage>>(`/api/notification-outbox/messages?sellerId=${sellerId}&limit=${limit}`),
+  settings: (sellerId: string) => getJson<NotificationSettings>(`/api/notification-outbox/settings?sellerId=${sellerId}`),
+  initialize: (sellerId: string) => postJson<NotificationSettings>(`/api/notification-outbox/initialize?sellerId=${sellerId}`, {}),
+  queue: (body: Record<string, unknown>) => postJson<unknown>("/api/notification-outbox/queue", body),
+  send: (id: string) => postJson<unknown>(`/api/notification-outbox/send/${encodeURIComponent(id)}`, {})
+};
+
+export const securityGuardrailsApi = {
+  summary: (sellerId: string) => getJson<SecurityGuardrailSummary>(`/api/security-guardrails/summary?sellerId=${sellerId}`),
+  audit: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<SecurityAuditEvent>>(`/api/security-guardrails/audit?sellerId=${sellerId}&limit=${limit}`),
+  check: (body: Record<string, unknown>) => postJson<unknown>("/api/security-guardrails/check", body)
 };
 
 export const maintenanceApi = {

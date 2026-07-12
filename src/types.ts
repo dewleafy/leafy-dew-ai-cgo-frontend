@@ -448,6 +448,149 @@ export type ApprovalReadyAction = AnyRecord & {
   createdAt?: string | null;
 };
 
+export type LiveExecutionStatus = AnyRecord & {
+  mode?: string | null;
+  liveExecutionEnabled?: boolean | string | number | null;
+  ppcLiveExecutionEnabled?: boolean | string | number | null;
+  listingLiveExecutionEnabled?: boolean | string | number | null;
+  aiCallsEnabled?: boolean | string | number | null;
+  message?: string | null;
+  totalLiveRuns?: number | string | null;
+  dryRuns?: number | string | null;
+  blockedRuns?: number | string | null;
+  successfulLiveRuns?: number | string | null;
+  failedRuns?: number | string | null;
+};
+
+export type LiveExecutionRun = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  actionId?: string | null;
+  executionDomain?: string | null;
+  actionType?: string | null;
+  sku?: string | null;
+  asin?: string | null;
+  liveStatus?: string | null;
+  dryRunStatus?: string | null;
+  blockedReason?: string | null;
+  errorMessage?: string | null;
+  actor?: string | null;
+};
+
+export type LaunchGateCheck = AnyRecord & {
+  checkKey?: string | null;
+  checkName?: string | null;
+  status?: string | null;
+  severity?: string | null;
+  message?: string | null;
+  lastCheckedAt?: string | null;
+};
+
+export type LaunchGateSummary = AnyRecord & {
+  overallStatus?: string | null;
+  liveEligible?: boolean | string | number | null;
+  ppcLiveEligible?: boolean | string | number | null;
+  listingLiveEligible?: boolean | string | number | null;
+  blockersCount?: number | string | null;
+  warningsCount?: number | string | null;
+  checks?: LaunchGateCheck[] | null;
+  blockers?: unknown[] | null;
+  warnings?: unknown[] | null;
+  nextSteps?: unknown[] | null;
+};
+
+export type LaunchChecklistItem = AnyRecord & {
+  key?: string | null;
+  label?: string | null;
+  status?: string | null;
+  message?: string | null;
+  critical?: boolean | string | number | null;
+  updatedAt?: string | null;
+};
+
+export type LaunchChecklistSummary = AnyRecord & {
+  overallLaunchStatus?: string | null;
+  readyItems?: number | string | null;
+  warningItems?: number | string | null;
+  failedItems?: number | string | null;
+  readyForShadowLaunch?: boolean | string | number | null;
+  readyForLimitedLiveTest?: boolean | string | number | null;
+  items?: LaunchChecklistItem[] | null;
+  checklist?: LaunchChecklistItem[] | null;
+  nextSteps?: unknown[] | null;
+};
+
+export type SchedulerSummary = AnyRecord & {
+  totalJobs?: number | string | null;
+  enabledJobs?: number | string | null;
+  disabledJobs?: number | string | null;
+  lastRunStatus?: string | null;
+  failedRuns?: number | string | null;
+  successfulRuns?: number | string | null;
+};
+
+export type SchedulerJob = AnyRecord & {
+  id?: string | null;
+  jobKey?: string | null;
+  jobName?: string | null;
+  jobType?: string | null;
+  enabled?: boolean | string | number | null;
+  scheduleHint?: string | null;
+  lastRunAt?: string | null;
+  lastRunStatus?: string | null;
+};
+
+export type NotificationSummary = AnyRecord & {
+  queued?: number | string | null;
+  sent?: number | string | null;
+  blocked?: number | string | null;
+  failed?: number | string | null;
+  externalNotificationsEnabled?: boolean | string | number | null;
+  emailEnabled?: boolean | string | number | null;
+  whatsappEnabled?: boolean | string | number | null;
+  slackEnabled?: boolean | string | number | null;
+};
+
+export type NotificationMessage = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  channel?: string | null;
+  recipient?: string | null;
+  subject?: string | null;
+  message?: string | null;
+  severity?: string | null;
+  status?: string | null;
+  sourceModule?: string | null;
+  sendAttempts?: number | string | null;
+  lastError?: string | null;
+};
+
+export type NotificationSettings = AnyRecord & {
+  externalNotificationsEnabled?: boolean | string | number | null;
+  emailEnabled?: boolean | string | number | null;
+  whatsappEnabled?: boolean | string | number | null;
+  slackEnabled?: boolean | string | number | null;
+};
+
+export type SecurityGuardrailSummary = AnyRecord & {
+  totalChecks?: number | string | null;
+  allowed?: number | string | null;
+  blocked?: number | string | null;
+  dangerousBlocks?: number | string | null;
+  latestBlockedAction?: string | null;
+};
+
+export type SecurityAuditEvent = AnyRecord & {
+  id?: string | null;
+  createdAt?: string | null;
+  actor?: string | null;
+  eventType?: string | null;
+  route?: string | null;
+  action?: string | null;
+  allowed?: boolean | string | number | null;
+  reason?: string | null;
+};
+
 export type MaintenanceSummary = AnyRecord & {
   latestRunStatus?: string | null;
   runsToday?: number | string | null;
