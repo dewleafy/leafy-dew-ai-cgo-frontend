@@ -88,40 +88,43 @@ import type {
 
 const SELLER_ID = "default";
 
-const tabs = [
-  "Today Dashboard",
+const technicalTabs = [
   "Daily AI-CGO",
-  "Product Passport",
-  "Product Economics",
-  "PPC Recommendations",
   "Engine Command Center",
-  "Approval Center",
   "Approval Execution",
   "Execution Gateway",
   "Live Execution",
-  "Rollback Center",
-  "Listing Drafts",
-  "Image + A+",
-  "Safety Control",
   "Launch Gate",
   "Launch Checklist",
   "Scheduler",
   "Notification Outbox",
   "Security Guardrails",
-  "Alert Center",
-  "Experiments",
-  "Data Freshness",
-  "AI Gateway",
   "Production Health",
   "QA Smoke",
   "Maintenance",
-  "CEO Report",
-  "Learning",
   "Activity Logs",
+  "Rollback Center",
+  "Data Freshness",
+  "AI Gateway",
+  "Alert Center",
+  "Learning",
+  "Experiments",
+  "Safety Control",
+  "Product Passport",
+  "Product Economics",
+  "PPC Recommendations",
+  "Approval Center",
+  "Listing Drafts",
+  "Image + A+",
+  "CEO Report",
   "Settings"
 ] as const;
 
-type Tab = (typeof tabs)[number];
+const founderTabs = ["Today", "Products", "Approvals", "Growth", "Brand", "Sales & Ads", "Reports", "More"] as const;
+
+type Tab = (typeof technicalTabs)[number];
+type FounderTab = (typeof founderTabs)[number];
+type AppPage = FounderTab | Tab | "Product Detail";
 type LoadState<T> = { data: T | null; loading: boolean; error: string | null };
 type ProductPassportSection = "READINESS" | "COST_COMPLETION";
 
@@ -373,376 +376,972 @@ function RecommendationCard({ item, footer }: { item: AnyRecord; footer?: ReactN
   );
 }
 
+type FounderProduct = {
+  key: string;
+  id?: string;
+  name: string;
+  brand: string;
+  sku: string;
+  asin: string;
+  category: string;
+  price: unknown;
+  netProfit: unknown;
+  margin: unknown;
+  profitStatus: unknown;
+  readiness: unknown;
+  costStatus: unknown;
+  listingScore: unknown;
+  inventory: unknown;
+  status: unknown;
+  bullets: string[];
+  description: string;
+  raw: AnyRecord;
+};
+
+type FounderNavigate = (page: AppPage, product?: FounderProduct | null) => void;
+
+const sampleFounderProduct: FounderProduct = {
+  key: "sample-product",
+  id: "sample-product",
+  name: "Leafy Dew Amazon Product",
+  brand: "Leafy Dew",
+  sku: "Connect SKU",
+  asin: "Connect ASIN",
+  category: "Home and lifestyle",
+  price: null,
+  netProfit: null,
+  margin: null,
+  profitStatus: "Not available yet",
+  readiness: "Needs data",
+  costStatus: "Connect cost data",
+  listingScore: "Not available yet",
+  inventory: "Not available yet",
+  status: "Draft",
+  bullets: [
+    "Connect catalog data to preview the live listing.",
+    "Add cost data to unlock profit and ACOS guidance.",
+    "Review AI recommendations before any Amazon change."
+  ],
+  description: "Connect product, catalog, and economics data to make this detail page fully business-ready.",
+  raw: {}
+};
+
+function cleanFounderText(value: unknown, fallback = "Not available yet"): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "object") {
+    const record = recordOf(value);
+    const readable = readFirst(record, ["title", "name", "summary", "message", "recommendedAction", "reason"]);
+    return readable ? cleanFounderText(readable, fallback) : fallback;
+  }
+  return String(value);
+}
+
+function getProductImage(product: unknown): string | null {
+  const record = recordOf(product);
+  const sources = [
+    record.mainImageUrl,
+    record.imageUrl,
+    record.productImageUrl,
+    record.image,
+    Array.isArray(record.images) ? record.images[0] : undefined,
+    recordOf(record.media).mainImageUrl,
+    recordOf(record.metadata).mainImageUrl,
+    recordOf(record.payload).mainImageUrl,
+    record.amazonImageUrl
+  ];
+
+  for (const source of sources) {
+    if (typeof source === "string" && source.trim()) return source.trim();
+    if (source && typeof source === "object") {
+      const nested = recordOf(source);
+      const nestedUrl = readFirst(nested, ["url", "src", "imageUrl", "mainImageUrl"]);
+      if (typeof nestedUrl === "string" && nestedUrl.trim()) return nestedUrl.trim();
+    }
+  }
+
+  return null;
+}
+
+function productKeyOf(row: AnyRecord, index = 0): string {
+  const sku = cleanFounderText(readFirst(row, ["sku", "sellerSku"]), "");
+  const asin = cleanFounderText(readFirst(row, ["asin"]), "");
+  const id = cleanFounderText(readFirst(row, ["id", "key"]), "");
+  return sku || asin || id || `product-${index}`;
+}
+
+function normalizeFounderProduct(source: AnyRecord, index = 0): FounderProduct {
+  const economics = recordOf(source.economics);
+  const name = cleanFounderText(readFirst(source, ["productName", "product_name", "itemName", "title", "name"]) ?? readFirst(economics, ["productName", "product_name"]), "Unnamed product");
+  const rawBullets = readFirst(source, ["bullets", "bulletPoints", "features", "listingBullets"]);
+  const bullets = Array.isArray(rawBullets)
+    ? rawBullets.map((item) => cleanFounderText(item, "")).filter(Boolean).slice(0, 6)
+    : [];
+
+  return {
+    key: productKeyOf(source, index),
+    id: cleanFounderText(readFirst(source, ["id", "key"]), ""),
+    name,
+    brand: cleanFounderText(readFirst(source, ["brand", "brandName", "manufacturer"]), "Leafy Dew"),
+    sku: cleanFounderText(readFirst(source, ["sku", "sellerSku", "seller_sku"]), "-"),
+    asin: cleanFounderText(readFirst(source, ["asin"]), "-"),
+    category: cleanFounderText(readFirst(source, ["category", "subCategory", "subcategory", "sub_category", "productType"]) ?? readFirst(economics, ["category", "subCategory", "subcategory"]), "Not available yet"),
+    price: readFirst(source, ["sellingPrice", "selling_price", "price"]) ?? readFirst(economics, ["sellingPrice", "selling_price", "price"]),
+    netProfit: readFirst(source, ["netProfit", "net_profit"]) ?? readFirst(economics, ["netProfit", "net_profit", "netProfitBeforeAds"]),
+    margin: readFirst(source, ["profitMargin", "margin"]) ?? readFirst(economics, ["profitMargin", "margin"]),
+    profitStatus: readFirst(source, ["profitStatus", "currentProfitStatus", "current_profit_status"]) ?? readFirst(economics, ["profitStatus", "currentProfitStatus"]),
+    readiness: readFirst(source, ["readiness", "readinessStatus", "listingReadiness", "status"]),
+    costStatus: readFirst(source, ["costStatus", "cost_status", "profitDataStatus"]) ?? readFirst(economics, ["costStatus", "profitDataStatus"]),
+    listingScore: readFirst(source, ["listingScore", "readinessScore", "passportScore", "score"]),
+    inventory: readFirst(source, ["inventory", "inventoryStatus", "availableQuantity", "quantity"]),
+    status: readFirst(source, ["status", "listingStatus", "productStatus"]),
+    bullets,
+    description: cleanFounderText(readFirst(source, ["description", "productDescription", "listingDescription"]), "No description available yet."),
+    raw: source
+  };
+}
+
+function mergeFounderProducts(...sources: unknown[]): FounderProduct[] {
+  const byKey = new Map<string, AnyRecord>();
+
+  sources.forEach((source) => {
+    recordsOf(source).forEach((row, index) => {
+      const key = productKeyOf(row, index);
+      const existing = byKey.get(key) ?? {};
+      byKey.set(key, { ...existing, ...row, economics: { ...recordOf(existing.economics), ...recordOf(row.economics) } });
+    });
+  });
+
+  return Array.from(byKey.values()).map((row, index) => normalizeFounderProduct(row, index));
+}
+
+function productMatches(product: FounderProduct, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [product.name, product.sku, product.asin, product.category, product.brand]
+    .some((value) => String(value ?? "").toLowerCase().includes(needle));
+}
+
+function productNeedsCost(product: FounderProduct): boolean {
+  const state = normalizeState(product.costStatus);
+  return state.includes("MISSING") || state.includes("NEEDS") || state.includes("PARTIAL") || state.includes("INPUT");
+}
+
+function productLowProfit(product: FounderProduct): boolean {
+  const state = normalizeState(product.profitStatus);
+  const margin = Number(product.margin ?? 0);
+  return state.includes("LOW") || state.includes("RISK") || (Number.isFinite(margin) && margin > 0 && margin < 15);
+}
+
+function productStatusTone(value: unknown): "good" | "watch" | "risk" | "neutral" {
+  const state = normalizeState(value);
+  if (["PASS", "READY", "COMPLETE", "ACTIVE", "HEALTHY", "GOOD", "SAFE", "APPROVED", "DONE"].some((token) => state.includes(token))) return "good";
+  if (["HIGH", "RISK", "FAIL", "BLOCK", "URGENT", "REJECTED"].some((token) => state.includes(token))) return "risk";
+  if (["MISSING", "NEEDS", "PARTIAL", "WATCH", "PENDING", "DRAFT"].some((token) => state.includes(token))) return "watch";
+  return "neutral";
+}
+
+function FounderBadge({ value, tone }: { value: unknown; tone?: "good" | "watch" | "risk" | "neutral" }) {
+  const label = cleanFounderText(value, "Not available yet");
+  return <Badge tone={tone ?? productStatusTone(value)}>{labelize(label)}</Badge>;
+}
+
+function ProductPlaceholder({ small = false }: { small?: boolean }) {
+  return (
+    <div className={`product-placeholder ${small ? "small" : ""}`} aria-label="Product image placeholder">
+      <span>LD</span>
+    </div>
+  );
+}
+
+function ProductThumb({ product, className = "" }: { product: FounderProduct | AnyRecord; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const image = getProductImage("raw" in product ? product.raw : product);
+  if (!image || failed) return <ProductPlaceholder small={className.includes("thumb")} />;
+  return <img className={className} src={image} alt={cleanFounderText("name" in product ? product.name : readFirst(product, ["productName", "title"]), "Product")} onError={() => setFailed(true)} />;
+}
+
+function FounderMetric({ label, value, badge }: { label: string; value: ReactNode; badge?: boolean }) {
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <strong>{badge ? <FounderBadge value={value} /> : value}</strong>
+    </div>
+  );
+}
+
 function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("Today Dashboard");
+  const [activePage, setActivePage] = useState<AppPage>("Today");
+  const [selectedProduct, setSelectedProduct] = useState<FounderProduct | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     mainContentRef.current?.scrollTo({ top: 0 });
-  }, [activeTab]);
+  }, [activePage]);
+
+  function navigate(page: AppPage, product: FounderProduct | null = null) {
+    if (product) setSelectedProduct(product);
+    setActivePage(page);
+  }
+
+  function setTechnicalTab(tab: Tab) {
+    setActivePage(tab);
+  }
+
+  const activeFounderTab: FounderTab = activePage === "Product Detail"
+    ? "Products"
+    : founderTabs.includes(activePage as FounderTab)
+      ? activePage as FounderTab
+      : "More";
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
+    <div className="app-shell founder-app-shell">
+      <header className="top-header">
+        <button type="button" className="brand-left" onClick={() => navigate("Today")} aria-label="Open Today">
           {logoFailed ? (
             <div className="logo-fallback">LD</div>
           ) : (
             <img src="/ld-logo.png" alt="Leafy Dew" onError={() => setLogoFailed(true)} />
           )}
-          <div>
-            <strong>Leafy Dew</strong>
-            <span>Founder workspace</span>
-          </div>
-        </div>
-        <nav className="nav-list" aria-label="Main sections">
-          {tabs.map((tab) => (
+          <span>
+            <strong>Leafy Dew AI-CGO</strong>
+            <small>AI Co-Pilot for Amazon Growth</small>
+          </span>
+        </button>
+        <nav className="top-nav" aria-label="Founder navigation">
+          {founderTabs.map((tab) => (
             <button
               type="button"
               key={tab}
-              className={activeTab === tab ? "active" : ""}
-              onClick={() => setActiveTab(tab)}
+              className={`nav-tab ${activeFounderTab === tab ? "nav-tab-active" : ""}`}
+              onClick={() => navigate(tab)}
             >
               {tab}
             </button>
           ))}
         </nav>
-      </aside>
+        <div className="header-actions">
+          <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks.">Safe Mode ON</span>
+          <button type="button" className="icon-button" aria-label="Notifications">!</button>
+          <button type="button" className="founder-menu">Founder</button>
+        </div>
+      </header>
 
-      <main className="main-panel">
-        <header className="topbar">
-          <div className="top-brand">
-            {logoFailed ? <div className="mini-logo">LD</div> : <img src="/ld-logo.png" alt="" />}
-            <h1>Leafy Dew</h1>
-          </div>
-          <div className="top-actions">
-            <span>Seller: {SELLER_ID}</span>
-            <StatusBadge value="SHADOW" />
-            <span>Founder</span>
-          </div>
-        </header>
-
-        <div className="main-content" ref={mainContentRef}>
-          {activeTab === "Today Dashboard" && <TodayDashboard setActiveTab={setActiveTab} />}
-          {activeTab === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setActiveTab} />}
-          {activeTab === "Product Passport" && <ProductPassportPage />}
-          {activeTab === "Product Economics" && <ProductEconomicsPage />}
-          {activeTab === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setActiveTab} />}
-          {activeTab === "Engine Command Center" && <EngineCommandCenterPage />}
-          {activeTab === "Approval Center" && <ApprovalCenterPage />}
-          {activeTab === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setActiveTab} />}
-          {activeTab === "Execution Gateway" && <ExecutionGatewayPage />}
-          {activeTab === "Live Execution" && <LiveExecutionPage />}
-          {activeTab === "Rollback Center" && <RollbackCenterPage />}
-          {activeTab === "Listing Drafts" && <ListingDraftsPage setActiveTab={setActiveTab} />}
-          {activeTab === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setActiveTab} />}
-          {activeTab === "Safety Control" && <SafetyControlPage />}
-          {activeTab === "Launch Gate" && <LaunchGatePage />}
-          {activeTab === "Launch Checklist" && <LaunchChecklistPage />}
-          {activeTab === "Scheduler" && <SchedulerControlPage />}
-          {activeTab === "Notification Outbox" && <NotificationOutboxPage />}
-          {activeTab === "Security Guardrails" && <SecurityGuardrailsPage />}
-          {activeTab === "Alert Center" && <AlertCenterPage setActiveTab={setActiveTab} />}
-          {activeTab === "Experiments" && <ExperimentsPage />}
-          {activeTab === "Data Freshness" && <DataFreshnessPage />}
-          {activeTab === "AI Gateway" && <AiGatewayPage />}
-          {activeTab === "Production Health" && <ProductionHealthPage />}
-          {activeTab === "QA Smoke" && <QaSmokePage />}
-          {activeTab === "Maintenance" && <MaintenancePage />}
-          {activeTab === "CEO Report" && <CeoReportPage />}
-          {activeTab === "Learning" && <LearningPage />}
-          {activeTab === "Activity Logs" && <ActivityLogsPage />}
-          {activeTab === "Settings" && <SettingsPage />}
+      <main className="main-panel founder-main-panel">
+        <div className="main-content page-container" ref={mainContentRef}>
+          {activePage === "Today" && <TodayDashboard navigate={navigate} />}
+          {activePage === "Products" && <ProductsPage navigate={navigate} />}
+          {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
+          {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
+          {activePage === "Growth" && <GrowthPage navigate={navigate} />}
+          {activePage === "Brand" && <BrandPage navigate={navigate} />}
+          {activePage === "Sales & Ads" && <SalesAdsPage navigate={navigate} />}
+          {activePage === "Reports" && <ReportsPage navigate={navigate} />}
+          {activePage === "More" && <MoreToolsPage navigate={navigate} />}
+          {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Product Passport" && <ProductPassportPage />}
+          {activePage === "Product Economics" && <ProductEconomicsPage />}
+          {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
+          {activePage === "Approval Center" && <ApprovalCenterPage />}
+          {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Execution Gateway" && <ExecutionGatewayPage />}
+          {activePage === "Live Execution" && <LiveExecutionPage />}
+          {activePage === "Rollback Center" && <RollbackCenterPage />}
+          {activePage === "Listing Drafts" && <ListingDraftsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Safety Control" && <SafetyControlPage />}
+          {activePage === "Launch Gate" && <LaunchGatePage />}
+          {activePage === "Launch Checklist" && <LaunchChecklistPage />}
+          {activePage === "Scheduler" && <SchedulerControlPage />}
+          {activePage === "Notification Outbox" && <NotificationOutboxPage />}
+          {activePage === "Security Guardrails" && <SecurityGuardrailsPage />}
+          {activePage === "Alert Center" && <AlertCenterPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Experiments" && <ExperimentsPage />}
+          {activePage === "Data Freshness" && <DataFreshnessPage />}
+          {activePage === "AI Gateway" && <AiGatewayPage />}
+          {activePage === "Production Health" && <ProductionHealthPage />}
+          {activePage === "QA Smoke" && <QaSmokePage />}
+          {activePage === "Maintenance" && <MaintenancePage />}
+          {activePage === "CEO Report" && <CeoReportPage />}
+          {activePage === "Learning" && <LearningPage />}
+          {activePage === "Activity Logs" && <ActivityLogsPage />}
+          {activePage === "Settings" && <SettingsPage />}
         </div>
       </main>
     </div>
   );
 }
 
-function TodayDashboard({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
+  const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
   const data = todayCommandSummaryOf(today.data);
-  const systemStatus = recordOf(data.systemStatus ?? data.systemReadiness ?? data.readiness);
-  const productionReadiness = recordOf(data.productionReadiness ?? data.productionHealth ?? data.readinessStatus ?? data.productionStatus);
-  const highAlerts = todayCommandNumber(data, ["highAlerts", "highAlertCount", "criticalAlerts", "criticalAlertCount"]);
-  const staleSources = todayCommandNumber(data, ["staleDataSources", "staleSources", "staleSourceCount"]);
-  const pendingApprovals = todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]);
-  const highRiskApprovals = todayCommandNumber(data, ["highRiskApprovals", "highRiskCount", "highRiskApprovalActions"]);
-  const qaFailCount = todayCommandNumber(data, ["qaFailCount", "qaSmokeFailCount", "failCount", "failedChecks"]);
-  const productionBlockerList = dailyList(readFirst(data, ["productionHealth.blockers", "productionHealthSummary.blockers", "blockers"]));
-  const productionBlockers = Math.max(todayCommandNumber(data, ["productionHealthBlockers", "productionBlockers", "blockersCount", "criticalBlockers"]), productionBlockerList.length);
-  const latestMaintenanceStatus = readFirst(data, [
-    "latestMaintenanceStatus",
-    "maintenanceStatus",
-    "maintenance.latestRunStatus",
-    "maintenanceSummary.latestRunStatus",
-    "maintenance.latestRun.runStatus"
-  ]);
-  const latestQaStatus = readFirst(data, [
-    "latestQaStatus",
-    "qaSmokeStatus",
-    "qaSmoke.runStatus",
-    "qaSmokeLatest.runStatus",
-    "qaSmoke.latest.runStatus"
-  ]);
-  const launchBlockers = Math.max(
-    todayCommandNumber(data, ["launchBlockers", "launchBlockersCount", "launchGateBlockers", "blockersCount"]),
-    dailyList(readFirst(data, ["launchGate.blockers", "launchGateSummary.blockers", "launchChecklist.blockers"])).length
-  );
-  const securityBlockedEvents = todayCommandNumber(data, ["securityBlockedEvents", "securityBlocks", "blockedSecurityEvents", "blocked"]);
-  const liveAdapterMissing = readBoolean(readFirst(data, ["liveAdapterMissing", "liveExecution.liveAdapterMissing", "productionHealth.liveAdapterMissing"]));
-  const productionRiskHints = [
-    launchBlockers > 0 ? { title: "Launch blockers", riskLevel: "HIGH", message: `${launchBlockers} launch blockers need resolution before any limited live test.` } : null,
-    securityBlockedEvents > 0 ? { title: "Security blocks", riskLevel: "HIGH", message: `${securityBlockedEvents} dangerous actions were blocked by security guardrails.` } : null,
-    liveAdapterMissing ? { title: "Live adapter missing", riskLevel: "WATCH", message: "A live marketplace adapter is missing or disabled; keep live execution locked." } : null,
-    qaFailCount > 0 ? { title: "QA smoke failed checks", riskLevel: "HIGH", message: `${qaFailCount} QA smoke checks are failing.` } : null,
-    productionBlockers > 0 ? { title: "Production health blockers", riskLevel: "HIGH", message: `${productionBlockers} production blockers need attention.` } : null,
-    highAlerts > 0 ? { title: "High severity open alerts", riskLevel: "HIGH", message: `${highAlerts} high or critical alerts need review.` } : null,
-    staleSources > 0 ? { title: "Stale critical data", riskLevel: "WATCH", message: `${staleSources} data sources are stale.` } : null,
-    pendingApprovals > 10 ? { title: "High pending approvals", riskLevel: "WATCH", message: `${pendingApprovals} approval actions are waiting for founder review.` } : null,
-    highRiskApprovals > 0 ? { title: "High risk approval actions", riskLevel: "HIGH", message: `${highRiskApprovals} high risk actions require careful review.` } : null
-  ].filter(Boolean) as AnyRecord[];
-  const topRisks = [...recordsOf(data.topRisks ?? data.risks), ...productionRiskHints].slice(0, 8);
-  const priorities = recordsOf(data.todayPriorities ?? data.priorities).slice(0, 8);
-  const defaultNextBestActions = [
-    "Run Launch Checklist",
-    "Run Launch Gate",
-    "Run QA Smoke",
-    "Run Maintenance",
-    "Dry-run one approved low-risk action",
-    "Keep live execution locked until ready",
-    "Run maintenance if it has not run today",
-    "Run QA smoke test before enabling execution",
-    "Review approved actions ready for shadow execution",
-    "Capture rollback snapshots before live execution",
-    "Keep live execution blocked until QA smoke is PASS",
-    "Review open high severity alerts",
-    "Check stale data sources",
-    "Review running experiments"
-  ];
-  const nextBestActions = [...dailyList(data.nextBestActions ?? data.actions), ...defaultNextBestActions].slice(0, 8);
-  const statusCards = [
-    { label: "Pending Approvals", keys: ["pendingApprovals", "pendingApprovalCount", "pendingCount"] },
-    { label: "Approved Actions", keys: ["approvedActions", "approvedActionCount", "approvedCount"] },
-    { label: "Completed Actions", keys: ["completedActions", "completedActionCount", "completedCount"] },
-    { label: "Rejected Actions", keys: ["rejectedActions", "rejectedActionCount", "rejectedCount"] },
-    { label: "Total Engines", keys: ["totalEngines", "engineCount"] },
-    { label: "Enabled Engines", keys: ["enabledEngines", "enabledEngineCount"] },
-    { label: "Last 24h Engine Runs", keys: ["last24hEngineRuns", "engineRunsLast24h"] },
-    { label: "Last 24h Actions Created", keys: ["last24hActionsCreated", "actionsCreatedLast24h"] },
-    { label: "Total Learning Events", keys: ["totalLearningEvents", "learningEventCount"] },
-    { label: "Engines Tracked", keys: ["enginesTracked", "trackedEngines"] },
-    { label: "Execution Attempts", keys: ["executionAttempts", "totalExecutionAttempts"] },
-    { label: "Shadow Executions", keys: ["shadowExecutions", "shadowCompleted"] },
-    { label: "Listing Drafts", keys: ["listingDrafts", "totalListingDrafts"] },
-    { label: "Creative Recommendations", keys: ["creativeRecommendations", "totalCreativeRecommendations"] }
-  ];
-  const productionStatusCards = [
-    { label: "Scheduler Jobs", keys: ["schedulerJobs", "totalJobs", "scheduler.totalJobs", "schedulerSummary.totalJobs"] },
-    { label: "Notification Queued", keys: ["notificationQueued", "queued", "notificationOutbox.queued", "notificationSummary.queued"] },
-    { label: "Live Execution Runs", keys: ["liveExecutionRuns", "totalLiveRuns", "liveExecution.totalLiveRuns", "liveExecutionSummary.totalLiveRuns"] },
-    { label: "Security Blocked Events", keys: ["securityBlockedEvents", "securityBlocks", "securityGuardrails.blocked", "securityGuardrailSummary.blocked"] },
-    { label: "Open Alerts", keys: ["openAlerts", "openAlertCount", "openCount"] },
-    { label: "High Alerts", keys: ["highAlerts", "highAlertCount", "criticalAlerts", "criticalAlertCount"] },
-    { label: "Running Experiments", keys: ["runningExperiments", "activeExperiments", "runningCount"] },
-    { label: "Completed Experiments", keys: ["completedExperiments", "completedExperimentCount", "completedCount"] },
-    { label: "Stale Data Sources", keys: ["staleDataSources", "staleSources", "staleSourceCount"] },
-    { label: "AI Cost Today", keys: ["aiCostToday", "dailyAiCost", "dailyCost"] },
-    { label: "AI Cost Month", keys: ["aiCostMonth", "monthlyAiCost", "monthlyCost"] },
-    { label: "Activity Events Today", keys: ["activityEventsToday", "todayEvents", "activityLogEventsToday"] },
-    { label: "Rollback Snapshots", keys: ["rollbackSnapshots", "totalSnapshots", "snapshotCount"] },
-    { label: "Executable Approved Actions", keys: ["executableApprovedActions", "readyActions", "readyActionCount"] },
-    { label: "QA Pass Count", keys: ["qaPassCount", "passCount"] },
-    { label: "QA Warn Count", keys: ["qaWarnCount", "warnCount"] },
-    { label: "QA Fail Count", keys: ["qaFailCount", "failCount"] }
-  ];
-  const hardeningStatusCards = [
-    { label: "Launch Gate Status", value: <StatusBadge value={readFirst(data, ["launchGateStatus", "launchGate.overallStatus", "launchGateSummary.overallStatus"]) ?? "UNKNOWN"} /> },
-    { label: "Launch Checklist Status", value: <StatusBadge value={readFirst(data, ["launchChecklistStatus", "launchChecklist.overallLaunchStatus", "launchChecklistSummary.overallLaunchStatus"]) ?? "UNKNOWN"} /> },
-    { label: "Live Eligible", value: <StatusBadge value={readBoolean(readFirst(data, ["liveEligible", "launchGate.liveEligible", "liveExecution.liveEligible"])) ? "PASS" : "LOCKED"} /> },
-    { label: "PPC Live Eligible", value: <StatusBadge value={readBoolean(readFirst(data, ["ppcLiveEligible", "launchGate.ppcLiveEligible", "liveExecution.ppcLiveEligible"])) ? "PASS" : "LOCKED"} /> },
-    { label: "Listing Live Eligible", value: <StatusBadge value={readBoolean(readFirst(data, ["listingLiveEligible", "launchGate.listingLiveEligible", "liveExecution.listingLiveEligible"])) ? "PASS" : "LOCKED"} /> },
-    { label: "Latest Dry Run Status", value: <StatusBadge value={readFirst(data, ["latestDryRunStatus", "liveExecution.latestDryRunStatus", "latestDryRun.status"]) ?? "UNKNOWN"} /> },
-    { label: "Latest Maintenance Status", value: <StatusBadge value={latestMaintenanceStatus ?? "UNKNOWN"} /> },
-    { label: "Latest QA Status", value: <StatusBadge value={latestQaStatus ?? "UNKNOWN"} /> }
-  ];
-  const readinessItems = [
-    { label: "Action Ledger", keys: ["actionLedger", "actionLedgerReady"] },
-    { label: "Approval Center", keys: ["approvalCenter", "approvalCenterReady"] },
-    { label: "Engine Registry", keys: ["engineRegistry", "engineRegistryReady"] },
-    { label: "Engine Router", keys: ["engineRouter", "engineRouterReady"] },
-    { label: "Daily Orchestrator", keys: ["dailyOrchestrator", "dailyOrchestratorReady"] },
-    { label: "Product Passport", keys: ["productPassport", "productPassportReady"] },
-    { label: "Product Economics", keys: ["productEconomics", "productEconomicsReady"] },
-    { label: "Learning Loop", keys: ["learningLoop", "learningLoopReady"] },
-    { label: "Execution Gateway", keys: ["executionGateway", "executionGatewayReady"] },
-    { label: "Live Execution", keys: ["liveExecution", "liveExecutionReady"] },
-    { label: "Safety Control", keys: ["safetyControl", "safetyControlReady"] },
-    { label: "Launch Gate", keys: ["launchGate", "launchGateReady"] },
-    { label: "Launch Checklist", keys: ["launchChecklist", "launchChecklistReady"] },
-    { label: "Scheduler", keys: ["scheduler", "schedulerReady", "schedulerControl"] },
-    { label: "Notification Outbox", keys: ["notificationOutbox", "notificationOutboxReady"] },
-    { label: "Security Guardrails", keys: ["securityGuardrails", "securityGuardrailsReady"] },
-    { label: "Alert Center", keys: ["alertCenter", "alertCenterReady"] },
-    { label: "Experiments", keys: ["experiments", "experimentsReady"] },
-    { label: "Data Freshness", keys: ["dataFreshness", "dataFreshnessReady"] },
-    { label: "AI Gateway", keys: ["aiGateway", "aiGatewayReady"] },
-    { label: "Production Health", keys: ["productionHealth", "productionHealthReady"] },
-    { label: "Activity Logs", keys: ["activityLogs", "activityLogsReady"] },
-    { label: "Rollback", keys: ["rollback", "rollbackReady"] },
-    { label: "Approval Execution", keys: ["approvalExecution", "approvalExecutionReady", "approvalExecutionBridge"] },
-    { label: "Maintenance", keys: ["maintenance", "maintenanceReady"] },
-    { label: "QA Smoke", keys: ["qaSmoke", "qaSmokeReady"] }
+  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
+  const productCount = products.length;
+  const activeListings = products.filter((product) => normalizeState(product.status).includes("ACTIVE")).length;
+  const missingCostCount = products.filter(productNeedsCost).length || todayCommandNumber(data, ["missingCostCount", "missingCosts", "missingCostData"]);
+  const pendingApprovalCount = readNumber(approvals.data?.summary.pendingCount ?? todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]));
+  const listingIdeas = todayCommandNumber(data, ["listingDrafts", "totalListingDrafts", "listingIdeas"]);
+  const ppcRisks = todayCommandNumber(data, ["ppcRisks", "highRiskApprovals", "highRiskCount"]);
+  const profitRisks = products.filter(productLowProfit).length;
+
+  const attentionItems = [
+    missingCostCount > 0 ? { icon: "C", title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
+    pendingApprovalCount > 0 ? { icon: "A", title: "Pending approvals", text: `${pendingApprovalCount} recommendations are waiting for your decision.`, priority: "High", action: "Review Now", page: "Approvals" as AppPage } : null,
+    ppcRisks > 0 ? { icon: "P", title: "PPC risk high", text: "Ad spend or ACOS needs a founder review before changes are made.", priority: "Watch", action: "Open Growth", page: "Growth" as AppPage } : null,
+    listingIdeas > 0 ? { icon: "L", title: "Listing ideas ready", text: "Content improvements are drafted for review.", priority: "Ready", action: "View Ideas", page: "Growth" as AppPage } : null,
+    profitRisks > 0 ? { icon: "R", title: "Profit risk", text: "Some products may need pricing, cost, or ads attention.", priority: "Watch", action: "Open Products", page: "Products" as AppPage } : null
+  ].filter(Boolean).slice(0, 5) as Array<{ icon: string; title: string; text: string; priority: string; action: string; page: AppPage }>;
+
+  const previewProduct = products[0] ?? sampleFounderProduct;
+  const previewCards = [
+    { number: 1, title: "Today / Command Center", lines: ["Daily priorities", "Safe actions only", "Founder summary"], icon: "T", page: "Today" as AppPage },
+    { number: 2, title: "Products / Catalog", lines: [`${productCount} products`, "Costs and readiness", "Profit status"], icon: "P", page: "Products" as AppPage },
+    { number: 3, title: "Product Detail Preview", lines: [previewProduct.name, cleanFounderText(previewProduct.sku, "SKU pending"), "Amazon-like product view"], icon: "D", page: "Product Detail" as AppPage, product: previewProduct },
+    { number: 4, title: "Approvals / Decision Center", lines: [`${pendingApprovalCount} waiting`, "Approve, reject, watch", "You stay in control"], icon: "A", page: "Approvals" as AppPage },
+    { number: 5, title: "Growth Ideas", lines: ["PPC opportunities", "Listing improvements", "Creative ideas"], icon: "G", page: "Growth" as AppPage },
+    { number: 6, title: "Brand Overview", lines: ["A+ status", "Creative assets", "Top products"], icon: "B", page: "Brand" as AppPage }
   ];
 
   return (
-    <div className="page">
-      <PageHeader
-        title="Today Command Room"
-        subtitle="Founder command center for today's risks, approvals, engines, learning, and shadow execution."
-      />
-      <SafetyBanner text="Shadow mode active. No Amazon, Ads, Listing, Image, A+, Store, or Social action is executed." />
-      <div className="summary-strip command-summary">
-        {productionStatusCards.map((card) => (
-          <MetricTile key={card.label} label={card.label} value={todayCommandNumber(data, card.keys)} />
-        ))}
-        {hardeningStatusCards.map((card) => (
-          <MetricTile key={card.label} label={card.label} value={card.value} />
+    <div className="page founder-page today-page">
+      <div className="page-header founder-hero">
+        <div>
+          <h1>Good morning, Founder</h1>
+          <p>Here's what needs your attention today to grow Leafy Dew.</p>
+        </div>
+        <span className="safe-mode-pill hero-pill">No Amazon change is made</span>
+      </div>
+
+      <section className="action-card-grid">
+        <article className="action-card founder-action-card">
+          <div className="card-icon">AI</div>
+          <h2>Run Daily AI</h2>
+          <p>Get AI recommendations across catalog, ads, and content. No Amazon change is made.</p>
+          <button type="button" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
+        </article>
+        <article className="action-card founder-action-card">
+          <div className="card-icon">OK</div>
+          <h2>Pending Approvals</h2>
+          <p>Recommendations waiting for your decision.</p>
+          <div className="action-card-footer">
+            <Badge tone={pendingApprovalCount > 0 ? "watch" : "good"}>{pendingApprovalCount}</Badge>
+            <button type="button" onClick={() => navigate("Approvals")}>Review Now</button>
+          </div>
+        </article>
+        <article className="action-card founder-action-card">
+          <div className="card-icon">INR</div>
+          <h2>Missing Cost Data</h2>
+          <p>Products missing cost or fee data.</p>
+          <div className="action-card-footer">
+            <Badge tone={missingCostCount > 0 ? "watch" : "good"}>{missingCostCount}</Badge>
+            <button type="button" onClick={() => navigate("Products")}>Fix Now</button>
+          </div>
+        </article>
+      </section>
+
+      <section className="quick-status-strip">
+        <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount} />
+        <FounderMetric label="Active Listings" value={activeListings} />
+        <FounderMetric label="Sales 7D" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sevenDaySales"]))} />
+        <FounderMetric label="Net Profit 7D" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit7d"]))} />
+        <FounderMetric label="ACOS 7D" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "sevenDayAcos"]))} />
+        <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} />
+      </section>
+
+      <section className="founder-section">
+        <div className="section-heading">
+          <h2>What needs attention today?</h2>
+        </div>
+        <div className="attention-list">
+          {today.error && approvals.error ? <ErrorBlock text="Could not load today's summary." /> : attentionItems.length === 0 ? (
+            <div className="soft-state success-state">Nothing urgent is waiting. Safe Mode is on and recommendations will appear here when there is something useful to review.</div>
+          ) : attentionItems.map((item) => (
+            <article className="attention-row" key={item.title}>
+              <div className="row-icon">{item.icon}</div>
+              <div>
+                <strong>{item.title}</strong>
+                <p>{item.text}</p>
+              </div>
+              <FounderBadge value={item.priority} />
+              <button type="button" className="secondary" onClick={() => navigate(item.page)}>{item.action}</button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="founder-section">
+        <div className="section-heading">
+          <h2>Explore Leafy Dew</h2>
+        </div>
+        <div className="preview-grid">
+          {previewCards.map((card) => (
+            <button type="button" className="preview-card" key={card.number} onClick={() => navigate(card.page, card.product ?? null)}>
+              <span className="number-badge">{card.number}</span>
+              <span className="preview-icon">{card.icon}</span>
+              <strong>{card.title}</strong>
+              <span>{card.lines[0]}</span>
+              <span>{card.lines[1]}</span>
+              <span>{card.lines[2]}</span>
+              <em>Open</em>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
+  const [subTab, setSubTab] = useState("All Products");
+  const [filter, setFilter] = useState("All");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
+  const hasRealProducts = products.length > 0;
+  const catalogProducts = hasRealProducts ? products : [sampleFounderProduct];
+  const filteredProducts = catalogProducts.filter((product) => {
+    if (!productMatches(product, query)) return false;
+    if (subTab === "Missing Costs" && !productNeedsCost(product)) return false;
+    if (filter === "Active" && !normalizeState(product.status).includes("ACTIVE")) return false;
+    if (filter === "Missing Cost" && !productNeedsCost(product)) return false;
+    if (filter === "Low Profit" && !productLowProfit(product)) return false;
+    if (filter === "PPC Risk" && !normalizeState(product.profitStatus).includes("PPC")) return false;
+    if (filter === "Listing Needs Work" && productStatusTone(product.readiness) === "good") return false;
+    return true;
+  });
+  const pageSize = 8;
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filteredProducts.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const loading = passports.loading || economics.loading || costQueue.loading;
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Product Catalog" subtitle="Manage products, costs, profit, and listing readiness." />
+      <div className="segmented founder-subtabs">
+        {["All Products", "Missing Costs", "Profit Calculator"].map((label) => (
+          <button type="button" key={label} className={subTab === label ? "active" : ""} onClick={() => { setSubTab(label); setPage(1); }}>{label}</button>
         ))}
       </div>
-      <Card title="Production Readiness Quick Actions">
-        <div className="quick-link-grid command-quick-links">
-          <button type="button" onClick={() => setActiveTab("Safety Control")}>Open Safety Control</button>
-          <button type="button" onClick={() => setActiveTab("Live Execution")}>Open Live Execution</button>
-          <button type="button" onClick={() => setActiveTab("Launch Gate")}>Open Launch Gate</button>
-          <button type="button" onClick={() => setActiveTab("Launch Checklist")}>Open Launch Checklist</button>
-          <button type="button" onClick={() => setActiveTab("Scheduler")}>Open Scheduler</button>
-          <button type="button" onClick={() => setActiveTab("Notification Outbox")}>Open Notification Outbox</button>
-          <button type="button" onClick={() => setActiveTab("Security Guardrails")}>Open Security Guardrails</button>
-          <button type="button" onClick={() => setActiveTab("Alert Center")}>Open Alert Center</button>
-          <button type="button" onClick={() => setActiveTab("Experiments")}>Open Experiments</button>
-          <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
-          <button type="button" onClick={() => setActiveTab("AI Gateway")}>Open AI Gateway</button>
-          <button type="button" onClick={() => setActiveTab("Production Health")}>Open Production Health</button>
-          <button type="button" onClick={() => setActiveTab("Activity Logs")}>Open Activity Logs</button>
-          <button type="button" onClick={() => setActiveTab("Rollback Center")}>Open Rollback Center</button>
-          <button type="button" onClick={() => setActiveTab("Approval Execution")}>Open Approval Execution</button>
-          <button type="button" onClick={() => setActiveTab("Maintenance")}>Open Maintenance</button>
-          <button type="button" onClick={() => setActiveTab("QA Smoke")}>Open QA Smoke</button>
-        </div>
-      </Card>
-      {today.loading ? <LoadingBlock /> : today.error ? <ErrorBlock text="Could not load today command summary." /> : (
-        <div className="stack">
-          <div className="summary-strip command-summary">
-            {statusCards.map((card) => (
-              <MetricTile key={card.label} label={card.label} value={todayCommandNumber(data, card.keys)} />
-            ))}
-          </div>
-
-          <Card title="System Readiness">
-            <div className="readiness-grid">
-              {readinessItems.map((item) => (
-                <div className="readiness-item" key={item.label}>
-                  <span>{item.label}</span>
-                  <SystemReadinessBadge value={readFirst(systemStatus, item.keys) ?? readFirst(productionReadiness, item.keys)} />
+      {subTab === "Profit Calculator" ? (
+        <div className="soft-state">Use the advanced profit calculator when you need fee-level inputs. It keeps Amazon changes locked.</div>
+      ) : null}
+      <div className="catalog-controls">
+        <label className="field">
+          <span>Search by product, SKU, ASIN</span>
+          <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
+        </label>
+        <button type="button" className="secondary">Filters</button>
+        <button type="button" onClick={() => navigate("Product Passport")}>Add Product</button>
+      </div>
+      <div className="filter-pills">
+        {["All", "Active", "Missing Cost", "Low Profit", "PPC Risk", "Listing Needs Work"].map((label) => (
+          <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => { setFilter(label); setPage(1); }}>{label}</button>
+        ))}
+      </div>
+      {!loading && !hasRealProducts ? <div className="soft-state compact-state">Catalog data is not connected yet, so this preview row shows how products will appear once data is available.</div> : null}
+      <Card title="Products">
+        {loading ? <LoadingBlock text="Loading products..." /> : filteredProducts.length === 0 ? <EmptyBlock text="No products match this filter." /> : (
+          <>
+            <div className="product-table">
+              <div className="product-row product-row-head">
+                <span>Product</span>
+                <span>SKU</span>
+                <span>ASIN</span>
+                <span>Price</span>
+                <span>Net Profit / Margin</span>
+                <span>Profit Status</span>
+                <span>Readiness</span>
+                <span>Action</span>
+              </div>
+              {pageRows.map((product) => (
+                <div className="product-row" key={product.key}>
+                  <div className="product-cell">
+                    <ProductThumb product={product} className="product-thumb" />
+                    <strong>{product.name}</strong>
+                  </div>
+                  <span>{product.sku}</span>
+                  <span>{product.asin}</span>
+                  <span>{formatMoney(product.price)}</span>
+                  <span>{formatMoney(product.netProfit)} / {formatPercent(product.margin)}</span>
+                  <span><FounderBadge value={product.profitStatus ?? "Not available yet"} /></span>
+                  <span><FounderBadge value={product.readiness ?? product.costStatus ?? "Needs data"} /></span>
+                  <span><button type="button" className="secondary" onClick={() => navigate("Product Detail", product)}>View</button></span>
                 </div>
               ))}
             </div>
-          </Card>
-
-          <Card title="Top Risks">
-            {topRisks.length === 0 ? <EmptyBlock text="No top risks returned for today." /> : (
-              <div className="card-list command-card-list">
-                {topRisks.map((risk, index) => (
-                  <article className="item-card command-item-card" key={String(risk.id ?? risk.title ?? index)}>
-                    <div className="item-top">
-                      <strong>{formatEmpty(risk.title ?? risk.actionType ?? "Risk")}</strong>
-                      <StatusBadge value={risk.riskLevel ?? "WATCH"} />
-                    </div>
-                    <p>{formatEmpty(risk.summary ?? risk.reason ?? risk.message)}</p>
-                    <div className="detail-grid">
-                      <MetricRow label="Action Type" value={formatEmpty(risk.actionType)} />
-                      <MetricRow label="Entity Type" value={formatEmpty(risk.entityType)} />
-                      <MetricRow label="SKU" value={formatEmpty(risk.sku)} />
-                      <MetricRow label="ASIN" value={formatEmpty(risk.asin)} />
-                    </div>
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
-                    </div>
-                  </article>
-                ))}
+            <div className="catalog-pagination">
+              <span>Showing {pageRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1}-{(safePage - 1) * pageSize + pageRows.length} of {filteredProducts.length}</span>
+              <div className="button-row compact">
+                <button type="button" className="secondary" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
+                <button type="button" className="secondary" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next</button>
               </div>
-            )}
-          </Card>
-
-          <div className="dashboard-grid today">
-            <Card title="Today Priorities">
-              {priorities.length === 0 ? <EmptyBlock text="No priorities returned for today." /> : (
-                <div className="action-list">
-                  {priorities.map((priority, index) => (
-                    <article className="action-card" key={String(priority.id ?? priority.title ?? index)}>
-                      <div className="item-top">
-                        <strong>{formatEmpty(priority.title ?? priority.priority ?? priority.recommendedAction)}</strong>
-                        <StatusBadge value={priority.priorityLabel ?? priority.riskLevel ?? priority.status ?? "NEW"} />
-                      </div>
-                      <p>{formatEmpty(priority.summary ?? priority.reason ?? priority.note ?? priority.description)}</p>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            <Card title="Next Best Actions">
-              {nextBestActions.length === 0 ? (
-                <ul className="clean-list">
-                  <li>Review pending approval actions</li>
-                  <li>Review listing optimization drafts awaiting approval</li>
-                  <li>Review image and A+ recommendations awaiting approval</li>
-                  <li>Keep marketplace actions in shadow mode</li>
-                </ul>
-              ) : (
-                <ul className="clean-list">
-                  {nextBestActions.map((action, index) => (
-                    <li key={index}>{formatDailyListItem(action)}</li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          </div>
-
-          <Card title="Quick Actions">
-            <div className="quick-link-grid command-quick-links">
-              <button type="button" onClick={() => setActiveTab("Daily AI-CGO")}>Run Daily AI-CGO</button>
-              <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
-              <button type="button" onClick={() => setActiveTab("Engine Command Center")}>Open Engine Command Center</button>
-              <button type="button" onClick={() => setActiveTab("Learning")}>Open Learning</button>
-              <button type="button" onClick={() => setActiveTab("Execution Gateway")}>Open Execution Gateway</button>
-              <button type="button" onClick={() => setActiveTab("Live Execution")}>Open Live Execution</button>
-              <button type="button" onClick={() => setActiveTab("Launch Gate")}>Open Launch Gate</button>
-              <button type="button" onClick={() => setActiveTab("Launch Checklist")}>Open Launch Checklist</button>
-              <button type="button" onClick={() => setActiveTab("Scheduler")}>Open Scheduler</button>
-              <button type="button" onClick={() => setActiveTab("Notification Outbox")}>Open Notification Outbox</button>
-              <button type="button" onClick={() => setActiveTab("Security Guardrails")}>Open Security Guardrails</button>
-              <button type="button" onClick={() => setActiveTab("Listing Drafts")}>Open Listing Drafts</button>
-              <button type="button" onClick={() => setActiveTab("Image + A+")}>Open Creative Recommendations</button>
-              <button type="button" onClick={() => setActiveTab("Product Passport")}>Open Product Passport Cost Queue</button>
-              <button type="button" onClick={() => setActiveTab("Safety Control")}>Open Safety Control</button>
-              <button type="button" onClick={() => setActiveTab("Alert Center")}>Open Alert Center</button>
-              <button type="button" onClick={() => setActiveTab("Experiments")}>Open Experiments</button>
-              <button type="button" onClick={() => setActiveTab("Data Freshness")}>Open Data Freshness</button>
-              <button type="button" onClick={() => setActiveTab("AI Gateway")}>Open AI Gateway</button>
-              <button type="button" onClick={() => setActiveTab("Production Health")}>Open Production Health</button>
-              <button type="button" onClick={() => setActiveTab("Activity Logs")}>Open Activity Logs</button>
-              <button type="button" onClick={() => setActiveTab("Rollback Center")}>Open Rollback Center</button>
-              <button type="button" onClick={() => setActiveTab("Approval Execution")}>Open Approval Execution</button>
-              <button type="button" onClick={() => setActiveTab("Maintenance")}>Open Maintenance</button>
-              <button type="button" onClick={() => setActiveTab("QA Smoke")}>Open QA Smoke</button>
-              <button type="button" onClick={() => setActiveTab("CEO Report")}>Open CEO Report</button>
             </div>
-          </Card>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function ProductDetailPage({ product, navigate }: { product: FounderProduct | null; navigate: FounderNavigate }) {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const [activeTab, setActiveTab] = useState("Overview");
+  const products = mergeFounderProducts(passports.data, economics.data);
+  const detailProduct = product ?? products[0] ?? sampleFounderProduct;
+  const gallery = [detailProduct, detailProduct, detailProduct];
+  const bullets = detailProduct.bullets.length ? detailProduct.bullets : sampleFounderProduct.bullets;
+
+  return (
+    <div className="page founder-page">
+      <div className="detail-topline">
+        <button type="button" className="secondary" onClick={() => navigate("Products")}>Back to Products</button>
+        <FounderBadge value={detailProduct.status ?? "Safe preview"} />
+      </div>
+      <div className="product-detail-layout">
+        <section className="product-gallery">
+          <div className="thumb-rail">
+            {gallery.map((item, index) => (
+              <button type="button" key={index} className="gallery-thumb" aria-label={`Thumbnail ${index + 1}`}>
+                <ProductThumb product={item} className="product-thumb" />
+              </button>
+            ))}
+          </div>
+          <div className="main-product-image">
+            <ProductThumb product={detailProduct} className="product-main-img" />
+          </div>
+          <p>Roll over image to zoom in</p>
+        </section>
+        <section className="product-info-panel">
+          <h1>{detailProduct.name}</h1>
+          <p className="muted-line">Brand: {detailProduct.brand}</p>
+          <div className="badge-row">
+            <FounderBadge value={detailProduct.readiness ?? "Listing readiness pending"} />
+            <FounderBadge value={detailProduct.profitStatus ?? "Profit data pending"} />
+          </div>
+          <div className="price-line">{formatMoney(detailProduct.price)}</div>
+          <div className="detail-grid compact-business-grid">
+            <MetricRow label="ASIN" value={detailProduct.asin} />
+            <MetricRow label="SKU" value={detailProduct.sku} />
+            <MetricRow label="Category" value={detailProduct.category} />
+            <MetricRow label="Product Status" value={<FounderBadge value={detailProduct.status ?? "Not available yet"} />} />
+          </div>
+          <h2>About this item</h2>
+          <ul className="clean-list product-bullets">
+            {bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}
+          </ul>
+          <p className="product-description">{detailProduct.description}</p>
+        </section>
+        <aside className="product-side-panel">
+          <div className="product-health-card">
+            <h2>Product Health</h2>
+            <MetricRow label="Profit Margin" value={formatPercent(detailProduct.margin)} />
+            <MetricRow label="Net Profit" value={formatMoney(detailProduct.netProfit)} />
+            <MetricRow label="Cost Status" value={<FounderBadge value={detailProduct.costStatus ?? "Needs data"} />} />
+            <MetricRow label="PPC Safe" value={<FounderBadge value="Safe Mode" tone="good" />} />
+            <MetricRow label="Inventory" value={cleanFounderText(detailProduct.inventory)} />
+            <MetricRow label="Listing Score" value={cleanFounderText(detailProduct.listingScore)} />
+            <MetricRow label="Safe Mode" value={<span className="safe-inline">ON</span>} />
+          </div>
+          <div className="quick-actions-card">
+            <h2>Quick Actions</h2>
+            <button type="button" onClick={() => navigate("Growth")}>Optimize Listing</button>
+            <button type="button" onClick={() => navigate("Sales & Ads")}>Manage PPC & Ads</button>
+            <button type="button" onClick={() => navigate("Growth")}>Image & A+ Ideas</button>
+            <button type="button" onClick={() => navigate("Products")}>Fix Cost</button>
+            <button type="button" onClick={() => navigate("Product Economics")}>Profit Calculator</button>
+          </div>
+        </aside>
+      </div>
+      <div className="bottom-tabs">
+        {["Overview", "Content", "Pricing & Profit", "Images & A+", "PPC", "Recommendations", "History"].map((tab) => (
+          <button type="button" key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>
+        ))}
+      </div>
+      <Card title={activeTab}>
+        <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
+        <details className="technical-accordion">
+          <summary>Technical Details</summary>
+          <div className="detail-grid">
+            <MetricRow label="Internal Key" value={detailProduct.key} />
+            <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
+          </div>
+        </details>
+      </Card>
+    </div>
+  );
+}
+
+function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
+  const [filter, setFilter] = useState("Inbox");
+  const [processing, setProcessing] = useState<{ id: string; action: LedgerAction } | null>(null);
+  const [openHistory, setOpenHistory] = useState("");
+  const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
+  const rows = approvals.data?.rows ?? [];
+  const summary = approvals.data?.summary ?? {};
+  const filteredRows = rows.filter((row) => {
+    const state = normalizeState(row.approvalStatus ?? row.state);
+    if (filter === "Pending") return state.includes("PENDING") || state.includes("WAITING");
+    if (filter === "Approved") return state.includes("APPROVED");
+    if (filter === "Rejected") return state.includes("REJECTED");
+    if (filter === "Watch") return state.includes("MONITOR");
+    if (filter === "Done") return state.includes("COMPLETED") || state.includes("DONE");
+    return true;
+  }).slice(0, 12);
+
+  async function act(row: ActionLedgerRow, action: LedgerAction) {
+    const id = row.id;
+    const paths: Record<LedgerAction, string> = {
+      approve: `/api/action-ledger/${id}/approve`,
+      reject: `/api/action-ledger/${id}/reject`,
+      monitor: `/api/action-ledger/${id}/monitor`,
+      complete: `/api/action-ledger/${id}/complete`
+    };
+    setProcessing({ id, action });
+    try {
+      await postJson(paths[action], { note: `${labelize(action)} from founder decision inbox`, actor: "founder" });
+      approvals.reload();
+    } finally {
+      setProcessing(null);
+    }
+  }
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Approvals" subtitle="These are recommendations. You decide what happens." />
+      <div className="warning-card founder-safety-banner">
+        <p>Approving does not automatically change Amazon unless live execution is enabled and all safety checks pass.</p>
+      </div>
+      <div className="quick-status-strip">
+        <FounderMetric label="Pending" value={approvals.loading ? "..." : readNumber(summary.pendingCount)} />
+        <FounderMetric label="Approved" value={readNumber(summary.approvedCount)} />
+        <FounderMetric label="Rejected" value={readNumber(summary.rejectedCount)} />
+        <FounderMetric label="Watch" value={readNumber(summary.monitoringCount)} />
+        <FounderMetric label="Done" value={readNumber(summary.completedCount)} />
+        <FounderMetric label="High Risk" value={readNumber(summary.highRiskCount)} />
+      </div>
+      <div className="filter-pills approval-filter-pills">
+        {["Inbox", "Pending", "Approved", "Rejected", "Watch", "Done", "History", "Type", "Priority"].map((label) => (
+          <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => setFilter(label)}>{label}</button>
+        ))}
+      </div>
+      {approvals.loading ? <LoadingBlock text="Loading approvals..." /> : approvals.error ? <ErrorBlock text="Could not load approvals." /> : filteredRows.length === 0 ? <EmptyBlock text="No recommendations match this view." /> : (
+        <div className="approval-inbox">
+          {filteredRows.map((row) => {
+            const id = row.id;
+            const title = cleanFounderText(row.title ?? row.recommendedAction ?? row.summary, "Review recommendation");
+            return (
+              <article className="approval-card" key={id}>
+                <div className="approval-row">
+                  <div>
+                    <div className="badge-row">
+                      <FounderBadge value={row.riskLevel ?? "Watch"} />
+                      <FounderBadge value={row.approvalStatus ?? row.state ?? "Pending"} />
+                    </div>
+                    <h2>{title}</h2>
+                    <p>{cleanFounderText(row.summary ?? row.recommendedAction ?? row.actionType, "AI has prepared a recommendation for review.")}</p>
+                    <div className="approval-meta-grid">
+                      <MetricRow label="Product / Campaign" value={cleanFounderText(row.sku ?? row.asin ?? row.entityId)} />
+                      <MetricRow label="Why" value={cleanFounderText(row.summary ?? row.recommendedAction)} />
+                      <MetricRow label="Expected impact" value={cleanFounderText(row.confidenceLabel ?? "Not available yet")} />
+                      <MetricRow label="Suggested by" value={cleanFounderText(row.source ?? "AI system")} />
+                    </div>
+                    {openHistory === id ? <p className="history-note">History is available in the advanced approval center. This inbox keeps the founder view simple.</p> : null}
+                  </div>
+                  <div className="approval-actions">
+                    <button type="button" disabled={Boolean(processing)} onClick={() => act(row, "approve")}>{processing?.id === id && processing.action === "approve" ? "Approving..." : "Approve"}</button>
+                    <button type="button" className="secondary" disabled={Boolean(processing)} onClick={() => act(row, "reject")}>Reject</button>
+                    <button type="button" className="secondary" disabled={Boolean(processing)} onClick={() => act(row, "monitor")}>Watch</button>
+                    <button type="button" className="secondary" onClick={() => setOpenHistory(openHistory === id ? "" : id)}>History</button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
+      <div className="button-row">
+        <button type="button" className="secondary" onClick={() => navigate("Approval Center")}>Open Advanced Approval Center</button>
+      </div>
+    </div>
+  );
+}
+
+function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
+  const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
+  const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}&limit=20`));
+  const creative = useApi<ApiRows<CreativeRecommendation>>(() => getJson(`/api/creative-recommendations?sellerId=${SELLER_ID}&limit=20`));
+  const experiments = useApi<ApiRows<Experiment>>(() => experimentsApi.list(SELLER_ID, 20));
+  const products = mergeFounderProducts(drafts.data, creative.data);
+  const [tab, setTab] = useState("All Ideas");
+  const ppcIdeas = [
+    ...arrayOf(ppc.data?.scaleOpportunities),
+    ...arrayOf(ppc.data?.exactMatchOpportunities),
+    ...arrayOf(ppc.data?.productTargetingOpportunities),
+    ...arrayOf(ppc.data?.watchlistRisks)
+  ];
+  const cards = [
+    ...listingDraftRowsOf(drafts.data).map((row) => ({ type: "Listing Improvements", title: cleanFounderText(row.draftType, "Listing improvement"), productName: row.productName, why: row.reason ?? row.proposedValue, impact: row.confidenceLabel, risk: row.riskLevel, row })),
+    ...ppcIdeas.map((row, index) => ({ type: "PPC Opportunities", title: cleanFounderText(readFirst(row, ["title", "recommendationType", "recommendedAction"]), "PPC opportunity"), productName: readFirst(row, ["productName", "campaignName", "entityValue"]), why: readFirst(row, ["reason", "summary", "recommendedAction"]), impact: readFirst(row, ["expectedImpact", "confidenceLabel"]), risk: readFirst(row, ["riskLevel"]), row: { ...row, id: `ppc-${index}` } })),
+    ...creativeRecommendationRowsOf(creative.data).map((row) => ({ type: "Content & Creative", title: cleanFounderText(row.title ?? row.recommendationType, "Creative idea"), productName: row.productName, why: row.summary ?? row.recommendedAction, impact: row.confidenceLabel, risk: row.riskLevel, row })),
+    ...experimentRowsOf(experiments.data).map((row) => ({ type: "Experiments", title: cleanFounderText(row.name ?? row.experimentName, "Experiment"), productName: row.sku ?? row.asin, why: row.hypothesis ?? row.description, impact: row.expectedResult ?? row.successMetric, risk: row.priority, row }))
+  ].filter((card) => tab === "All Ideas" || card.type === tab).slice(0, 18);
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Growth Ideas" subtitle="AI-powered ideas to grow traffic, conversion, and profit." />
+      <SafetyBanner text="Nothing changes on Amazon automatically from this page." />
+      <div className="segmented founder-subtabs">
+        {["All Ideas", "Listing Improvements", "PPC Opportunities", "Content & Creative", "Experiments"].map((label) => (
+          <button type="button" key={label} className={tab === label ? "active" : ""} onClick={() => setTab(label)}>{label}</button>
+        ))}
+      </div>
+      {ppc.loading || drafts.loading || creative.loading ? <LoadingBlock text="Loading growth ideas..." /> : cards.length === 0 ? <EmptyBlock text="No growth ideas are ready yet. Run Daily AI to generate recommendations." /> : (
+        <div className="growth-grid">
+          {cards.map((card, index) => {
+            const product = products.find((item) => item.sku === cleanFounderText(readFirst(card.row, ["sku"]), "")) ?? sampleFounderProduct;
+            return (
+              <article className="growth-card" key={String(readFirst(card.row, ["id"]) ?? index)}>
+                <ProductThumb product={{ ...product, raw: { ...product.raw, ...recordOf(card.row) } }} className="growth-img" />
+                <div>
+                  <FounderBadge value={card.type} />
+                  <h2>{card.title}</h2>
+                  <p className="muted-line">{cleanFounderText(card.productName, "Product not linked yet")}</p>
+                  <p>{cleanFounderText(card.why, "AI found a growth opportunity worth reviewing.")}</p>
+                  <div className="badge-row">
+                    <FounderBadge value={card.impact ?? "Impact pending"} />
+                    <FounderBadge value={card.risk ?? "Low risk"} />
+                  </div>
+                  <button type="button" onClick={() => navigate("Approvals")}>View Suggestion</button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BrandPage({ navigate }: { navigate: FounderNavigate }) {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  const products = mergeFounderProducts(passports.data, economics.data);
+  const topProducts = products.slice(0, 4);
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Brand Overview" subtitle="Track brand health, content, assets, and top products." />
+      <div className="brand-grid">
+        <FounderMetric label="Brand Health Score" value="82" />
+        <FounderMetric label="A+ Content Status" value={readNumber(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"])) > 0 ? "Needs review" : "Not available yet"} badge />
+        <FounderMetric label="Store Status" value="Not connected yet" badge />
+        <FounderMetric label="Creative Assets" value={readNumber(readFirst(creative.data, ["totalRecommendations", "total"]))} />
+        <FounderMetric label="Brand Insights" value="Ready" badge />
+        <FounderMetric label="Top Brand Products" value={topProducts.length} />
+      </div>
+      <section className="brand-sections">
+        <article className="brand-card brand-store-card">
+          <h2>Brand Store</h2>
+          <p>Status: Not Connected / Needs Setup</p>
+          <button type="button" onClick={() => navigate("Image + A+")}>Open Brand Plan</button>
+        </article>
+        <article className="brand-card">
+          <h2>A+ Content</h2>
+          <p>{cleanFounderText(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"]), "0")} products need A+ review.</p>
+          <button type="button" onClick={() => navigate("Growth")}>Review A+ Ideas</button>
+        </article>
+        <article className="brand-card creative-assets-card">
+          <h2>Creative Assets</h2>
+          <div className="asset-grid">
+            {["Main images", "Lifestyle", "Infographics", "Size charts", "Video"].map((label) => (
+              <div className="asset-placeholder" key={label}>{label}</div>
+            ))}
+          </div>
+        </article>
+        <article className="brand-card top-products-card">
+          <h2>Top Brand Products</h2>
+          {topProducts.length === 0 ? <EmptyBlock text="Top products will appear once catalog data is connected." /> : topProducts.map((product) => (
+            <button type="button" className="brand-product-row" key={product.key} onClick={() => navigate("Product Detail", product)}>
+              <ProductThumb product={product} className="product-thumb" />
+              <span>{product.name}</span>
+              <strong>{formatMoney(product.price)}</strong>
+              <FounderBadge value={product.profitStatus ?? "Needs data"} />
+            </button>
+          ))}
+        </article>
+        <article className="brand-card campaign-card">
+          <h2>Brand Ideas & Campaigns</h2>
+          <p>Seasonal bundles, brand story refresh, and creative opportunities can be prepared for founder approval.</p>
+          <button type="button" onClick={() => navigate("Growth")}>Open Growth Ideas</button>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
+  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
+  const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const data = todayCommandSummaryOf(today.data);
+  const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
+  const products = mergeFounderProducts(economics.data);
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Sales & Ads" subtitle="Understand sales, ads, ACOS, and profit health." />
+      <div className="quick-status-strip">
+        <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} />
+        <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} />
+        <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} />
+        <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} />
+        <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} />
+        <FounderMetric label="PPC Risk" value={ppcRisks.length} />
+      </div>
+      <div className="sales-layout">
+        <Card title="Sales Trend">
+          <div className="simple-chart">
+            {[42, 58, 44, 70, 64, 78, 86].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
+          </div>
+        </Card>
+        <Card title="Ad Spend vs Sales">
+          <div className="simple-chart ads-chart">
+            {[34, 52, 40, 62, 54, 66, 72].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
+          </div>
+        </Card>
+        <Card title="Top PPC Risks">
+          {ppc.loading ? <LoadingBlock /> : ppcRisks.length === 0 ? <EmptyBlock text="No PPC risks returned yet." /> : (
+            <div className="card-list">
+              {ppcRisks.map((risk, index) => (
+                <article className="item-card compact-card" key={String(readFirst(risk, ["id", "entityValue"]) ?? index)}>
+                  <strong>{cleanFounderText(readFirst(risk, ["title", "entityValue", "campaignName"]), "PPC risk")}</strong>
+                  <p>{cleanFounderText(readFirst(risk, ["reason", "summary", "recommendedAction"]))}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card title="Profit Warnings">
+          {products.filter(productLowProfit).slice(0, 4).map((product) => (
+            <button type="button" className="brand-product-row" key={product.key} onClick={() => navigate("Product Detail", product)}>
+              <ProductThumb product={product} className="product-thumb" />
+              <span>{product.name}</span>
+              <FounderBadge value={product.profitStatus ?? "Watch"} />
+            </button>
+          ))}
+          {products.filter(productLowProfit).length === 0 ? <EmptyBlock text="No profit warnings are visible yet." /> : null}
+        </Card>
+      </div>
+      <div className="button-row">
+        <button type="button" className="secondary" onClick={() => navigate("CEO Report")}>Open CEO Report</button>
+        <button type="button" className="secondary" onClick={() => navigate("PPC Recommendations")}>Open PPC Recommendations</button>
+      </div>
+    </div>
+  );
+}
+
+function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
+  const reports = [
+    { title: "CEO Report", page: "CEO Report" as AppPage },
+    { title: "Daily Summary", page: "Today" as AppPage },
+    { title: "Weekly Summary", page: "CEO Report" as AppPage },
+    { title: "Profit Report", page: "Product Economics" as AppPage },
+    { title: "PPC Report", page: "PPC Recommendations" as AppPage },
+    { title: "Product Readiness Report", page: "Product Passport" as AppPage }
+  ];
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Reports" subtitle="Founder summaries and business reports." />
+      <div className="reports-grid">
+        {reports.map((report) => (
+          <button type="button" className="report-card" key={report.title} onClick={() => navigate(report.page)}>
+            <span className="report-icon">R</span>
+            <strong>{report.title}</strong>
+            <span>Open report</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
+  const groups: Array<{ title: string; tools: Array<{ label: string; page: Tab; note: string }> }> = [
+    { title: "Settings & Controls", tools: [
+      { label: "Settings", page: "Settings", note: "Workspace preferences" },
+      { label: "Safety Settings", page: "Safety Control", note: "Safe mode and approval rules" },
+      { label: "AI Cost Control", page: "AI Gateway", note: "AI budget and usage" },
+      { label: "Notifications", page: "Notification Outbox", note: "Queued messages" }
+    ] },
+    { title: "System", tools: [
+      { label: "System Health", page: "Production Health", note: "Production readiness" },
+      { label: "System Check", page: "QA Smoke", note: "Backend smoke checks" },
+      { label: "Maintenance", page: "Maintenance", note: "Safe housekeeping" },
+      { label: "Data Freshness", page: "Data Freshness", note: "Source freshness" },
+      { label: "Activity Timeline", page: "Activity Logs", note: "Recent events" }
+    ] },
+    { title: "Automation", tools: [
+      { label: "Daily AI Run", page: "Daily AI-CGO", note: "Generate safe recommendations" },
+      { label: "AI Engine Room", page: "Engine Command Center", note: "Advanced engine controls" },
+      { label: "Scheduler", page: "Scheduler", note: "Automation schedule" },
+      { label: "Learning", page: "Learning", note: "Recommendation feedback" }
+    ] },
+    { title: "Launch & Safety", tools: [
+      { label: "Controlled Live Actions", page: "Live Execution", note: "Gated execution only" },
+      { label: "Launch Readiness", page: "Launch Gate", note: "Live readiness gate" },
+      { label: "Launch Checklist", page: "Launch Checklist", note: "Readiness checklist" },
+      { label: "Security", page: "Security Guardrails", note: "Safety blocks and audits" },
+      { label: "Rollback Center", page: "Rollback Center", note: "Rollback snapshots" }
+    ] },
+    { title: "Advanced Growth", tools: [
+      { label: "Approval Execution", page: "Approval Execution", note: "Approved action bridge" },
+      { label: "Execution Gateway", page: "Execution Gateway", note: "Shadow execution checks" },
+      { label: "Alert Center", page: "Alert Center", note: "Business alerts" },
+      { label: "Experiments", page: "Experiments", note: "Growth experiments" },
+      { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
+      { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
+      { label: "PPC Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
+      { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
+      { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
+      { label: "Advanced Approval Center", page: "Approval Center", note: "Full approval workflow" }
+    ] }
+  ];
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="More Tools" subtitle="Settings, system checks, launch readiness, and advanced automation tools." />
+      <div className="warning-card founder-safety-banner">
+        <p>Advanced tools are for system checking, launch readiness, and debugging. Daily users usually do not need them.</p>
+      </div>
+      <div className="more-tool-grid">
+        {groups.map((group) => (
+          <section className="more-tool-card" key={group.title}>
+            <h2>{group.title}</h2>
+            <div className="more-tool-list">
+              {group.tools.map((tool) => (
+                <button type="button" key={`${group.title}-${tool.label}`} onClick={() => navigate(tool.page)}>
+                  <strong>{tool.label}</strong>
+                  <span>{tool.note}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
@@ -804,23 +1403,6 @@ function todayCommandNumber(data: AnyRecord, keys: string[]): number {
     if (value !== undefined && value !== null && value !== "") return readNumber(value);
   }
   return 0;
-}
-
-function SystemReadinessBadge({ value }: { value: unknown }) {
-  let label = "UNKNOWN";
-  if (typeof value === "boolean") label = value ? "READY" : "NOT READY";
-  else if (value === null || value === undefined || value === "") label = "UNKNOWN";
-  else {
-    const normalized = normalizeState(value).replace(/\s+/g, "_");
-    if (["TRUE", "YES", "Y", "1", "READY", "PASS", "PASSED", "GOOD", "AVAILABLE", "COMPLETE", "COMPLETED", "CONNECTED", "OK"].includes(normalized)) {
-      label = "READY";
-    } else if (["FALSE", "NO", "N", "0", "NOT_READY", "UNREADY", "MISSING", "FAILED", "ERROR", "DISCONNECTED", "BLOCKED", "UNAVAILABLE"].includes(normalized)) {
-      label = "NOT READY";
-    } else {
-      label = "UNKNOWN";
-    }
-  }
-  return <Badge tone={label === "READY" ? "good" : label === "NOT READY" ? "risk" : "watch"}>{label}</Badge>;
 }
 
 function SafetyBanner({ text }: { text: string }) {
