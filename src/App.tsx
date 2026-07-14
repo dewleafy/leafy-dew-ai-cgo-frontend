@@ -439,27 +439,87 @@ function cleanFounderText(value: unknown, fallback = "Not available yet"): strin
   return String(value);
 }
 
+function isValidImageUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:") || trimmed.startsWith("/");
+}
+
+function readImagePath(source: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, part) => {
+    if (current === null || current === undefined) return undefined;
+    if (/^\d+$/.test(part)) return Array.isArray(current) ? current[Number(part)] : undefined;
+    return recordOf(current)[part];
+  }, source);
+}
+
+function firstValidImageUrl(value: unknown, depth = 0): string | null {
+  if (isValidImageUrl(value)) return value.trim();
+  if (depth > 2 || value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = firstValidImageUrl(item, depth + 1);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (typeof value === "object") {
+    const record = recordOf(value);
+    const objectCandidates = [
+      record.url,
+      record.link,
+      record.src,
+      record.imageUrl,
+      record.image_url,
+      record.mainImageUrl,
+      record.main_image_url,
+      record.productImageUrl,
+      record.product_image_url,
+      record.amazonImageUrl,
+      record.amazon_image_url
+    ];
+    for (const candidate of objectCandidates) {
+      const nested = firstValidImageUrl(candidate, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
 function getProductImage(product: unknown): string | null {
-  const record = recordOf(product);
-  const sources = [
-    record.mainImageUrl,
-    record.imageUrl,
-    record.productImageUrl,
-    record.image,
-    Array.isArray(record.images) ? record.images[0] : undefined,
-    recordOf(record.media).mainImageUrl,
-    recordOf(record.metadata).mainImageUrl,
-    recordOf(record.payload).mainImageUrl,
-    record.amazonImageUrl
+  const imagePaths = [
+    "mainImageUrl",
+    "main_image_url",
+    "imageUrl",
+    "image_url",
+    "productImageUrl",
+    "product_image_url",
+    "amazonImageUrl",
+    "amazon_image_url",
+    "image",
+    "images",
+    "images.0",
+    "images.0.url",
+    "images.0.link",
+    "media.mainImageUrl",
+    "media.main_image_url",
+    "media.imageUrl",
+    "metadata.mainImageUrl",
+    "metadata.imageUrl",
+    "payload.mainImageUrl",
+    "payload.imageUrl",
+    "attributes.main_image_url",
+    "attributes.image_url",
+    "catalog.imageUrl",
+    "catalog.mainImageUrl",
+    "summaries.0.mainImage.link",
+    "images.0.images.0.link",
+    "includedData.images.0.images.0.link"
   ];
 
-  for (const source of sources) {
-    if (typeof source === "string" && source.trim()) return source.trim();
-    if (source && typeof source === "object") {
-      const nested = recordOf(source);
-      const nestedUrl = readFirst(nested, ["url", "src", "imageUrl", "mainImageUrl"]);
-      if (typeof nestedUrl === "string" && nestedUrl.trim()) return nestedUrl.trim();
-    }
+  for (const path of imagePaths) {
+    const image = firstValidImageUrl(readImagePath(product, path));
+    if (image) return image;
   }
 
   return null;
@@ -571,20 +631,79 @@ function FounderIcon({ name }: { name: FounderIconName }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function ProductPlaceholder({ small = false }: { small?: boolean }) {
+type ProductThumbnailVariant = "small" | "medium" | "large" | "hero";
+type ProductFallbackType = "product" | "brand" | "creative" | "listing";
+
+function fallbackTypeForTitle(title: string, fallbackType: ProductFallbackType): ProductFallbackType {
+  const normalized = title.toLowerCase();
+  if (fallbackType !== "product") return fallbackType;
+  if (/(image|a\+|creative|asset|lifestyle|infographic|video)/.test(normalized)) return "creative";
+  if (/(brand|store|campaign)/.test(normalized)) return "brand";
+  if (/(listing|keyword|bullet|content)/.test(normalized)) return "listing";
+  return "product";
+}
+
+function ProductPlaceholder({
+  title = "Product image",
+  variant = "medium",
+  fallbackType = "product",
+  className = ""
+}: {
+  title?: string;
+  variant?: ProductThumbnailVariant;
+  fallbackType?: ProductFallbackType;
+  className?: string;
+}) {
+  const resolvedFallback = fallbackTypeForTitle(title, fallbackType);
+  const normalizedTitle = title.toLowerCase();
+  const theme = /(yoga|mat|band|fitness|gym)/.test(normalizedTitle)
+    ? "fitness"
+    : /bottle/.test(normalizedTitle)
+      ? "bottle"
+      : resolvedFallback;
   return (
-    <div className={`product-placeholder ${small ? "small" : ""}`} aria-label="Product image placeholder">
+    <div className={`product-placeholder product-placeholder-${variant} product-placeholder-${theme} ${className}`} aria-label={`${title} image placeholder`}>
       <FounderIcon name="box" />
-      {!small ? <span>Product image</span> : null}
+      {variant !== "small" ? <span>{resolvedFallback === "creative" ? "Creative asset" : resolvedFallback === "brand" ? "Brand asset" : resolvedFallback === "listing" ? "Listing preview" : "Product image"}</span> : null}
     </div>
   );
 }
 
-function ProductThumb({ product, className = "" }: { product: FounderProduct | AnyRecord; className?: string }) {
+function ProductThumbnail({
+  src,
+  title,
+  variant = "medium",
+  fallbackType = "product",
+  className = ""
+}: {
+  src?: unknown;
+  title: string;
+  size?: number;
+  variant?: ProductThumbnailVariant;
+  fallbackType?: ProductFallbackType;
+  className?: string;
+}) {
   const [failed, setFailed] = useState(false);
+  const image = firstValidImageUrl(src);
+  if (!image || failed) return <ProductPlaceholder title={title} variant={variant} fallbackType={fallbackType} className={className} />;
+  return <img loading="lazy" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
+}
+
+function ProductThumb({
+  product,
+  className = "",
+  variant,
+  fallbackType = "product"
+}: {
+  product: FounderProduct | AnyRecord;
+  className?: string;
+  variant?: ProductThumbnailVariant;
+  fallbackType?: ProductFallbackType;
+}) {
   const image = getProductImage("raw" in product ? product.raw : product);
-  if (!image || failed) return <ProductPlaceholder small={className.includes("thumb")} />;
-  return <img className={className} src={image} alt={cleanFounderText("name" in product ? product.name : readFirst(product, ["productName", "title"]), "Product")} onError={() => setFailed(true)} />;
+  const inferredVariant = variant ?? (className.includes("main") ? "hero" : className.includes("growth") ? "large" : className.includes("thumb") ? "small" : "medium");
+  const title = cleanFounderText("name" in product ? product.name : readFirst(product, ["productName", "title", "name"]), "Product");
+  return <ProductThumbnail src={image} title={title} variant={inferredVariant} fallbackType={fallbackType} className={className} />;
 }
 
 function FounderMetric({ label, value, badge, icon = "chart", trend = "Ready for review", tone = "green" }: { label: string; value: ReactNode; badge?: boolean; icon?: FounderIconName; trend?: string; tone?: "green" | "gold" | "blue" | "neutral" }) {
@@ -865,9 +984,17 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 ) : card.kind === "approvals" ? (
                   <div className="preview-approval-stack"><Badge tone="watch">High</Badge><Badge tone="neutral">Watch</Badge><Badge tone="good">Safe</Badge></div>
                 ) : card.kind === "growth" ? (
-                  <div className="preview-mini-cards"><span>PPC</span><span>Listing</span><span>Creative</span></div>
+                  <div className="preview-product-stack">
+                    <ProductThumbnail title="PPC opportunity" variant="small" fallbackType="creative" className="product-thumb" />
+                    <ProductThumbnail title="Listing improvement" variant="small" fallbackType="listing" className="product-thumb" />
+                    <ProductThumbnail title="Creative idea" variant="small" fallbackType="creative" className="product-thumb" />
+                  </div>
                 ) : card.kind === "brand" ? (
-                  <div className="preview-assets"><span /><span /><span /><span /></div>
+                  <div className="preview-product-stack">
+                    <ProductThumbnail title="Brand asset" variant="small" fallbackType="brand" className="product-thumb" />
+                    <ProductThumbnail title="A+ creative" variant="small" fallbackType="creative" className="product-thumb" />
+                    <ProductThumbnail title="Top product" variant="small" fallbackType="product" className="product-thumb" />
+                  </div>
                 ) : (
                   <div className="preview-status-chips"><Badge tone="good">Daily priorities</Badge><Badge tone="good">Safe actions</Badge><Badge tone="neutral">Founder summary</Badge></div>
                 )}
@@ -1135,6 +1262,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
             return (
               <article className="approval-card" key={id}>
                 <div className="approval-row">
+                  <ProductThumb product={row as unknown as AnyRecord} className="approval-thumb" variant="small" />
                   <div>
                     <div className="badge-row">
                       <FounderBadge value={row.riskLevel ?? "Watch"} />
@@ -1264,6 +1392,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
       <section className="brand-sections">
         <article className="brand-card brand-store-card">
           <h2>Brand Store</h2>
+          <ProductThumbnail title="Leafy Dew Brand Store" variant="large" fallbackType="brand" className="brand-store-preview" />
           <p>Status: Not Connected / Needs Setup</p>
           <button type="button" onClick={() => navigate("Image + A+")}>Open Brand Plan</button>
         </article>
@@ -1276,7 +1405,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
           <h2>Creative Assets</h2>
           <div className="asset-grid">
             {["Main images", "Lifestyle", "Infographics", "Size charts", "Video"].map((label) => (
-              <div className="asset-placeholder" key={label}>{label}</div>
+              <ProductThumbnail key={label} title={label} variant="medium" fallbackType="creative" className="asset-placeholder" />
             ))}
           </div>
         </article>
