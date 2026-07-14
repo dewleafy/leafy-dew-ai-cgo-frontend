@@ -466,17 +466,20 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
   if (typeof value === "object") {
     const record = recordOf(value);
     const objectCandidates = [
+      record.mainImageUrl,
+      record.imageUrl,
+      record.amazonImageUrl,
+      record.imageUrls,
+      record.images,
       record.url,
       record.link,
       record.src,
-      record.imageUrl,
-      record.image_url,
-      record.mainImageUrl,
       record.main_image_url,
+      record.image_url,
+      record.amazon_image_url,
+      record.image_urls,
       record.productImageUrl,
-      record.product_image_url,
-      record.amazonImageUrl,
-      record.amazon_image_url
+      record.product_image_url
     ];
     for (const candidate of objectCandidates) {
       const nested = firstValidImageUrl(candidate, depth + 1);
@@ -488,16 +491,20 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
 
 const productImagePaths = [
   "mainImageUrl",
-  "main_image_url",
   "imageUrl",
-  "image_url",
   "amazonImageUrl",
-  "amazon_image_url",
-  "productImageUrl",
-  "product_image_url",
+  "imageUrls.0",
   "images.0",
   "images.0.url",
   "images.0.link",
+  "main_image_url",
+  "image_url",
+  "amazon_image_url",
+  "productImageUrl",
+  "product_image_url",
+  "imageUrls",
+  "image_urls.0",
+  "image_urls",
   "media.mainImageUrl",
   "media.imageUrl",
   "metadata.mainImageUrl",
@@ -538,7 +545,9 @@ const nestedProductImagePaths = [
 ] as const;
 
 const productImageCollectionPaths = [
+  "imageUrls",
   "images",
+  "image_urls",
   "media.images",
   "metadata.images",
   "payload.images",
@@ -606,6 +615,8 @@ function collectImageUrls(value: unknown, urls: string[], depth = 0) {
       record.product_image_url,
       record.amazonImageUrl,
       record.amazon_image_url,
+      record.imageUrls,
+      record.image_urls,
       record.images
     ].forEach((candidate) => collectImageUrls(candidate, urls, depth + 1));
   }
@@ -632,16 +643,6 @@ function productImageDebugValue(product: unknown, keys: string[]): unknown {
 }
 
 function productImageDebugFields(product: unknown): Array<[string, ReactNode]> {
-  const imageSource = productImageDebugValue(product, [
-    "imageSource",
-    "image_source",
-    "media.imageSource",
-    "media.image_source",
-    "metadata.imageSource",
-    "payload.imageSource",
-    "product.imageSource",
-    "product.image_source"
-  ]);
   const imageStatus = productImageDebugValue(product, [
     "imageStatus",
     "image_status",
@@ -652,9 +653,19 @@ function productImageDebugFields(product: unknown): Array<[string, ReactNode]> {
     "product.imageStatus",
     "product.image_status"
   ]);
+  const mediaJoinMatched = productImageDebugValue(product, [
+    "mediaJoinMatched",
+    "media_join_matched",
+    "media.mediaJoinMatched",
+    "media.media_join_matched",
+    "metadata.mediaJoinMatched",
+    "payload.mediaJoinMatched",
+    "product.mediaJoinMatched",
+    "product.media_join_matched"
+  ]);
   return [
-    imageSource ? ["Image Source", formatEmpty(imageSource)] : null,
-    imageStatus ? ["Image Status", formatEmpty(imageStatus)] : null
+    imageStatus !== undefined ? ["Image Status", formatEmpty(imageStatus)] : null,
+    mediaJoinMatched !== undefined ? ["Media Join Matched", formatEmpty(mediaJoinMatched)] : null
   ].filter(Boolean) as Array<[string, ReactNode]>;
 }
 
