@@ -442,7 +442,7 @@ function cleanFounderText(value: unknown, fallback = "Not available yet"): strin
 function isValidImageUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
-  return trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:") || trimmed.startsWith("/");
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:") || trimmed.startsWith("/") || trimmed.startsWith("//");
 }
 
 function readImagePath(source: unknown, path: string): unknown {
@@ -486,43 +486,203 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
   return null;
 }
 
-function getProductImage(product: unknown): string | null {
-  const imagePaths = [
-    "mainImageUrl",
-    "main_image_url",
-    "imageUrl",
-    "image_url",
-    "productImageUrl",
-    "product_image_url",
-    "amazonImageUrl",
-    "amazon_image_url",
-    "image",
-    "images",
-    "images.0",
-    "images.0.url",
-    "images.0.link",
-    "media.mainImageUrl",
-    "media.main_image_url",
-    "media.imageUrl",
-    "metadata.mainImageUrl",
-    "metadata.imageUrl",
-    "payload.mainImageUrl",
-    "payload.imageUrl",
-    "attributes.main_image_url",
-    "attributes.image_url",
-    "catalog.imageUrl",
-    "catalog.mainImageUrl",
-    "summaries.0.mainImage.link",
-    "images.0.images.0.link",
-    "includedData.images.0.images.0.link"
-  ];
+const productImagePaths = [
+  "mainImageUrl",
+  "main_image_url",
+  "imageUrl",
+  "image_url",
+  "amazonImageUrl",
+  "amazon_image_url",
+  "productImageUrl",
+  "product_image_url",
+  "images.0",
+  "images.0.url",
+  "images.0.link",
+  "media.mainImageUrl",
+  "media.imageUrl",
+  "metadata.mainImageUrl",
+  "payload.mainImageUrl",
+  "summaries.0.mainImage.link",
+  "image",
+  "images",
+  "media.main_image_url",
+  "metadata.imageUrl",
+  "payload.imageUrl",
+  "attributes.main_image_url",
+  "attributes.image_url",
+  "catalog.imageUrl",
+  "catalog.mainImageUrl",
+  "images.0.images.0.link",
+  "includedData.images.0.images.0.link"
+] as const;
 
-  for (const path of imagePaths) {
+const nestedProductImagePaths = [
+  "product",
+  "productData",
+  "product_data",
+  "productInfo",
+  "product_info",
+  "productPayload",
+  "product_payload",
+  "catalogProduct",
+  "catalog_product",
+  "listing",
+  "listingData",
+  "listing_data",
+  "payload.product",
+  "payload.productData",
+  "metadata.product",
+  "metadata.productData",
+  "action.product",
+  "action.productData"
+] as const;
+
+const productImageCollectionPaths = [
+  "images",
+  "media.images",
+  "metadata.images",
+  "payload.images",
+  "summaries.0.images",
+  "summaries.0.mainImage",
+  "includedData.images"
+] as const;
+
+type ProductImageResolution = {
+  url: string;
+  sourcePath: string;
+};
+
+function resolveProductImage(product: unknown, depth = 0): ProductImageResolution | null {
+  const directImage = firstValidImageUrl(product);
+  if (directImage) return { url: directImage, sourcePath: "direct" };
+
+  for (const path of productImagePaths) {
     const image = firstValidImageUrl(readImagePath(product, path));
-    if (image) return image;
+    if (image) return { url: image, sourcePath: path };
+  }
+
+  if (depth >= 2) return null;
+
+  for (const path of nestedProductImagePaths) {
+    const nested = readImagePath(product, path);
+    if (!nested || nested === product) continue;
+    const nestedImage = resolveProductImage(nested, depth + 1);
+    if (nestedImage) return { ...nestedImage, sourcePath: `${path}.${nestedImage.sourcePath}` };
   }
 
   return null;
+}
+
+function getProductImage(product: unknown): string | null {
+  return resolveProductImage(product)?.url ?? null;
+}
+
+function addUniqueImageUrl(urls: string[], value: unknown) {
+  const image = firstValidImageUrl(value);
+  if (image && !urls.includes(image)) urls.push(image);
+}
+
+function collectImageUrls(value: unknown, urls: string[], depth = 0) {
+  if (depth > 3 || value === null || value === undefined) return;
+  if (isValidImageUrl(value)) {
+    addUniqueImageUrl(urls, value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectImageUrls(item, urls, depth + 1));
+    return;
+  }
+  if (typeof value === "object") {
+    const record = recordOf(value);
+    [
+      record.url,
+      record.link,
+      record.src,
+      record.imageUrl,
+      record.image_url,
+      record.mainImageUrl,
+      record.main_image_url,
+      record.productImageUrl,
+      record.product_image_url,
+      record.amazonImageUrl,
+      record.amazon_image_url,
+      record.images
+    ].forEach((candidate) => collectImageUrls(candidate, urls, depth + 1));
+  }
+}
+
+function getProductImages(product: unknown): string[] {
+  const urls: string[] = [];
+  const primary = getProductImage(product);
+  addUniqueImageUrl(urls, primary);
+  productImageCollectionPaths.forEach((path) => collectImageUrls(readImagePath(product, path), urls));
+  nestedProductImagePaths.forEach((path) => {
+    const nested = readImagePath(product, path);
+    if (nested && nested !== product) getProductImages(nested).forEach((url) => addUniqueImageUrl(urls, url));
+  });
+  return urls.slice(0, 8);
+}
+
+function productImageDebugValue(product: unknown, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = readImagePath(product, key);
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return undefined;
+}
+
+function productImageDebugFields(product: unknown): Array<[string, ReactNode]> {
+  const imageSource = productImageDebugValue(product, [
+    "imageSource",
+    "image_source",
+    "media.imageSource",
+    "media.image_source",
+    "metadata.imageSource",
+    "payload.imageSource",
+    "product.imageSource",
+    "product.image_source"
+  ]);
+  const imageStatus = productImageDebugValue(product, [
+    "imageStatus",
+    "image_status",
+    "media.imageStatus",
+    "media.image_status",
+    "metadata.imageStatus",
+    "payload.imageStatus",
+    "product.imageStatus",
+    "product.image_status"
+  ]);
+  return [
+    imageSource ? ["Image Source", formatEmpty(imageSource)] : null,
+    imageStatus ? ["Image Status", formatEmpty(imageStatus)] : null
+  ].filter(Boolean) as Array<[string, ReactNode]>;
+}
+
+function ProductImageDebug({ product, compact = false }: { product: unknown; compact?: boolean }) {
+  const fields = productImageDebugFields(product);
+  if (!import.meta.env.DEV || fields.length === 0) return null;
+  return (
+    <div className={`product-image-debug ${compact ? "compact" : ""}`}>
+      {fields.map(([label, value]) => (
+        <span key={label}>{label}: {value}</span>
+      ))}
+    </div>
+  );
+}
+
+function hasProductContext(value: unknown): boolean {
+  return Boolean(readFirst(value, [
+    "sku",
+    "asin",
+    "productName",
+    "product_name",
+    "product",
+    "productData",
+    "mainImageUrl",
+    "imageUrl",
+    "amazonImageUrl",
+    "productImageUrl"
+  ]));
 }
 
 function productKeyOf(row: AnyRecord, index = 0): string {
@@ -685,8 +845,11 @@ function ProductThumbnail({
 }) {
   const [failed, setFailed] = useState(false);
   const image = firstValidImageUrl(src);
+  useEffect(() => {
+    setFailed(false);
+  }, [image]);
   if (!image || failed) return <ProductPlaceholder title={title} variant={variant} fallbackType={fallbackType} className={className} />;
-  return <img loading="lazy" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
+  return <img loading="lazy" decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
 }
 
 function ProductThumb({
@@ -985,15 +1148,15 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   <div className="preview-approval-stack"><Badge tone="watch">High</Badge><Badge tone="neutral">Watch</Badge><Badge tone="good">Safe</Badge></div>
                 ) : card.kind === "growth" ? (
                   <div className="preview-product-stack">
-                    <ProductThumbnail title="PPC opportunity" variant="small" fallbackType="creative" className="product-thumb" />
-                    <ProductThumbnail title="Listing improvement" variant="small" fallbackType="listing" className="product-thumb" />
-                    <ProductThumbnail title="Creative idea" variant="small" fallbackType="creative" className="product-thumb" />
+                    <ProductThumb product={previewProducts[0] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
+                    <ProductThumb product={previewProducts[1] ?? previewProduct} variant="small" fallbackType="listing" className="product-thumb" />
+                    <ProductThumb product={previewProducts[2] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
                   </div>
                 ) : card.kind === "brand" ? (
                   <div className="preview-product-stack">
-                    <ProductThumbnail title="Brand asset" variant="small" fallbackType="brand" className="product-thumb" />
-                    <ProductThumbnail title="A+ creative" variant="small" fallbackType="creative" className="product-thumb" />
-                    <ProductThumbnail title="Top product" variant="small" fallbackType="product" className="product-thumb" />
+                    <ProductThumb product={previewProducts[0] ?? previewProduct} variant="small" fallbackType="brand" className="product-thumb" />
+                    <ProductThumb product={previewProducts[1] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
+                    <ProductThumb product={previewProducts[2] ?? previewProduct} variant="small" fallbackType="product" className="product-thumb" />
                   </div>
                 ) : (
                   <div className="preview-status-chips"><Badge tone="good">Daily priorities</Badge><Badge tone="good">Safe actions</Badge><Badge tone="neutral">Founder summary</Badge></div>
@@ -1120,8 +1283,11 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const [activeTab, setActiveTab] = useState("Overview");
   const products = mergeFounderProducts(passports.data, economics.data);
   const detailProduct = product ?? products[0] ?? sampleFounderProduct;
-  const gallery = [detailProduct, detailProduct, detailProduct];
+  const detailImageSource = detailProduct.raw;
+  const galleryImages = getProductImages(detailImageSource);
+  const gallery = galleryImages.length ? galleryImages : [null, null, null];
   const bullets = detailProduct.bullets.length ? detailProduct.bullets : sampleFounderProduct.bullets;
+  const imageDebugFields = productImageDebugFields(detailImageSource);
 
   return (
     <div className="page founder-page">
@@ -1132,9 +1298,9 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
       <div className="product-detail-layout">
         <section className="product-gallery">
           <div className="thumb-rail">
-            {gallery.map((item, index) => (
+            {gallery.map((image, index) => (
               <button type="button" key={index} className="gallery-thumb" aria-label={`Thumbnail ${index + 1}`}>
-                <ProductThumb product={item} className="product-thumb" />
+                <ProductThumbnail src={image} title={`${detailProduct.name} thumbnail ${index + 1}`} variant="small" className="product-thumb" />
               </button>
             ))}
           </div>
@@ -1196,7 +1362,11 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
           <div className="detail-grid">
             <MetricRow label="Internal Key" value={detailProduct.key} />
             <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
+            {imageDebugFields.map(([label, value]) => (
+              <MetricRow key={label} label={label} value={value} />
+            ))}
           </div>
+          <ProductImageDebug product={detailImageSource} />
         </details>
       </Card>
     </div>
@@ -1302,7 +1472,9 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
   const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}&limit=20`));
   const creative = useApi<ApiRows<CreativeRecommendation>>(() => getJson(`/api/creative-recommendations?sellerId=${SELLER_ID}&limit=20`));
   const experiments = useApi<ApiRows<Experiment>>(() => experimentsApi.list(SELLER_ID, 20));
-  const products = mergeFounderProducts(drafts.data, creative.data);
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const products = mergeFounderProducts(passports.data, economics.data, drafts.data, creative.data);
   const [tab, setTab] = useState("All Ideas");
   const ppcIdeas = [
     ...arrayOf(ppc.data?.scaleOpportunities),
@@ -1332,10 +1504,17 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
           <button type="button" key={label} className={tab === label ? "active" : ""} onClick={() => setTab(label)}>{label}</button>
         ))}
       </div>
-      {ppc.loading || drafts.loading || creative.loading ? <LoadingBlock text="Loading growth ideas..." /> : (
+      {ppc.loading || drafts.loading || creative.loading || passports.loading || economics.loading ? <LoadingBlock text="Loading growth ideas..." /> : (
         <div className="growth-grid">
           {displayCards.map((card, index) => {
-            const product = products.find((item) => item.sku === cleanFounderText(readFirst(card.row, ["sku"]), "")) ?? sampleFounderProduct;
+            const cardSku = cleanFounderText(readFirst(card.row, ["sku", "sellerSku"]), "");
+            const cardAsin = cleanFounderText(readFirst(card.row, ["asin"]), "");
+            const cardProductName = cleanFounderText(card.productName, "");
+            const product = products.find((item) => (
+              (cardSku && item.sku === cardSku)
+              || (cardAsin && item.asin === cardAsin)
+              || (cardProductName && item.name === cardProductName)
+            )) ?? sampleFounderProduct;
             return (
               <article className="growth-card" key={String(readFirst(card.row, ["id"]) ?? index)}>
                 <ProductThumb product={{ ...product, raw: { ...product.raw, ...recordOf(card.row) } }} className="growth-img" />
@@ -1404,9 +1583,14 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         <article className="brand-card creative-assets-card">
           <h2>Creative Assets</h2>
           <div className="asset-grid">
-            {["Main images", "Lifestyle", "Infographics", "Size charts", "Video"].map((label) => (
-              <ProductThumbnail key={label} title={label} variant="medium" fallbackType="creative" className="asset-placeholder" />
-            ))}
+            {["Main images", "Lifestyle", "Infographics", "Size charts", "Video"].map((label, index) => {
+              const product = topProducts[index % Math.max(1, topProducts.length)];
+              return product ? (
+                <ProductThumb key={label} product={product} variant="medium" fallbackType="creative" className="asset-placeholder" />
+              ) : (
+                <ProductThumbnail key={label} title={label} variant="medium" fallbackType="creative" className="asset-placeholder" />
+              );
+            })}
           </div>
         </article>
         <article className="brand-card top-products-card">
@@ -4353,6 +4537,8 @@ function ActionLedgerCard({
   const monitoring = isMonitoringAction(row);
   const selectable = isSelectableBatchAction(row);
   const buttonDisabled = Boolean(processing || batchProcessing || actionsDisabled);
+  const showProductThumbnail = hasProductContext(row);
+  const imageDebugFields = productImageDebugFields(row);
   const importantFields: Array<[string, ReactNode]> = [
     ["Recommended Action", formatEmpty(row.recommendedAction)],
     ["SKU", formatEmpty(row.sku)],
@@ -4414,6 +4600,7 @@ function ActionLedgerCard({
               />
             </label>
           ) : null}
+          {showProductThumbnail ? <ProductThumb product={row} className="action-ledger-thumb" variant="small" /> : null}
           <div className="approval-title-block">
             <strong>{formatEmpty(row.title)}</strong>
             <span>Action ID {formatShortId(row.id)}</span>
@@ -4453,7 +4640,11 @@ function ActionLedgerCard({
           {detailFields.map(([label, value]) => (
             <MetricRow key={label} label={label} value={value} />
           ))}
+          {imageDebugFields.map(([label, value]) => (
+            <MetricRow key={label} label={label} value={value} />
+          ))}
         </div>
+        <ProductImageDebug product={row} compact />
       </details>
       {footer}
       {workflowPanel?.open ? (

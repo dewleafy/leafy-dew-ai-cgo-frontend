@@ -4096,6 +4096,34 @@ button.secondary:hover:not(:disabled),
   border-radius: 14px;
 }
 
+.action-ledger-thumb {
+  width: 58px;
+  height: 58px;
+  min-height: 58px;
+  flex: 0 0 58px;
+  border-radius: 14px;
+}
+
+.product-image-debug {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.product-image-debug span {
+  padding: 4px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: #f7faf5;
+}
+
+.product-image-debug.compact {
+  margin-top: 8px;
+}
+
 .brand-store-preview {
   width: 100%;
   min-height: 190px;
@@ -4157,5 +4185,10 @@ button.secondary:hover:not(:disabled),
   .approval-thumb {
     width: 82px;
     height: 82px;
+  }
+
+  .action-ledger-thumb {
+    width: 72px;
+    height: 72px;
   }
 }
