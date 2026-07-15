@@ -218,43 +218,37 @@ function StubPage({ title, navigate }: { title: string; navigate: FounderNavigat
 // DASHBOARD (REAL BACKEND INTEGRATION)
 // -----------------------------------------------------------------------------
 function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
-  // Fetch Real Backend Data
-  const today = useApi<AnyRecord>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
-  const approvalsSummary = useApi<AnyRecord>(() => getJson(`/api/action-ledger/summary?sellerId=${SELLER_ID}`));
-  const approvalsList = useApi<AnyRecord>(() => getJson(`/api/action-ledger?sellerId=${SELLER_ID}&limit=10`));
-  const passports = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const economics = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
+  const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
   const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30`));
-  const creativeSummary = useApi<AnyRecord>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
 
-  // Parse Data
-  const data = recordOf(today.data?.summary ?? today.data?.todayCommand ?? today.data);
-  const products = mergeFounderProducts(passports.data, economics.data);
-  const approvalRows = recordsOf(approvalsList.data?.rows).slice(0, 4);
-  const growthOpportunities = [...recordsOf(ppc.data?.scaleOpportunities), ...recordsOf(ppc.data?.watchlistRisks)].slice(0, 4);
+  const data = todayCommandSummaryOf(today.data);
+  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   
-  // Calculate Metrics from Backend
   const productCount = products.length;
-  const activeListings = products.filter(p => String(p.status).toUpperCase().includes("ACTIVE")).length;
-  const pendingCount = readNumber(readFirst(approvalsSummary.data, ["pendingCount", "summary.pendingCount"]));
-  const missingCostCount = products.filter(p => {
-    const s = String(p.costStatus).toUpperCase();
-    return s.includes("MISSING") || s.includes("NEEDS") || s.includes("PARTIAL");
-  }).length;
+  const activeListings = products.filter((p) => normalizeState(p.status).includes("ACTIVE")).length;
+  const missingCostCount = products.filter(productNeedsCost).length || todayCommandNumber(data, ["missingCostCount", "missingCosts", "missingCostData"]);
+  const pendingApprovalCount = readNumber(approvals.data?.summary?.pendingCount ?? todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]));
+  
   const acosValue = formatPercent(readFirst(data, ["acos7d", "acos", "metrics.acos7d"]));
   const revenueValue = formatMoney(readFirst(data, ["sales7d", "revenue", "metrics.sales7d"]));
   const profitValue = formatMoney(readFirst(data, ["netProfit7d", "profit", "metrics.netProfit7d"]));
 
-  // Brand Metrics from Backend
-  const aplusLive = readNumber(readFirst(creativeSummary.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
-  const aplusTotal = readNumber(readFirst(creativeSummary.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
+  const approvalRows = (approvals.data?.rows || []).slice(0, 4);
+  const ppcData = recordOf(ppc.data);
+  const growthOpportunities = [...arrayOf(ppcData.scaleOpportunities), ...arrayOf(ppcData.watchlistRisks)].slice(0, 4);
 
-  // Placeholder Fallbacks
+  const aplusLive = readNumber(readFirst(creative.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
+  const aplusTotal = readNumber(readFirst(creative.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
+
   const placeholderImg = "https://placehold.co/400x400/f8fafc/a1a1aa?text=Product+Image";
-  const placeholderProducts = products.length > 0 ? products : [];
 
   return (
-    <div className="w-full px-4 md:px-6 lg:px-8 space-y-6 pb-12">
+    <div className="w-full px-4 md:px-6 lg:px-8 space-y-6">
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         
         {/* CARD 1: Command Center */}
@@ -287,14 +281,14 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
               </div>
               <div className="border border-blue-100 bg-blue-50/30 rounded-xl p-4 flex flex-col h-full relative overflow-hidden">
                  <div className="flex items-center gap-2 mb-2 font-bold text-blue-900">Pending Approvals</div>
-                 <p className="text-xs text-blue-700/70 mb-4 flex-1">{pendingCount} items waiting in Action Ledger.</p>
+                 <p className="text-xs text-blue-700/70 mb-4 flex-1">{pendingApprovalCount} items waiting in Action Ledger.</p>
                  <button className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded-lg w-full transition" onClick={() => navigate("Approvals")}>Review Now</button>
-                 <div className="absolute top-4 right-4 bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{pendingCount}</div>
+                 <div className="absolute top-4 right-4 bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{pendingApprovalCount}</div>
               </div>
               <div className="border border-orange-100 bg-orange-50/30 rounded-xl p-4 flex flex-col h-full relative overflow-hidden">
                  <div className="flex items-center gap-2 mb-2 font-bold text-orange-900">Missing Cost Data</div>
                  <p className="text-xs text-orange-700/70 mb-4 flex-1">{missingCostCount} products missing passport costs.</p>
-                 <button className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-2 px-4 rounded-lg w-full transition" onClick={() => navigate("Catalog")}>Fix Now</button>
+                 <button className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-2 px-4 rounded-lg w-full transition" onClick={() => navigate("Products")}>Fix Now</button>
                  <div className="absolute top-4 right-4 bg-orange-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{missingCostCount}</div>
               </div>
             </div>
@@ -333,7 +327,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 
         {/* CARD 2: Catalog / Product List */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[500px]">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition" onClick={() => navigate("Catalog")}>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition" onClick={() => navigate("Products")}>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-full bg-green-800 text-white flex items-center justify-center font-bold text-sm">2</span>
               <h2 className="text-lg font-bold text-gray-900">Catalog / Product List</h2>
@@ -354,12 +348,12 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {placeholderProducts.length === 0 ? (
+                  {products.length === 0 ? (
                     <tr>
                       <td colSpan={5}>
                         <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                           <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                            <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                            <FounderIcon name="box" />
                           </div>
                           <h3 className="text-sm font-bold text-gray-900 mb-1">No products found</h3>
                           <p className="text-xs text-gray-500 max-w-xs">Your backend database is currently empty. Connect your catalog to populate this list.</p>
@@ -367,7 +361,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                       </td>
                     </tr>
                   ) : (
-                    placeholderProducts.slice(0, 5).map((p, i) => {
+                    products.slice(0, 5).map((p, i) => {
                       const img = getProductImage(p.raw) || placeholderImg;
                       return (
                         <tr key={String(p.key || i)} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
@@ -386,7 +380,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 </tbody>
               </table>
             </div>
-            <button className="w-full text-center mt-4 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Catalog")}>
+            <button className="w-full text-center mt-4 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Products")}>
               View all {productCount} backend products →
             </button>
           </div>
@@ -409,7 +403,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
              {products.length === 0 ? (
                <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                   <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4-4m-4 4l-4-4" /></svg>
+                    <FounderIcon name="chart" />
                   </div>
                   <h3 className="text-sm font-bold text-gray-900 mb-1">No product selected</h3>
                   <p className="text-xs text-gray-500 max-w-xs">Add products to your catalog to view deep intelligence.</p>
@@ -452,7 +446,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 {approvalRows.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                     <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                      <FounderIcon name="approval" />
                     </div>
                     <h3 className="text-sm font-bold text-gray-900 mb-1">Inbox Zero</h3>
                     <p className="text-xs text-gray-500 max-w-xs">No pending action ledger records requiring your review.</p>
@@ -475,7 +469,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 )}
              </div>
              <button className="w-full text-center mt-4 pt-4 border-t border-gray-100 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Approvals")}>
-              View all {pendingCount} approvals →
+              View all {pendingApprovalCount} approvals →
             </button>
           </div>
         </div>
@@ -498,7 +492,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 {growthOpportunities.length === 0 ? (
                    <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                     <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                      <FounderIcon name="growth" />
                     </div>
                     <h3 className="text-sm font-bold text-gray-900 mb-1">No PPC Opportunities</h3>
                     <p className="text-xs text-gray-500 max-w-xs">Connect your ads data to discover growth and optimization ideas.</p>
@@ -572,10 +566,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
     </div>
   );
 }
-
-// -----------------------------------------------------------------------------
-// MAIN APP SHELL
-// -----------------------------------------------------------------------------
 function App() {
   const [activePage, setActivePage] = useState<AppPage>("Today");
   const [selectedProduct, setSelectedProduct] = useState<FounderProduct | null>(null);
