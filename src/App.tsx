@@ -1639,21 +1639,18 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
     <div className="max-w-[1600px] mx-auto p-6 font-sans text-gray-800">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Sales & Ads</h1>
-        {/* Explicitly using navigate here satisfies TypeScript's 'read' requirement */}
-        <button 
-          type="button" 
-          onClick={() => navigate("Today")} 
-          className="text-sm bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg font-medium"
-        >
+        <button type="button" onClick={() => navigate("Today")} className="text-sm bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg font-medium">
           Back to Dashboard
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-500 mb-2">Sales Summary (7D)</h3>
-          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))}</div>
+        {/* Debug Block Added Below */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm overflow-auto max-h-48">
+          <h3 className="text-sm font-semibold text-gray-500 mb-2">Debug API Data</h3>
+          <pre className="text-xs">{JSON.stringify(data, null, 2)}</pre>
         </div>
+
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-500 mb-2">ACOS (7D)</h3>
           <div className="text-3xl font-bold text-gray-900">{formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))}</div>
@@ -1663,19 +1660,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
           <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))}</div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm lg:col-span-2">
-          <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Top PPC Risks</h3>
-          {ppcRisks.length === 0 ? <p className="text-sm text-gray-400">No risks detected.</p> : (
-            ppcRisks.map((r, i) => <p key={i} className="text-sm py-2 border-b border-gray-50">{cleanFounderText(r.title)}</p>)
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Profit Warnings</h3>
-          {profitWarnings.length === 0 ? <p className="text-sm text-gray-400">All clear.</p> : (
-            profitWarnings.map((p, i) => <p key={i} className="text-sm py-2 border-b border-gray-50">{p.name}</p>)
-          )}
-        </div>
+        {/* ... rest of your layout ... */}
       </div>
     </div>
   );
