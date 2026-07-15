@@ -1632,7 +1632,6 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   
   const data = todayCommandSummaryOf(today.data);
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
-  const products = mergeFounderProducts(economics.data);
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
@@ -1670,9 +1669,11 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         </div>
       </div>
       
-      {/* Footer Navigation */}
       <div className="flex gap-4 pt-8 border-t border-gray-100">
-        <button className="text-sm text-gray-500 hover:text-green-600 transition-colors" onClick={() => navigate("Today")}>
+        <button 
+          className="text-sm text-gray-500 hover:text-green-600 transition-colors" 
+          onClick={() => navigate("Today")}
+        >
           Return to Dashboard
         </button>
       </div>
