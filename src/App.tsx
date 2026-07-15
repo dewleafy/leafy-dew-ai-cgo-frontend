@@ -576,25 +576,41 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 // -----------------------------------------------------------------------------
 // MAIN APP SHELL
 // -----------------------------------------------------------------------------
-export default function App() {
+function App() {
   const [activePage, setActivePage] = useState<AppPage>("Today");
+  const [selectedProduct, setSelectedProduct] = useState<FounderProduct | null>(null);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
 
-  function navigate(page: AppPage) {
+  useEffect(() => {
+    mainContentRef.current?.scrollTo({ top: 0 });
+  }, [activePage]);
+
+  function navigate(page: AppPage, product: FounderProduct | null = null) {
+    if (product) setSelectedProduct(product);
     setActivePage(page);
   }
 
-  const activeFounderTab: FounderTab = founderTabs.includes(activePage as FounderTab) 
-    ? (activePage as FounderTab) 
-    : "More";
+  function setTechnicalTab(tab: Tab) {
+    setActivePage(tab);
+  }
+
+  const activeFounderTab: FounderTab = activePage === "Product Detail"
+    ? "Products"
+    : founderTabs.includes(activePage as FounderTab)
+      ? activePage as FounderTab
+      : "More";
 
   return (
     <div className="w-full min-h-screen bg-[#f3f4f6] font-sans text-gray-900 selection:bg-green-100">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50 px-4 md:px-6 h-16 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4 md:gap-10 h-full">
           <button type="button" onClick={() => navigate("Today")} className="flex items-center gap-2 hover:opacity-80 transition shrink-0">
-            <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">
-              LD
-            </div>
+            {logoFailed ? (
+              <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">LD</div>
+            ) : (
+              <img src="/ld-logo.png" alt="Leafy Dew" className="w-8 h-8 rounded-lg" onError={() => setLogoFailed(true)} />
+            )}
             <span className="text-lg font-extrabold tracking-tight text-gray-900">
               Leafy Dew <span className="text-gray-500 font-medium text-sm ml-1 hidden lg:inline-block">AI-CGO</span>
             </span>
@@ -620,13 +636,16 @@ export default function App() {
         <div className="flex items-center gap-4 shrink-0">
           <div className="hidden xl:flex items-center gap-3">
             <span className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold border border-green-100">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              Safe Mode ON
+              <FounderIcon name="shield" /> Safe Mode ON
             </span>
             <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-bold border border-gray-200">
               Shadow Mode OFF
             </span>
           </div>
+          <button type="button" className="relative p-2 text-gray-400 hover:text-gray-600 transition" aria-label="Notifications">
+            <FounderIcon name="bell" />
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+          </button>
           <div className="flex items-center gap-2 pl-4 border-l border-gray-200 cursor-pointer hover:opacity-80">
             <div className="w-8 h-8 rounded-full bg-gray-800 text-white flex items-center justify-center font-bold text-xs">F</div>
             <span className="text-sm font-semibold hidden sm:block">Founder</span>
@@ -634,12 +653,46 @@ export default function App() {
         </div>
       </header>
 
-      <main className="w-full pt-6">
-        {activePage === "Today" ? (
-          <TodayDashboard navigate={navigate} />
-        ) : (
-          <StubPage title={activePage} navigate={navigate} />
-        )}
+      <main className="w-full pt-6 pb-12" ref={mainContentRef}>
+         {activePage === "Today" && <TodayDashboard navigate={navigate} />}
+         {activePage === "Products" && <ProductsPage navigate={navigate} />}
+         {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
+         {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
+         {activePage === "Growth" && <GrowthPage navigate={navigate} />}
+         {activePage === "Brand" && <BrandPage navigate={navigate} />}
+         {activePage === "Sales & Ads" && <SalesAdsPage navigate={navigate} />}
+         {activePage === "Reports" && <ReportsPage navigate={navigate} />}
+         {activePage === "More" && <MoreToolsPage navigate={navigate} />}
+         
+         {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
+         {activePage === "Product Passport" && <ProductPassportPage />}
+         {activePage === "Product Economics" && <ProductEconomicsPage />}
+         {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
+         {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
+         {activePage === "Approval Center" && <ApprovalCenterPage />}
+         {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
+         {activePage === "Execution Gateway" && <ExecutionGatewayPage />}
+         {activePage === "Live Execution" && <LiveExecutionPage />}
+         {activePage === "Rollback Center" && <RollbackCenterPage />}
+         {activePage === "Listing Drafts" && <ListingDraftsPage setActiveTab={setTechnicalTab} />}
+         {activePage === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setTechnicalTab} />}
+         {activePage === "Safety Control" && <SafetyControlPage />}
+         {activePage === "Launch Gate" && <LaunchGatePage />}
+         {activePage === "Launch Checklist" && <LaunchChecklistPage />}
+         {activePage === "Scheduler" && <SchedulerControlPage />}
+         {activePage === "Notification Outbox" && <NotificationOutboxPage />}
+         {activePage === "Security Guardrails" && <SecurityGuardrailsPage />}
+         {activePage === "Alert Center" && <AlertCenterPage setActiveTab={setTechnicalTab} />}
+         {activePage === "Experiments" && <ExperimentsPage />}
+         {activePage === "Data Freshness" && <DataFreshnessPage />}
+         {activePage === "AI Gateway" && <AiGatewayPage />}
+         {activePage === "Production Health" && <ProductionHealthPage />}
+         {activePage === "QA Smoke" && <QaSmokePage />}
+         {activePage === "Maintenance" && <MaintenancePage />}
+         {activePage === "CEO Report" && <CeoReportPage />}
+         {activePage === "Learning" && <LearningPage />}
+         {activePage === "Activity Logs" && <ActivityLogsPage />}
+         {activePage === "Settings" && <SettingsPage />}
       </main>
     </div>
   );
