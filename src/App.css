@@ -4196,3 +4196,30 @@ button.secondary:hover:not(:disabled),
     height: 72px;
   }
 }
+
+.brand-store-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.store-stat {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.store-stat span {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.store-stat strong {
+  display: block;
+  font-size: 18px;
+  color: #1a1a2e;
+}
