@@ -1647,14 +1647,14 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <p className="text-gray-500 mt-2 text-sm">Understand sales, ads, ACOS, and profit health.</p>
       </div>
 
-      {/* Top Metric Strip */}
+      {/* Top Metric Strip - STRICTLY TYPED TONES */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} tone="green" icon="sales" />
         <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} tone="blue" icon="box" />
         <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} tone="neutral" icon="chart" />
         <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} tone="gold" icon="spark" />
         <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} tone="green" icon="check" />
-        <FounderMetric label="PPC Risk" value={ppcRisks.length} tone={ppcRisks.length > 0 ? "risk" : "good"} badge icon="shield" />
+        <FounderMetric label="PPC Risk" value={ppcRisks.length} tone={ppcRisks.length > 0 ? "gold" : "neutral"} badge icon="shield" />
       </div>
 
       {/* Chart Layout */}
@@ -1697,7 +1697,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
               <span className="flex items-center gap-1"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> Sales</span>
             </div>
           </div>
-          <div className="flex-1 relative w-full h-64 flex items-end justify-between px-2">
+          <div className="flex-1 relative w-full h-64 flex items-end justify-between px-2 gap-2">
             {/* Background Grid Lines */}
             <div className="absolute inset-0 flex flex-col justify-between z-0">
               {[...Array(5)].map((_, i) => (
@@ -1706,20 +1706,20 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
             </div>
             {/* Bars */}
             {days.map((day, i) => (
-              <div key={day} className="relative z-10 flex gap-1.5 w-1/8 h-full items-end group">
+              <div key={day} className="relative z-10 flex flex-1 gap-1 h-full items-end group">
                 <div 
-                  className="w-full bg-blue-500 rounded-t-md hover:bg-blue-400 transition-colors relative" 
+                  className="flex-1 bg-blue-500 rounded-t-sm hover:bg-blue-400 transition-colors" 
                   style={{ height: `${spendBars[i]}%` }}
                 ></div>
                 <div 
-                  className="w-full bg-green-500 rounded-t-md hover:bg-green-400 transition-colors relative" 
+                  className="flex-1 bg-green-500 rounded-t-sm hover:bg-green-400 transition-colors" 
                   style={{ height: `${salesBars[i]}%` }}
                 ></div>
               </div>
             ))}
           </div>
           {/* X-Axis Labels */}
-          <div className="flex justify-between mt-4 text-xs text-gray-400 font-medium px-4">
+          <div className="flex justify-between mt-4 text-xs text-gray-400 font-medium px-2">
             {days.map(day => <span key={day}>{day}</span>)}
           </div>
         </div>
