@@ -453,9 +453,51 @@ function readImagePath(source: unknown, path: string): unknown {
   }, source);
 }
 
+// NEW: Extract URL from Amazon SP-API image object format
+function extractUrlFromImageObject(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = recordOf(value);
+  // Amazon SP-API image object: { variant: "MAIN", link: "https://...", height, width }
+  const link = record.link ?? record.url ?? record.src ?? record.imageUrl ?? record.image_url ?? record.imageLocation;
+  if (typeof link === "string" && isValidImageUrl(link)) return link.trim();
+  return null;
+}
+
+// NEW: Extract all image URLs from Amazon SP-API images array
+function extractUrlsFromAmazonImages(value: unknown): string[] {
+  const urls: string[] = [];
+  if (!value || typeof value !== "object") return urls;
+  const record = recordOf(value);
+  
+  // Handle Amazon SP-API format: images: [{ marketplaceId, images: [{variant, link}] }]
+  if (record.images && Array.isArray(record.images)) {
+    for (const marketplaceImage of record.images) {
+      if (marketplaceImage && typeof marketplaceImage === "object") {
+        const innerImages = (marketplaceImage as AnyRecord).images;
+        if (Array.isArray(innerImages)) {
+          for (const img of innerImages) {
+            const url = extractUrlFromImageObject(img);
+            if (url && !urls.includes(url)) urls.push(url);
+          }
+        }
+        // Also check for direct link on marketplace wrapper
+        const directUrl = extractUrlFromImageObject(marketplaceImage);
+        if (directUrl && !urls.includes(directUrl)) urls.push(directUrl);
+      }
+    }
+  }
+  return urls;
+}
+
 function firstValidImageUrl(value: unknown, depth = 0): string | null {
-  if (isValidImageUrl(value)) return value.trim();
-  if (depth > 2 || value === null || value === undefined) return null;
+  if (isValidImageUrl(value)) return (value as string).trim();
+  
+  // NEW: Handle Amazon image object format directly
+  const fromObject = extractUrlFromImageObject(value);
+  if (fromObject) return fromObject;
+  
+  if (depth > 3 || value === null || value === undefined) return null;
+  
   if (Array.isArray(value)) {
     for (const item of value) {
       const nested = firstValidImageUrl(item, depth + 1);
@@ -463,8 +505,16 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
     }
     return null;
   }
+  
   if (typeof value === "object") {
     const record = recordOf(value);
+    
+    // NEW: Check Amazon SP-API nested image structure first
+    if (record.images && Array.isArray(record.images)) {
+      const amazonUrls = extractUrlsFromAmazonImages(value);
+      if (amazonUrls.length > 0) return amazonUrls[0];
+    }
+    
     const objectCandidates = [
       record.mainImageUrl,
       record.imageUrl,
@@ -479,7 +529,9 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
       record.amazon_image_url,
       record.image_urls,
       record.productImageUrl,
-      record.product_image_url
+      record.product_image_url,
+      record.imageLocation,
+      record.image_location
     ];
     for (const candidate of objectCandidates) {
       const nested = firstValidImageUrl(candidate, depth + 1);
@@ -520,7 +572,22 @@ const productImagePaths = [
   "catalog.imageUrl",
   "catalog.mainImageUrl",
   "images.0.images.0.link",
-  "includedData.images.0.images.0.link"
+  "includedData.images.0.images.0.link",
+  // NEW: Additional Amazon SP-API paths
+  "images.0.images.0.url",
+  "images.0.images",
+  "catalog.images",
+  "catalogData.images",
+  "raw.images",
+  "productData.images",
+  "listingData.images",
+  "product.images",
+  "item.images",
+  "attributes.images",
+  "summaries.0.images.0.link",
+  "summaries.0.images.0.url",
+  "payload.images.0.link",
+  "payload.images.0.url"
 ] as const;
 
 const nestedProductImagePaths = [
@@ -541,7 +608,15 @@ const nestedProductImagePaths = [
   "metadata.product",
   "metadata.productData",
   "action.product",
-  "action.productData"
+  "action.productData",
+  // NEW: Additional nested paths
+  "catalog",
+  "catalogData",
+  "raw",
+  "item",
+  "attributes",
+  "summaries.0",
+  "includedData"
 ] as const;
 
 const productImageCollectionPaths = [
@@ -553,7 +628,16 @@ const productImageCollectionPaths = [
   "payload.images",
   "summaries.0.images",
   "summaries.0.mainImage",
-  "includedData.images"
+  "includedData.images",
+  // NEW: Additional collection paths
+  "catalog.images",
+  "catalogData.images",
+  "raw.images",
+  "productData.images",
+  "listingData.images",
+  "product.images",
+  "item.images",
+  "attributes.images"
 ] as const;
 
 type ProductImageResolution = {
@@ -597,12 +681,29 @@ function collectImageUrls(value: unknown, urls: string[], depth = 0) {
     addUniqueImageUrl(urls, value);
     return;
   }
+  
+  // NEW: Handle Amazon image objects
+  const fromObject = extractUrlFromImageObject(value);
+  if (fromObject) {
+    if (!urls.includes(fromObject)) urls.push(fromObject);
+    return;
+  }
+  
   if (Array.isArray(value)) {
     value.forEach((item) => collectImageUrls(item, urls, depth + 1));
     return;
   }
   if (typeof value === "object") {
     const record = recordOf(value);
+    
+    // NEW: Extract from Amazon SP-API nested structure
+    if (record.images && Array.isArray(record.images)) {
+      const amazonUrls = extractUrlsFromAmazonImages(value);
+      amazonUrls.forEach((url) => {
+        if (!urls.includes(url)) urls.push(url);
+      });
+    }
+    
     [
       record.url,
       record.link,
@@ -617,7 +718,9 @@ function collectImageUrls(value: unknown, urls: string[], depth = 0) {
       record.amazon_image_url,
       record.imageUrls,
       record.image_urls,
-      record.images
+      record.images,
+      record.imageLocation,
+      record.image_location
     ].forEach((candidate) => collectImageUrls(candidate, urls, depth + 1));
   }
 }
