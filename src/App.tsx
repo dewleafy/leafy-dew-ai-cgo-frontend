@@ -1,16 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { ReactNode } from "react";
 import "./App.css";
 import { getJson } from "./api";
+import type {
+  ActionLedgerRow,
+  ActionLedgerSummary,
+  AnyRecord,
+  ApiRows,
+  ProductEconomics,
+  ProductPassport,
+  TodayCommandSummary
+} from "./types";
 
 const SELLER_ID = "default";
 
 // -----------------------------------------------------------------------------
 // TYPES & NAVIGATION
 // -----------------------------------------------------------------------------
-type AnyRecord = Record<string, unknown>;
-type ApiRows<T> = { rows: T[] };
-
 const founderTabs = ["Today", "Catalog", "Product Detail", "Approvals", "Growth", "Brand", "Sales & Ads", "Reports", "More"] as const;
 type FounderTab = (typeof founderTabs)[number];
 type AppPage = FounderTab | string;
@@ -101,10 +107,11 @@ function isValidImageUrl(value: unknown): value is string {
   return trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:") || trimmed.startsWith("/");
 }
 
+// FIXED: Strict Array Type Checking to resolve TS7053
 function getProductImage(product: unknown): string | null {
   const record = recordOf(product);
-  const imageUrls = Array.isArray(record.imageUrls) ? record.imageUrls : [];
-  const images = Array.isArray(record.images) ? record.images : [];
+  const imageUrls = Array.isArray(record.imageUrls) ? (record.imageUrls as string[]) : [];
+  const images = Array.isArray(record.images) ? (record.images as string[]) : [];
   
   const candidates = [
     record.mainImageUrl, record.imageUrl, record.amazonImageUrl, 
@@ -251,12 +258,11 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const aplusLive = readNumber(readFirst(creativeSummary.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
   const aplusTotal = readNumber(readFirst(creativeSummary.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
 
-  // Placeholder Fallbacks
   const placeholderImg = "https://placehold.co/400x400/f8fafc/a1a1aa?text=Product+Image";
-  const placeholderProducts = products.length > 0 ? products : [];
 
   return (
-    <div className="max-w-[1700px] mx-auto p-4 md:p-8 space-y-6">
+    // FULL WIDTH CONTAINER: w-full instead of max-w
+    <div className="w-full px-4 md:px-6 lg:px-8 space-y-6 pb-12">
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         
         {/* CARD 1: Command Center */}
@@ -273,7 +279,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
             
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-2xl">AI</div>
+                <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-2xl font-bold">AI</div>
                 <div>
                   <h3 className="text-xl font-extrabold text-gray-900">Good morning, Founder! 👋</h3>
                   <p className="text-xs text-gray-500">Here's what your AI agent recommends from backend data.</p>
@@ -303,7 +309,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 
             <div className="mt-auto">
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Quick Status (Backend)</h4>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-4">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 border-t border-gray-100 pt-4">
                 <div className="text-center sm:text-left">
                   <div className="text-xs text-gray-500 mb-1">Total Products</div>
                   <div className="text-xl font-bold text-gray-900">{productCount}</div>
@@ -344,9 +350,9 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           </div>
           <div className="p-6 flex-1 flex flex-col overflow-hidden">
             <p className="text-sm text-gray-500 mb-4 -mt-2">Backend products, pricing, and profit readiness.</p>
-            <div className="overflow-auto flex-1 border border-gray-100 rounded-xl">
+            <div className="overflow-auto flex-1 border border-gray-100 rounded-xl relative">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-gray-50 text-xs font-bold text-gray-500 uppercase sticky top-0 z-10">
+                <thead className="bg-gray-50 text-xs font-bold text-gray-500 uppercase sticky top-0 z-10 shadow-sm">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Product</th>
                     <th className="px-2 py-3 font-semibold">SKU</th>
@@ -356,15 +362,25 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {placeholderProducts.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No products found in backend.</td></tr>
+                  {products.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>
+                        <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                          <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
+                            <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                          </div>
+                          <h3 className="text-sm font-bold text-gray-900 mb-1">No products found</h3>
+                          <p className="text-xs text-gray-500 max-w-xs">Your backend database is currently empty. Connect your catalog to populate this list.</p>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
-                    placeholderProducts.slice(0, 5).map((p, i) => {
+                    products.slice(0, 5).map((p, i) => {
                       const img = getProductImage(p.raw) || placeholderImg;
                       return (
                         <tr key={String(p.key || i)} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
                           <td className="px-4 py-3 flex items-center gap-3">
-                            <img src={img} alt="" className="w-8 h-8 object-cover rounded shadow-sm border border-gray-200" />
+                            <img src={img} alt="" className="w-8 h-8 object-cover rounded shadow-sm border border-gray-200 bg-white" />
                             <span className="font-semibold text-gray-800 truncate max-w-[150px]">{p.name}</span>
                           </td>
                           <td className="px-2 py-3 text-xs text-gray-500">{p.sku}</td>
@@ -399,22 +415,31 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           </div>
           <div className="p-6 flex-1 flex flex-col">
              {products.length === 0 ? (
-               <div className="flex items-center justify-center h-full text-gray-400">Add products to view details.</div>
+               <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
+                  <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
+                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4-4m-4 4l-4-4" /></svg>
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-900 mb-1">No product selected</h3>
+                  <p className="text-xs text-gray-500 max-w-xs">Add products to your catalog to view deep intelligence.</p>
+                </div>
              ) : (
                <div className="flex gap-6 h-full">
                   <div className="w-48 h-64 border border-gray-100 rounded-lg flex items-center justify-center p-4 bg-gray-50">
                      <img src={getProductImage(products[0].raw) || placeholderImg} alt="" className="w-full h-full object-contain mix-blend-multiply rounded" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 flex flex-col">
                      <h3 className="text-lg font-bold text-gray-900 leading-tight mb-2">{products[0].name}</h3>
                      <div className="text-sm text-gray-500 mb-4">SKU: {products[0].sku} | ASIN: {products[0].asin}</div>
-                     <div className="text-2xl font-bold text-gray-900 mb-4">{formatMoney(products[0].price)}</div>
-                     <div className="space-y-2 mb-6">
-                        <div className="flex justify-between text-sm"><span className="text-gray-500">Margin</span> <span className="font-bold text-green-600">{formatPercent(products[0].margin)}</span></div>
-                        <div className="flex justify-between text-sm"><span className="text-gray-500">Profit</span> <span className="font-bold text-gray-900">{formatMoney(products[0].netProfit)}</span></div>
-                        <div className="flex justify-between text-sm"><span className="text-gray-500">Status</span> <StatusBadge value={products[0].profitStatus || "UNKNOWN"} /></div>
+                     <div className="text-2xl font-bold text-gray-900 mb-4 border-b border-gray-100 pb-4">{formatMoney(products[0].price)}</div>
+                     <div className="space-y-3 mb-6 flex-1">
+                        <div className="flex justify-between items-center text-sm"><span className="text-gray-500">Margin</span> <span className="font-bold text-green-600 bg-green-50 px-2 py-1 rounded">{formatPercent(products[0].margin)}</span></div>
+                        <div className="flex justify-between items-center text-sm"><span className="text-gray-500">Net Profit</span> <span className="font-bold text-gray-900">{formatMoney(products[0].netProfit)}</span></div>
+                        <div className="flex justify-between items-center text-sm"><span className="text-gray-500">Status</span> <StatusBadge value={products[0].profitStatus || "UNKNOWN"} /></div>
                      </div>
-                     <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded w-full mb-2 text-sm transition" onClick={() => navigate("Growth")}>Optimize Listing</button>
+                     <div className="grid grid-cols-2 gap-2 mt-auto">
+                       <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded text-sm transition" onClick={() => navigate("Growth")}>Optimize Listing</button>
+                       <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded text-sm transition" onClick={() => navigate("Sales & Ads")}>Manage Ads</button>
+                     </div>
                   </div>
                </div>
              )}
@@ -431,27 +456,33 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
             <span className="text-gray-400">›</span>
           </div>
           <div className="p-6 flex-1 flex flex-col overflow-hidden">
-             <div className="overflow-auto flex-1 space-y-4">
+             <div className="overflow-auto flex-1 space-y-3">
                 {approvalRows.length === 0 ? (
-                  <div className="text-center text-gray-400 py-8">No pending action ledger records.</div>
+                  <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
+                    <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mb-1">Inbox Zero</h3>
+                    <p className="text-xs text-gray-500 max-w-xs">No pending action ledger records requiring your review.</p>
+                  </div>
                 ) : (
                   approvalRows.map((row, i) => (
-                     <div key={String(row.id ?? i)} className="flex justify-between items-center p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:border-green-200 transition">
+                     <div key={String(row.id ?? i)} className="flex justify-between items-center p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:border-green-300 hover:shadow-md transition">
                         <div className="flex gap-4 items-start">
                            <StatusBadge value={row.riskLevel || "LOW"} />
                            <div>
-                              <h4 className="text-sm font-bold text-gray-900">{formatEmpty(row.title ?? row.recommendedAction)}</h4>
-                              <p className="text-[10px] text-gray-500 uppercase">{formatEmpty(row.actionType)}</p>
+                              <h4 className="text-sm font-bold text-gray-900 leading-tight mb-1">{formatEmpty(row.title ?? row.recommendedAction)}</h4>
+                              <p className="text-[10px] text-gray-500 uppercase tracking-wide">{formatEmpty(row.actionType)}</p>
                            </div>
                         </div>
-                        <div className="text-right">
-                           <button className="bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-3 py-1.5 rounded transition">Review</button>
+                        <div className="text-right shrink-0">
+                           <button className="bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-4 py-2 rounded-lg transition shadow-sm">Review</button>
                         </div>
                      </div>
                   ))
                 )}
              </div>
-             <button className="w-full text-center mt-4 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Approvals")}>
+             <button className="w-full text-center mt-4 pt-4 border-t border-gray-100 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Approvals")}>
               View all {pendingCount} approvals →
             </button>
           </div>
@@ -459,7 +490,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 
       </div>
 
-      {/* ADDITIONAL GRID FOR COMPLETENESS (5 & 6) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* CARD 5: Growth Ideas */}
@@ -472,14 +502,20 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
             <span className="text-gray-400">›</span>
           </div>
           <div className="p-6 flex-1 flex flex-col overflow-hidden">
-             <div className="overflow-auto flex-1 space-y-4">
+             <div className="overflow-auto flex-1 space-y-3">
                 {growthOpportunities.length === 0 ? (
-                   <div className="text-center text-gray-400 py-8">No PPC growth opportunities found.</div>
+                   <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
+                    <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mb-1">No PPC Opportunities</h3>
+                    <p className="text-xs text-gray-500 max-w-xs">Connect your ads data to discover growth and optimization ideas.</p>
+                  </div>
                 ) : (
                    growthOpportunities.map((opp, i) => (
-                      <div key={String(opp.id ?? i)} className="p-4 border border-gray-100 rounded-xl bg-gray-50">
+                      <div key={String(opp.id ?? i)} className="p-4 border border-gray-100 rounded-xl bg-gray-50 hover:bg-white hover:shadow-sm hover:border-gray-200 transition cursor-pointer">
                          <h4 className="text-sm font-bold text-gray-900 mb-1">{formatEmpty(opp.title ?? opp.recommendationType)}</h4>
-                         <p className="text-xs text-gray-500 mb-2">{formatEmpty(opp.reason ?? opp.summary)}</p>
+                         <p className="text-xs text-gray-500 mb-3 line-clamp-2">{formatEmpty(opp.reason ?? opp.summary)}</p>
                          <div className="flex gap-2">
                            <StatusBadge value={opp.priorityLabel ?? opp.riskLevel ?? "MEDIUM"} />
                            <StatusBadge value={opp.confidenceLabel ?? "MEDIUM"} />
@@ -501,34 +537,37 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
             <span className="text-gray-400">›</span>
           </div>
           <div className="p-6 flex-1 flex flex-col overflow-hidden">
-             <div className="grid grid-cols-2 gap-6 mb-8 border-b border-gray-100 pb-6">
-                <div>
-                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">A+ Modules Live</div>
-                   <div className="flex items-baseline gap-1 mb-1">
-                     <span className="text-4xl font-extrabold text-gray-900">{aplusLive}</span>
-                     <span className="text-lg text-gray-400">/ {aplusTotal}</span>
+             <div className="grid grid-cols-2 gap-6 mb-6 border-b border-gray-100 pb-6">
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">A+ Modules Live</div>
+                   <div className="flex items-baseline gap-1">
+                     <span className="text-3xl font-extrabold text-blue-600">{aplusLive}</span>
+                     <span className="text-sm text-gray-400 font-bold">/ {aplusTotal}</span>
                    </div>
                 </div>
-                <div className="border-l border-gray-100 pl-6">
-                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Store Status</div>
-                   <div className="text-lg font-bold text-green-600 mb-2 mt-2">Active</div>
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">Store Status</div>
+                   <div className="text-xl font-bold text-green-600 mt-1">Active</div>
                 </div>
              </div>
              
-             <h4 className="text-xs font-bold text-gray-900 mb-3">Top Brand Products</h4>
+             <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Top Brand Products</h4>
              <div className="space-y-3 mb-3 flex-1 overflow-auto">
                 {products.length === 0 ? (
-                  <div className="text-xs text-gray-400">No products connected.</div>
+                  <div className="text-xs text-gray-400 py-4 text-center bg-gray-50 rounded-lg">No products connected.</div>
                 ) : (
-                  products.slice(0, 3).map((p, i) => (
-                    <div key={String(p.key || i)} className="flex gap-3 items-center p-2 border border-gray-100 rounded-lg">
-                       <img src={getProductImage(p.raw) || placeholderImg} alt="" className="w-10 h-10 object-cover rounded" />
-                       <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-gray-900 truncate">{p.name}</p>
-                          <div className="text-xs text-gray-500">{formatMoney(p.price)}</div>
-                       </div>
-                    </div>
-                  ))
+                  products.slice(0, 3).map((p, i) => {
+                    const img = getProductImage(p.raw) || placeholderImg;
+                    return (
+                      <div key={String(p.key || i)} className="flex gap-3 items-center p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition">
+                         <img src={img} alt="" className="w-10 h-10 object-cover rounded shadow-sm border border-gray-200 bg-white" />
+                         <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-gray-900 truncate mb-0.5">{p.name}</p>
+                            <div className="text-xs text-gray-500 font-medium">{formatMoney(p.price)}</div>
+                         </div>
+                      </div>
+                    )
+                  })
                 )}
              </div>
              <button className="w-full text-center mt-auto pt-4 border-t border-gray-100 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Brand")}>
@@ -543,6 +582,39 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 }
 
 // -----------------------------------------------------------------------------
+// TECHNICAL PAGES (Stubs to satisfy React Router without bloating the file)
+// -----------------------------------------------------------------------------
+function DailyAiCgoPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Daily AI-CGO" navigate={() => setActiveTab("Today")} />; }
+function ProductPassportPage() { return <StubPage title="Product Passport" navigate={() => {}} />; }
+function ProductEconomicsPage() { return <StubPage title="Product Economics" navigate={() => {}} />; }
+function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="PPC Recommendations" navigate={() => setActiveTab("Today")} />; }
+function EngineCommandCenterPage() { return <StubPage title="Engine Command Center" navigate={() => {}} />; }
+function ApprovalCenterPage() { return <StubPage title="Approval Center" navigate={() => {}} />; }
+function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Approval Execution" navigate={() => setActiveTab("Today")} />; }
+function ExecutionGatewayPage() { return <StubPage title="Execution Gateway" navigate={() => {}} />; }
+function LiveExecutionPage() { return <StubPage title="Live Execution" navigate={() => {}} />; }
+function RollbackCenterPage() { return <StubPage title="Rollback Center" navigate={() => {}} />; }
+function ListingDraftsPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Listing Drafts" navigate={() => setActiveTab("Today")} />; }
+function CreativeRecommendationsPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Image + A+" navigate={() => setActiveTab("Today")} />; }
+function SafetyControlPage() { return <StubPage title="Safety Control" navigate={() => {}} />; }
+function LaunchGatePage() { return <StubPage title="Launch Gate" navigate={() => {}} />; }
+function LaunchChecklistPage() { return <StubPage title="Launch Checklist" navigate={() => {}} />; }
+function SchedulerControlPage() { return <StubPage title="Scheduler Control" navigate={() => {}} />; }
+function NotificationOutboxPage() { return <StubPage title="Notification Outbox" navigate={() => {}} />; }
+function SecurityGuardrailsPage() { return <StubPage title="Security Guardrails" navigate={() => {}} />; }
+function AlertCenterPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Alert Center" navigate={() => setActiveTab("Today")} />; }
+function ExperimentsPage() { return <StubPage title="Experiments" navigate={() => {}} />; }
+function DataFreshnessPage() { return <StubPage title="Data Freshness" navigate={() => {}} />; }
+function AiGatewayPage() { return <StubPage title="AI Gateway" navigate={() => {}} />; }
+function ProductionHealthPage() { return <StubPage title="Production Health" navigate={() => {}} />; }
+function QaSmokePage() { return <StubPage title="QA Smoke" navigate={() => {}} />; }
+function MaintenancePage() { return <StubPage title="Maintenance" navigate={() => {}} />; }
+function CeoReportPage() { return <StubPage title="CEO Report" navigate={() => {}} />; }
+function LearningPage() { return <StubPage title="Learning Loop" navigate={() => {}} />; }
+function ActivityLogsPage() { return <StubPage title="Activity Logs" navigate={() => {}} />; }
+function SettingsPage() { return <StubPage title="Settings" navigate={() => {}} />; }
+
+// -----------------------------------------------------------------------------
 // MAIN APP SHELL
 // -----------------------------------------------------------------------------
 export default function App() {
@@ -552,29 +624,33 @@ export default function App() {
     setActivePage(page);
   }
 
+  function setTechnicalTab(tab: string) {
+    setActivePage(tab);
+  }
+
   const activeFounderTab: FounderTab = founderTabs.includes(activePage as FounderTab) 
     ? (activePage as FounderTab) 
     : "More";
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] font-sans text-gray-900 selection:bg-green-100">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-10 h-full">
-          <button type="button" onClick={() => navigate("Today")} className="flex items-center gap-2 hover:opacity-80 transition">
+    <div className="w-full min-h-screen bg-[#f3f4f6] font-sans text-gray-900 selection:bg-green-100">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 px-4 md:px-6 h-16 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-4 md:gap-10 h-full">
+          <button type="button" onClick={() => navigate("Today")} className="flex items-center gap-2 hover:opacity-80 transition shrink-0">
             <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">
               LD
             </div>
             <span className="text-lg font-extrabold tracking-tight text-gray-900">
-              Leafy Dew <span className="text-gray-500 font-medium text-sm ml-1 hidden sm:inline-block">AI-CGO</span>
+              Leafy Dew <span className="text-gray-500 font-medium text-sm ml-1 hidden lg:inline-block">AI-CGO</span>
             </span>
           </button>
           
-          <nav className="hidden lg:flex items-center h-full gap-1">
+          <nav className="hidden md:flex items-center h-full gap-1 overflow-x-auto no-scrollbar">
             {founderTabs.map((tab) => (
               <button
                 key={tab}
                 onClick={() => navigate(tab)}
-                className={`h-full px-4 text-sm font-semibold border-b-2 transition-colors ${
+                className={`h-full px-3 lg:px-4 text-xs lg:text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${
                   activeFounderTab === tab 
                     ? "border-green-600 text-green-700" 
                     : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
@@ -586,13 +662,13 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex items-center gap-3">
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="hidden xl:flex items-center gap-3">
             <span className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold border border-green-100">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               Safe Mode ON
             </span>
-            <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-bold">
+            <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-bold border border-gray-200">
               Shadow Mode OFF
             </span>
           </div>
@@ -603,7 +679,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="w-full">
+      <main className="w-full pt-6">
         {activePage === "Today" ? (
           <TodayDashboard navigate={navigate} />
         ) : (
