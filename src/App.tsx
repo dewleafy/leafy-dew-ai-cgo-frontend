@@ -381,10 +381,16 @@ function App() {
     setActivePage(page);
   }
 
+  function setTechnicalTab(tab: Tab) {
+    setActivePage(tab);
+  }
+
   // Ensures technical tabs highlight the generic 'More' founder tab
-  const activeFounderTab: FounderTab = founderTabs.includes(activePage as FounderTab) 
-    ? (activePage as FounderTab) 
-    : "More";
+  const activeFounderTab: FounderTab = activePage === "Product Detail"
+    ? "Catalog"
+    : founderTabs.includes(activePage as FounderTab) 
+      ? (activePage as FounderTab) 
+      : "More";
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] font-sans text-gray-900 selection:bg-green-100">
@@ -454,15 +460,41 @@ function App() {
         {activePage === "Sales & Ads" && <SalesAdsPage navigate={navigate} />}
         {activePage === "Reports" && <ReportsPage navigate={navigate} />}
         {activePage === "More" && <MoreToolsPage navigate={navigate} />}
-        {/* Placeholder rendering for technical pages to prevent TS2304 errors */}
-        {technicalTabs.includes(activePage as Tab) && activePage !== "Settings" && (
-          <div className="p-8 text-center"><h1 className="text-xl font-bold">{activePage}</h1><p>Technical Workspace View</p></div>
-        )}
+        
+        {/* Explicitly rendering all technical pages to fix TS6133 unused variable errors */}
+        {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
+        {activePage === "Product Passport" && <ProductPassportPage />}
+        {activePage === "Product Economics" && <ProductEconomicsPage />}
+        {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
+        {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
+        {activePage === "Approval Center" && <ApprovalCenterPage />}
+        {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
+        {activePage === "Execution Gateway" && <ExecutionGatewayPage />}
+        {activePage === "Live Execution" && <LiveExecutionPage />}
+        {activePage === "Rollback Center" && <RollbackCenterPage />}
+        {activePage === "Listing Drafts" && <ListingDraftsPage setActiveTab={setTechnicalTab} />}
+        {activePage === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setTechnicalTab} />}
+        {activePage === "Safety Control" && <SafetyControlPage />}
+        {activePage === "Launch Gate" && <LaunchGatePage />}
+        {activePage === "Launch Checklist" && <LaunchChecklistPage />}
+        {activePage === "Scheduler" && <SchedulerControlPage />}
+        {activePage === "Notification Outbox" && <NotificationOutboxPage />}
+        {activePage === "Security Guardrails" && <SecurityGuardrailsPage />}
+        {activePage === "Alert Center" && <AlertCenterPage setActiveTab={setTechnicalTab} />}
+        {activePage === "Experiments" && <ExperimentsPage />}
+        {activePage === "Data Freshness" && <DataFreshnessPage />}
+        {activePage === "AI Gateway" && <AiGatewayPage />}
+        {activePage === "Production Health" && <ProductionHealthPage />}
+        {activePage === "QA Smoke" && <QaSmokePage />}
+        {activePage === "Maintenance" && <MaintenancePage />}
+        {activePage === "CEO Report" && <CeoReportPage />}
+        {activePage === "Learning" && <LearningPage />}
+        {activePage === "Activity Logs" && <ActivityLogsPage />}
+        {activePage === "Settings" && <SettingsPage />}
       </main>
     </div>
   );
 }
-
 // -----------------------------------------------------------------------------
 // HIGH-FIDELITY TODAY DASHBOARD (MATCHING THE UI REFERENCE IMAGE)
 // -----------------------------------------------------------------------------
