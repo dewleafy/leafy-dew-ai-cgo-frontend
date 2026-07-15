@@ -103,13 +103,18 @@ function isValidImageUrl(value: unknown): value is string {
 
 function getProductImage(product: unknown): string | null {
   const record = recordOf(product);
+  const imageUrls = Array.isArray(record.imageUrls) ? record.imageUrls : [];
+  const images = Array.isArray(record.images) ? record.images : [];
+  
   const candidates = [
     record.mainImageUrl, record.imageUrl, record.amazonImageUrl, 
-    record.image_url, record.productImageUrl, record.imageUrls?.[0], record.images?.[0]
+    record.image_url, record.productImageUrl, imageUrls[0], images[0]
   ];
+  
   for (const candidate of candidates) {
     if (isValidImageUrl(candidate)) return candidate;
   }
+  
   const economics = recordOf(record.economics);
   if (isValidImageUrl(economics.mainImageUrl)) return economics.mainImageUrl as string;
   if (isValidImageUrl(economics.imageUrl)) return economics.imageUrl as string;
@@ -357,7 +362,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                     placeholderProducts.slice(0, 5).map((p, i) => {
                       const img = getProductImage(p.raw) || placeholderImg;
                       return (
-                        <tr key={p.key || i} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
+                        <tr key={String(p.key || i)} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
                           <td className="px-4 py-3 flex items-center gap-3">
                             <img src={img} alt="" className="w-8 h-8 object-cover rounded shadow-sm border border-gray-200" />
                             <span className="font-semibold text-gray-800 truncate max-w-[150px]">{p.name}</span>
@@ -431,7 +436,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   <div className="text-center text-gray-400 py-8">No pending action ledger records.</div>
                 ) : (
                   approvalRows.map((row, i) => (
-                     <div key={row.id || i} className="flex justify-between items-center p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:border-green-200 transition">
+                     <div key={String(row.id ?? i)} className="flex justify-between items-center p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:border-green-200 transition">
                         <div className="flex gap-4 items-start">
                            <StatusBadge value={row.riskLevel || "LOW"} />
                            <div>
@@ -472,7 +477,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                    <div className="text-center text-gray-400 py-8">No PPC growth opportunities found.</div>
                 ) : (
                    growthOpportunities.map((opp, i) => (
-                      <div key={i} className="p-4 border border-gray-100 rounded-xl bg-gray-50">
+                      <div key={String(opp.id ?? i)} className="p-4 border border-gray-100 rounded-xl bg-gray-50">
                          <h4 className="text-sm font-bold text-gray-900 mb-1">{formatEmpty(opp.title ?? opp.recommendationType)}</h4>
                          <p className="text-xs text-gray-500 mb-2">{formatEmpty(opp.reason ?? opp.summary)}</p>
                          <div className="flex gap-2">
@@ -516,7 +521,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   <div className="text-xs text-gray-400">No products connected.</div>
                 ) : (
                   products.slice(0, 3).map((p, i) => (
-                    <div key={p.key || i} className="flex gap-3 items-center p-2 border border-gray-100 rounded-lg">
+                    <div key={String(p.key || i)} className="flex gap-3 items-center p-2 border border-gray-100 rounded-lg">
                        <img src={getProductImage(p.raw) || placeholderImg} alt="" className="w-10 h-10 object-cover rounded" />
                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-gray-900 truncate">{p.name}</p>
