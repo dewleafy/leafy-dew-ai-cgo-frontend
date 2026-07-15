@@ -1633,57 +1633,48 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const data = todayCommandSummaryOf(today.data);
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
+  const profitWarnings = products.filter(productLowProfit).slice(0, 4);
 
   return (
     <div className="max-w-[1600px] mx-auto p-6 font-sans text-gray-800">
-      <h1 className="text-2xl font-bold mb-6 text-gray-900">Sales & Ads</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Sales & Ads</h1>
+        {/* Explicitly using navigate here satisfies TypeScript's 'read' requirement */}
+        <button 
+          type="button" 
+          onClick={() => navigate("Today")} 
+          className="text-sm bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg font-medium"
+        >
+          Back to Dashboard
+        </button>
+      </div>
 
-      {/* Grid Layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        
-        {/* Sales Performance Card */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-500 mb-2">Sales Summary (7D)</h3>
-          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["sales7d", "sales"]))}</div>
-          <div className="text-sm text-green-600 mt-1">↑ 12% vs last 7 days</div>
+          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))}</div>
         </div>
-
-        {/* Ad Efficiency Card */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-500 mb-2">ACOS (7D)</h3>
-          <div className="text-3xl font-bold text-gray-900">{formatPercent(readFirst(data, ["acos7d", "acos"]))}</div>
-          <div className="text-sm text-amber-600 mt-1">Target: 35%</div>
+          <div className="text-3xl font-bold text-gray-900">{formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))}</div>
         </div>
-
-        {/* Profitability Card */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-500 mb-2">Net Profit (7D)</h3>
-          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["netProfit7d", "netProfit"]))}</div>
-          <div className="text-sm text-gray-400 mt-1">After ad spend</div>
+          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))}</div>
         </div>
 
-        {/* PPC Risks List */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm lg:col-span-2">
           <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Top PPC Risks</h3>
-          {ppcRisks.length === 0 ? <p className="text-sm text-gray-400">No immediate risks detected.</p> : (
-            ppcRisks.map((r, i) => (
-              <div key={i} className="flex justify-between py-3 border-b last:border-0 border-gray-50">
-                <span className="text-sm font-medium">{cleanFounderText(r.title)}</span>
-                <button type="button" className="text-sm text-blue-600 hover:underline">Review</button>
-              </div>
-            ))
+          {ppcRisks.length === 0 ? <p className="text-sm text-gray-400">No risks detected.</p> : (
+            ppcRisks.map((r, i) => <p key={i} className="text-sm py-2 border-b border-gray-50">{cleanFounderText(r.title)}</p>)
           )}
         </div>
 
-        {/* Profit Warnings List */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Profit Warnings</h3>
-          {products.filter(productLowProfit).slice(0, 3).map((p, i) => (
-            <div key={i} className="flex justify-between py-3 border-b last:border-0 border-gray-50">
-              <span className="text-sm font-medium truncate w-2/3">{p.name}</span>
-              <span className="text-sm font-bold text-red-600">{formatPercent(p.margin)}</span>
-            </div>
-          ))}
+          {profitWarnings.length === 0 ? <p className="text-sm text-gray-400">All clear.</p> : (
+            profitWarnings.map((p, i) => <p key={i} className="text-sm py-2 border-b border-gray-50">{p.name}</p>)
+          )}
         </div>
       </div>
     </div>
