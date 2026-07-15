@@ -1712,67 +1712,140 @@ function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
 }
 
 function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
-  const groups: Array<{ title: string; tools: Array<{ label: string; page: Tab; note: string }> }> = [
-    { title: "Settings & Controls", tools: [
-      { label: "Settings", page: "Settings", note: "Workspace preferences" },
-      { label: "Safety Settings", page: "Safety Control", note: "Safe mode and approval rules" },
-      { label: "AI Cost Control", page: "AI Gateway", note: "AI budget and usage" },
-      { label: "Notifications", page: "Notification Outbox", note: "Queued messages" }
-    ] },
-    { title: "System", tools: [
-      { label: "System Health", page: "Production Health", note: "Production readiness" },
-      { label: "System Check", page: "QA Smoke", note: "Backend smoke checks" },
-      { label: "Maintenance", page: "Maintenance", note: "Safe housekeeping" },
-      { label: "Data Freshness", page: "Data Freshness", note: "Source freshness" },
-      { label: "Activity Timeline", page: "Activity Logs", note: "Recent events" }
-    ] },
-    { title: "Automation", tools: [
-      { label: "Daily AI Run", page: "Daily AI-CGO", note: "Generate safe recommendations" },
-      { label: "AI Engine Room", page: "Engine Command Center", note: "Advanced engine controls" },
-      { label: "Scheduler", page: "Scheduler", note: "Automation schedule" },
-      { label: "Learning", page: "Learning", note: "Recommendation feedback" }
-    ] },
-    { title: "Launch & Safety", tools: [
-      { label: "Controlled Live Actions", page: "Live Execution", note: "Gated execution only" },
-      { label: "Launch Readiness", page: "Launch Gate", note: "Live readiness gate" },
-      { label: "Launch Checklist", page: "Launch Checklist", note: "Readiness checklist" },
-      { label: "Security", page: "Security Guardrails", note: "Safety blocks and audits" },
-      { label: "Rollback Center", page: "Rollback Center", note: "Rollback snapshots" }
-    ] },
-    { title: "Advanced Growth", tools: [
-      { label: "Approval Execution", page: "Approval Execution", note: "Approved action bridge" },
-      { label: "Execution Gateway", page: "Execution Gateway", note: "Shadow execution checks" },
-      { label: "Alert Center", page: "Alert Center", note: "Business alerts" },
-      { label: "Experiments", page: "Experiments", note: "Growth experiments" },
-      { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
-      { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
-      { label: "PPC Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
-      { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
-      { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
-      { label: "Advanced Approval Center", page: "Approval Center", note: "Full approval workflow" }
-    ] }
+  const [activeGroup, setActiveGroup] = useState("Settings & Controls");
+
+  const groups = [
+    { 
+      title: "Settings & Controls", 
+      description: "Manage your workspace preferences, safety thresholds, and AI compute budget.",
+      tools: [
+        { label: "Settings", page: "Settings" as Tab, note: "Workspace preferences" },
+        { label: "Safety Settings", page: "Safety Control" as Tab, note: "Safe mode and approval rules" },
+        { label: "AI Cost Control", page: "AI Gateway" as Tab, note: "AI budget and usage" },
+        { label: "Notifications", page: "Notification Outbox" as Tab, note: "Queued messages" }
+      ] 
+    },
+    { 
+      title: "System", 
+      description: "Monitor production readiness, backend smoke checks, and raw activity logs.",
+      tools: [
+        { label: "System Health", page: "Production Health" as Tab, note: "Production readiness" },
+        { label: "System Check", page: "QA Smoke" as Tab, note: "Backend smoke checks" },
+        { label: "Maintenance", page: "Maintenance" as Tab, note: "Safe housekeeping" },
+        { label: "Data Freshness", page: "Data Freshness" as Tab, note: "Source freshness" },
+        { label: "Activity Timeline", page: "Activity Logs" as Tab, note: "Recent events" }
+      ] 
+    },
+    { 
+      title: "Automation", 
+      description: "Control your AI-CGO engines, daily runs, and automated schedules.",
+      tools: [
+        { label: "Daily AI Run", page: "Daily AI-CGO" as Tab, note: "Generate safe recommendations" },
+        { label: "AI Engine Room", page: "Engine Command Center" as Tab, note: "Advanced engine controls" },
+        { label: "Scheduler", page: "Scheduler" as Tab, note: "Automation schedule" },
+        { label: "Learning", page: "Learning" as Tab, note: "Recommendation feedback" }
+      ] 
+    },
+    { 
+      title: "Launch & Safety", 
+      description: "Govern live marketplace execution, readiness gate checks, and rollbacks.",
+      tools: [
+        { label: "Controlled Live Actions", page: "Live Execution" as Tab, note: "Gated execution only" },
+        { label: "Launch Readiness", page: "Launch Gate" as Tab, note: "Live readiness gate" },
+        { label: "Launch Checklist", page: "Launch Checklist" as Tab, note: "Readiness checklist" },
+        { label: "Security", page: "Security Guardrails" as Tab, note: "Safety blocks and audits" },
+        { label: "Rollback Center", page: "Rollback Center" as Tab, note: "Rollback snapshots" }
+      ] 
+    },
+    { 
+      title: "Advanced Growth", 
+      description: "Deep-dive into PPC optimization, A10 algorithm alignment, and product economics.",
+      tools: [
+        { label: "Approval Execution", page: "Approval Execution" as Tab, note: "Approved action bridge" },
+        { label: "Execution Gateway", page: "Execution Gateway" as Tab, note: "Shadow execution checks" },
+        { label: "Alert Center", page: "Alert Center" as Tab, note: "Business alerts" },
+        { label: "Experiments", page: "Experiments" as Tab, note: "Growth experiments" },
+        { label: "Product Passport", page: "Product Passport" as Tab, note: "Product truth and cost queue" },
+        { label: "Product Economics", page: "Product Economics" as Tab, note: "Profit calculator" },
+        { label: "PPC Recommendations", page: "PPC Recommendations" as Tab, note: "Ads ideas" },
+        { label: "Listing Drafts", page: "Listing Drafts" as Tab, note: "Listing improvements" },
+        { label: "Image + A+", page: "Image + A+" as Tab, note: "Creative recommendations" },
+        { label: "Advanced Approval Center", page: "Approval Center" as Tab, note: "Full approval workflow" }
+      ] 
+    }
   ];
 
   return (
-    <div className="page founder-page">
-      <PageHeader title="More Tools" subtitle="Settings, system checks, launch readiness, and advanced automation tools." />
-      <div className="warning-card founder-safety-banner">
-        <p>Advanced tools are for system checking, launch readiness, and debugging. Daily users usually do not need them.</p>
+    <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
+      {/* Header section */}
+      <div className="mb-8 border-b border-gray-200 pb-6">
+        <h1 className="text-3xl font-bold text-gray-900 tracking-tight">More Tools</h1>
+        <p className="text-gray-500 mt-2 text-sm">Settings, system checks, launch readiness, and advanced automation tools.</p>
       </div>
-      <div className="more-tool-grid">
-        {groups.map((group) => (
-          <section className="more-tool-card" key={group.title}>
-            <h2>{group.title}</h2>
-            <div className="more-tool-list">
-              {group.tools.map((tool) => (
-                <button type="button" key={`${group.title}-${tool.label}`} onClick={() => navigate(tool.page)}>
-                  <strong>{tool.label}</strong>
-                  <span>{tool.note}</span>
+
+      {/* Safety Banner */}
+      <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mb-8 rounded-r-md flex items-start shadow-sm">
+        <span className="text-amber-500 text-xl mr-3" aria-hidden="true">⚠️</span>
+        <p className="text-amber-800 text-sm font-medium leading-relaxed m-0">
+          Advanced tools are for system checking, launch readiness, and debugging. Daily users usually do not need them.
+        </p>
+      </div>
+
+      {/* Main Layout: Sidebar + Content */}
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Sidebar Navigation */}
+        <nav className="w-full lg:w-64 flex-shrink-0">
+          <ul className="flex flex-col gap-2 m-0 p-0 list-none">
+            {groups.map((group) => (
+              <li key={group.title}>
+                <button
+                  type="button"
+                  onClick={() => setActiveGroup(group.title)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                    activeGroup === group.title
+                      ? "bg-green-50 text-green-700 shadow-sm border border-green-100"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 border border-transparent"
+                  }`}
+                >
+                  {group.title}
                 </button>
-              ))}
-            </div>
-          </section>
-        ))}
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        {/* Content Area */}
+        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8 min-h-[400px]">
+          {groups.map((group) => (
+            group.title === activeGroup && (
+              <div key={group.title} className="transition-opacity duration-300 ease-in-out opacity-100">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2 mt-0">{group.title}</h2>
+                <p className="text-gray-500 text-sm mb-8">{group.description}</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {group.tools.map((tool) => (
+                    <button
+                      key={tool.label}
+                      type="button"
+                      onClick={() => navigate(tool.page)}
+                      className="group relative flex flex-col items-start p-5 bg-white border border-gray-200 rounded-xl hover:border-green-400 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 text-left"
+                    >
+                      <div className="flex items-center justify-between w-full mb-2">
+                        <strong className="text-gray-900 font-semibold text-base group-hover:text-green-700 transition-colors">
+                          {tool.label}
+                        </strong>
+                        <span className="text-gray-300 group-hover:text-green-500 transition-colors transform group-hover:translate-x-1 duration-200" aria-hidden="true">
+                          →
+                        </span>
+                      </div>
+                      <span className="text-gray-500 text-sm">{tool.note}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          ))}
+        </div>
       </div>
     </div>
   );
