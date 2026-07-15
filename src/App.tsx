@@ -1633,29 +1633,10 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
 
-  // Mock data for Recharts
-  const salesTrendData = [
-    { name: 'Mon', sales: 4000 },
-    { name: 'Tue', sales: 3000 },
-    { name: 'Wed', sales: 5000 },
-    { name: 'Thu', sales: 2780 },
-    { name: 'Fri', sales: 6890 },
-    { name: 'Sat', sales: 8390 },
-    { name: 'Sun', sales: 7490 },
-  ];
-
-  const adSpendData = [
-    { name: 'Mon', spend: 2400, sales: 4000 },
-    { name: 'Tue', spend: 1398, sales: 3000 },
-    { name: 'Wed', spend: 3800, sales: 5000 },
-    { name: 'Thu', spend: 1908, sales: 2780 },
-    { name: 'Fri', spend: 4800, sales: 6890 },
-    { name: 'Sat', spend: 3800, sales: 8390 },
-    { name: 'Sun', spend: 4300, sales: 7490 },
-  ];
-
-  // TypeScript bypass: Force TypeScript to accept Recharts from the global window object
-  const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area } = (window as any).Recharts || {};
+  // Pure CSS Chart Mock Data
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const spendBars = [30, 45, 25, 60, 50, 80, 65]; // Percentages
+  const salesBars = [50, 70, 40, 85, 75, 100, 90]; // Percentages
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
@@ -1679,56 +1660,67 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
       {/* Chart Layout */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
         
-        {/* Sales Trend Chart */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        {/* Native SVG Area Chart (Sales Trend) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col">
           <h2 className="text-lg font-bold text-gray-900 mb-6">Sales Trend (7 Days)</h2>
-          <div className="h-72 w-full">
-            {ResponsiveContainer ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value: number) => `₹${value}`} dx={-10} />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                    itemStyle={{ color: '#111827', fontWeight: 'bold' }}
-                  />
-                  <Area type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg">Loading Chart Engine...</div>
-            )}
+          <div className="flex-1 relative w-full h-64">
+            {/* Background Grid Lines */}
+            <div className="absolute inset-0 flex flex-col justify-between">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="w-full border-b border-dashed border-gray-200 h-0"></div>
+              ))}
+            </div>
+            {/* SVG Trend Line */}
+            <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+              <defs>
+                <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.4" />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <polygon points="0,100 0,60 16,40 33,50 50,20 66,35 83,10 100,20 100,100" fill="url(#salesGradient)" />
+              <polyline points="0,60 16,40 33,50 50,20 66,35 83,10 100,20" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          {/* X-Axis Labels */}
+          <div className="flex justify-between mt-4 text-xs text-gray-400 font-medium px-2">
+            {days.map(day => <span key={day}>{day}</span>)}
           </div>
         </div>
 
-        {/* Ad Spend vs Sales Chart */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-6">Ad Spend vs Sales</h2>
-          <div className="h-72 w-full">
-            {ResponsiveContainer ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={adSpendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barGap={2}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value: number) => `₹${value}`} dx={-10} />
-                  <Tooltip 
-                    cursor={{fill: '#f9fafb'}}
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                  />
-                  <Bar dataKey="spend" name="Ad Spend" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  <Bar dataKey="sales" name="Sales" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg">Loading Chart Engine...</div>
-            )}
+        {/* Native CSS Bar Chart (Ad Spend vs Sales) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-lg font-bold text-gray-900">Ad Spend vs Sales</h2>
+            <div className="flex gap-4 text-xs font-medium">
+              <span className="flex items-center gap-1"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> Spend</span>
+              <span className="flex items-center gap-1"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> Sales</span>
+            </div>
+          </div>
+          <div className="flex-1 relative w-full h-64 flex items-end justify-between px-2">
+            {/* Background Grid Lines */}
+            <div className="absolute inset-0 flex flex-col justify-between z-0">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="w-full border-b border-dashed border-gray-200 h-0"></div>
+              ))}
+            </div>
+            {/* Bars */}
+            {days.map((day, i) => (
+              <div key={day} className="relative z-10 flex gap-1.5 w-1/8 h-full items-end group">
+                <div 
+                  className="w-full bg-blue-500 rounded-t-md hover:bg-blue-400 transition-colors relative" 
+                  style={{ height: `${spendBars[i]}%` }}
+                ></div>
+                <div 
+                  className="w-full bg-green-500 rounded-t-md hover:bg-green-400 transition-colors relative" 
+                  style={{ height: `${salesBars[i]}%` }}
+                ></div>
+              </div>
+            ))}
+          </div>
+          {/* X-Axis Labels */}
+          <div className="flex justify-between mt-4 text-xs text-gray-400 font-medium px-4">
+            {days.map(day => <span key={day}>{day}</span>)}
           </div>
         </div>
       </div>
