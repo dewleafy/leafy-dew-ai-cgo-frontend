@@ -1002,100 +1002,77 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
   const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
+  
   const data = todayCommandSummaryOf(today.data);
-  const products = mergeFounderProducts(passports.data);
+  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
+  
+  // Explicitly using these variables in the UI below prevents "never read" errors
+  const productCount = products.length;
+  const activeListings = products.filter((product) => normalizeState(product.status).includes("ACTIVE")).length;
+  const missingCostCount = products.filter(productNeedsCost).length || todayCommandNumber(data, ["missingCostCount", "missingCosts", "missingCostData"]);
+  const pendingApprovalCount = readNumber(approvals.data?.summary.pendingCount ?? todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]));
+  const listingIdeas = todayCommandNumber(data, ["listingDrafts", "totalListingDrafts", "listingIdeas"]);
+  const ppcRisks = todayCommandNumber(data, ["ppcRisks", "highRiskApprovals", "highRiskCount"]);
+  const profitRisks = products.filter(productLowProfit).length;
+
+  const attentionItems = [
+    missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost data.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
+    pendingApprovalCount > 0 ? { icon: "approval" as FounderIconName, title: "Pending approvals", text: `${pendingApprovalCount} recommendations waiting.`, priority: "High", action: "Review Now", page: "Approvals" as AppPage } : null,
+    ppcRisks > 0 ? { icon: "sales" as FounderIconName, title: "PPC risk high", text: "Ad spend needs founder review.", priority: "Watch", action: "Open Growth", page: "Growth" as AppPage } : null,
+    listingIdeas > 0 ? { icon: "spark" as FounderIconName, title: "Listing ideas", text: "Content drafts ready for review.", priority: "Ready", action: "View Ideas", page: "Growth" as AppPage } : null,
+    profitRisks > 0 ? { icon: "chart" as FounderIconName, title: "Profit risk", text: "Products may need attention.", priority: "Watch", action: "Open Products", page: "Products" as AppPage } : null
+  ].filter(Boolean) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
 
   return (
-    <div className="max-w-[1600px] mx-auto p-6 space-y-6 bg-gray-50/50">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* 1. Today / Command Center */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm col-span-3 lg:col-span-1">
-          <div className="flex items-center gap-3 mb-6 border-b pb-4">
-             <span className="w-8 h-8 flex items-center justify-center bg-gray-900 text-white rounded-full font-bold text-sm">1</span>
-             <h2 className="text-lg font-bold text-gray-900">Today / Command Center</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-4 mb-6">
-             <button type="button" onClick={() => navigate("Daily AI-CGO")} className="bg-green-600 hover:bg-green-700 text-white py-3 px-4 rounded-lg text-sm font-bold transition">Run Daily AI</button>
-             <button type="button" onClick={() => navigate("Approvals")} className="bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg text-sm font-bold transition">Review ({readNumber(approvals.data?.summary.pendingCount)})</button>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-             <FounderMetric label="Products" value={products.length} icon="box" />
-             <FounderMetric label="Active" value={products.filter(p => normalizeState(p.status).includes("ACTIVE")).length} icon="check" />
-             <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos"]))} icon="chart" tone="gold" />
-          </div>
+    <div className="page founder-page today-page">
+      {/* Header Section */}
+      <div className="page-header founder-hero">
+        <div className="hero-copy">
+          <h1>Good morning, Founder</h1>
+          <p>Your AI-CGO has reviewed catalog, ads, profit, and brand signals.</p>
         </div>
-
-        {/* 2. Catalog / Product List */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm lg:col-span-2 overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-            <div className="flex items-center gap-3">
-              <span className="w-8 h-8 flex items-center justify-center bg-gray-900 text-white rounded-full font-bold text-sm">2</span>
-              <h2 className="text-lg font-bold text-gray-900">Catalog / Product List</h2>
-            </div>
-            <button onClick={() => navigate("Products")} className="text-sm text-blue-600 font-bold hover:underline">View all →</button>
-          </div>
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 text-gray-400 uppercase">
-              <tr>
-                <th className="px-6 py-3 text-left">Product</th>
-                <th className="px-2 py-3">SKU</th>
-                <th className="px-2 py-3">Price</th>
-                <th className="px-2 py-3">Profit</th>
-                <th className="px-2 py-3">Readiness</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {products.slice(0, 4).map(p => (
-                <tr key={p.key}>
-                  <td className="px-6 py-3 flex items-center gap-2"><ProductThumb product={p} className="w-8 h-8 rounded" /> {p.name}</td>
-                  <td className="px-2 py-3 text-center">{p.sku}</td>
-                  <td className="px-2 py-3 text-center">{formatMoney(p.price)}</td>
-                  <td className="px-2 py-3 text-center font-bold text-green-600">{formatPercent(p.margin)}</td>
-                  <td className="px-2 py-3 text-center"><FounderBadge value={p.readiness} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* 3. Product Detail */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-           <div className="flex items-center gap-3 mb-6 border-b pb-4">
-             <span className="w-8 h-8 flex items-center justify-center bg-gray-900 text-white rounded-full font-bold text-sm">3</span>
-             <h2 className="text-lg font-bold text-gray-900">Product Detail</h2>
-           </div>
-           {products[0] ? (
-             <div>
-                <ProductThumb product={products[0]} className="w-full h-40 object-cover rounded-lg mb-4" />
-                <h3 className="font-bold">{products[0].name}</h3>
-                <p className="text-sm text-gray-500 mb-4">{products[0].brand}</p>
-                <div className="flex gap-2">
-                   <button onClick={() => navigate("Growth")} className="text-xs border px-3 py-2 rounded">Optimize</button>
-                </div>
-             </div>
-           ) : <p className="text-sm text-gray-400">Add a product to see details.</p>}
-        </div>
-
-        {/* 4. Approvals */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm col-span-2">
-           <div className="flex items-center gap-3 mb-6 border-b pb-4">
-             <span className="w-8 h-8 flex items-center justify-center bg-gray-900 text-white rounded-full font-bold text-sm">4</span>
-             <h2 className="text-lg font-bold text-gray-900">Approvals</h2>
-           </div>
-           {approvals.data?.rows.slice(0, 3).map(r => (
-              <div key={r.id} className="flex justify-between items-center py-2 border-b last:border-0 text-sm">
-                 <span>{r.title}</span>
-                 <FounderBadge value={r.riskLevel} />
-              </div>
-           ))}
-        </div>
-
       </div>
+
+      {/* Action Cards */}
+      <section className="action-card-grid">
+        <article className="action-card action-card-green">
+          <h2>Run Daily AI</h2>
+          <button onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
+        </article>
+        <article className="action-card action-card-blue">
+          <h2>Pending Approvals</h2>
+          <p>{pendingApprovalCount} waiting</p>
+          <button onClick={() => navigate("Approvals")}>Review</button>
+        </article>
+        <article className="action-card action-card-gold">
+          <h2>Missing Costs</h2>
+          <p>{missingCostCount} products</p>
+          <button onClick={() => navigate("Products")}>Fix</button>
+        </article>
+      </section>
+
+      {/* Business Pulse Strip (Using all variables to satisfy compiler) */}
+      <section className="founder-section">
+        <FounderMetric label="Total Products" value={productCount} icon="box" />
+        <FounderMetric label="Active" value={activeListings} icon="check" />
+        <FounderMetric label="Sales 7D" value={formatMoney(readFirst(data, ["sales7d"]))} icon="sales" />
+      </section>
+
+      {/* Attention Section (Mapping the array ensures they are read) */}
+      <section className="founder-section">
+        {attentionItems.map((item) => (
+          <article key={item.title}>
+            <strong>{item.title}</strong>
+            <p>{item.text}</p>
+            <button onClick={() => navigate(item.page)}>{item.action}</button>
+          </article>
+        ))}
+      </section>
     </div>
   );
 }
-
 function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
