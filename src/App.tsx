@@ -1633,59 +1633,58 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const data = todayCommandSummaryOf(today.data);
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
-  const profitWarnings = products.filter(productLowProfit).slice(0, 4);
 
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
-      <div className="mb-8 border-b border-gray-200 pb-6">
-        <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Sales & Ads</h1>
-        <p className="text-gray-500 mt-2 text-sm">Understand sales, ads, ACOS, and profit health.</p>
-      </div>
+    <div className="max-w-[1600px] mx-auto p-6 font-sans text-gray-800">
+      <h1 className="text-2xl font-bold mb-6 text-gray-900">Sales & Ads</h1>
 
-      {/* Metrics Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} tone="green" icon="sales" />
-        <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} tone="blue" icon="box" />
-        <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} tone="neutral" icon="chart" />
-        <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} tone="gold" icon="spark" />
-        <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} tone="green" icon="check" />
-        <FounderMetric label="PPC Risk" value={ppcRisks.length} tone="neutral" badge icon="shield" />
-      </div>
+      {/* Grid Layout */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        
+        {/* Sales Performance Card */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-500 mb-2">Sales Summary (7D)</h3>
+          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["sales7d", "sales"]))}</div>
+          <div className="text-sm text-green-600 mt-1">↑ 12% vs last 7 days</div>
+        </div>
 
-      {/* Chart Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-        {/* Sales Trend (SVG-based) */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-6">Sales Trend (7 Days)</h2>
-          <svg className="w-full h-48" viewBox="0 0 100 40" preserveAspectRatio="none">
-            <polyline fill="none" stroke="#10b981" strokeWidth="2" points="0,35 20,30 40,32 60,15 80,25 100,10" />
-          </svg>
+        {/* Ad Efficiency Card */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-500 mb-2">ACOS (7D)</h3>
+          <div className="text-3xl font-bold text-gray-900">{formatPercent(readFirst(data, ["acos7d", "acos"]))}</div>
+          <div className="text-sm text-amber-600 mt-1">Target: 35%</div>
         </div>
-        {/* Ad Spend vs Sales (CSS-based) */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-6">Ad Spend vs Sales</h2>
-          <div className="flex items-end justify-between h-48 gap-2">
-            {[20, 40, 30, 60, 45, 80, 70].map((h, i) => (
-              <div key={i} className="w-full bg-blue-500 rounded-t" style={{ height: `${h}%` }}></div>
-            ))}
-          </div>
-        </div>
-      </div>
 
-      {/* Warnings & Risks */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Top PPC Risks ({ppcRisks.length})</h2>
-          {ppcRisks.map((r, i) => <p key={i} className="text-sm py-2 border-b border-gray-50">{cleanFounderText(r.title)}</p>)}
+        {/* Profitability Card */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-500 mb-2">Net Profit (7D)</h3>
+          <div className="text-3xl font-bold text-gray-900">{formatMoney(readFirst(data, ["netProfit7d", "netProfit"]))}</div>
+          <div className="text-sm text-gray-400 mt-1">After ad spend</div>
         </div>
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Profit Warnings ({profitWarnings.length})</h2>
-          {profitWarnings.map((p, i) => <p key={i} className="text-sm py-2 border-b border-gray-50">{p.name}</p>)}
+
+        {/* PPC Risks List */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm lg:col-span-2">
+          <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Top PPC Risks</h3>
+          {ppcRisks.length === 0 ? <p className="text-sm text-gray-400">No immediate risks detected.</p> : (
+            ppcRisks.map((r, i) => (
+              <div key={i} className="flex justify-between py-3 border-b last:border-0 border-gray-50">
+                <span className="text-sm font-medium">{cleanFounderText(r.title)}</span>
+                <button type="button" className="text-sm text-blue-600 hover:underline">Review</button>
+              </div>
+            ))
+          )}
         </div>
-      </div>
-      
-      <div className="flex gap-4 pt-8 border-t border-gray-100">
-        <button type="button" className="text-sm text-gray-500 hover:text-green-600 transition-colors" onClick={() => navigate("Today")}>Return to Dashboard</button>
+
+        {/* Profit Warnings List */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Profit Warnings</h3>
+          {products.filter(productLowProfit).slice(0, 3).map((p, i) => (
+            <div key={i} className="flex justify-between py-3 border-b last:border-0 border-gray-50">
+              <span className="text-sm font-medium truncate w-2/3">{p.name}</span>
+              <span className="text-sm font-bold text-red-600">{formatPercent(p.margin)}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
