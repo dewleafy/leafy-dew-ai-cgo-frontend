@@ -1,8 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { ReactNode } from "react";
 import "./App.css";
 import { getJson } from "./api";
-import type { AnyRecord, ApiRows } from "./types";
+import type {
+  ActionLedgerRow,
+  ActionLedgerSummary,
+  AnyRecord,
+  ApiRows,
+  ProductEconomics,
+  ProductPassport,
+  TodayCommandSummary
+} from "./types";
 
 const SELLER_ID = "default";
 
@@ -30,10 +38,7 @@ function useApi<T>(loader: () => Promise<T>, deps: unknown[] = []) {
       .catch(() => {
         if (alive) setState({ data: null, loading: false, error: "Error loading data." });
       });
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey, ...deps]);
 
@@ -101,12 +106,13 @@ function isValidImageUrl(value: unknown): value is string {
 
 function getProductImage(product: unknown): string | null {
   const record = recordOf(product);
-  const imageUrls = Array.isArray(record.imageUrls) ? (record.imageUrls as string[]) : [];
-  const images = Array.isArray(record.images) ? (record.images as string[]) : [];
   
+  if (Array.isArray(record.imageUrls) && isValidImageUrl(record.imageUrls[0])) return record.imageUrls[0] as string;
+  if (Array.isArray(record.images) && isValidImageUrl(record.images[0])) return record.images[0] as string;
+
   const candidates = [
     record.mainImageUrl, record.imageUrl, record.amazonImageUrl, 
-    record.image_url, record.productImageUrl, imageUrls[0], images[0]
+    record.image_url, record.productImageUrl
   ];
   
   for (const candidate of candidates) {
@@ -218,37 +224,37 @@ function StubPage({ title, navigate }: { title: string; navigate: FounderNavigat
 // DASHBOARD (REAL BACKEND INTEGRATION)
 // -----------------------------------------------------------------------------
 function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
-  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
-  const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
-  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
+  const today = useApi<AnyRecord>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
+  const approvalsSummary = useApi<AnyRecord>(() => getJson(`/api/action-ledger/summary?sellerId=${SELLER_ID}`));
+  const approvalsList = useApi<AnyRecord>(() => getJson(`/api/action-ledger?sellerId=${SELLER_ID}&limit=10`));
+  const passports = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30`));
-  const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  const creativeSummary = useApi<AnyRecord>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
 
-  const data = todayCommandSummaryOf(today.data);
-  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
+  const data = recordOf(today.data?.summary ?? today.data?.todayCommand ?? today.data);
+  const products = mergeFounderProducts(passports.data, economics.data);
+  const approvalRows = recordsOf(approvalsList.data?.rows).slice(0, 4);
+  const growthOpportunities = [...recordsOf(ppc.data?.scaleOpportunities), ...recordsOf(ppc.data?.watchlistRisks)].slice(0, 4);
   
   const productCount = products.length;
-  const activeListings = products.filter((p) => normalizeState(p.status).includes("ACTIVE")).length;
-  const missingCostCount = products.filter(productNeedsCost).length || todayCommandNumber(data, ["missingCostCount", "missingCosts", "missingCostData"]);
-  const pendingApprovalCount = readNumber(approvals.data?.summary?.pendingCount ?? todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]));
-  
+  const activeListings = products.filter(p => String(p.status).toUpperCase().includes("ACTIVE")).length;
+  const pendingCount = readNumber(readFirst(approvalsSummary.data, ["pendingCount", "summary.pendingCount"]));
+  const missingCostCount = products.filter(p => {
+    const s = String(p.costStatus).toUpperCase();
+    return s.includes("MISSING") || s.includes("NEEDS") || s.includes("PARTIAL");
+  }).length;
   const acosValue = formatPercent(readFirst(data, ["acos7d", "acos", "metrics.acos7d"]));
   const revenueValue = formatMoney(readFirst(data, ["sales7d", "revenue", "metrics.sales7d"]));
   const profitValue = formatMoney(readFirst(data, ["netProfit7d", "profit", "metrics.netProfit7d"]));
 
-  const approvalRows = (approvals.data?.rows || []).slice(0, 4);
-  const ppcData = recordOf(ppc.data);
-  const growthOpportunities = [...arrayOf(ppcData.scaleOpportunities), ...arrayOf(ppcData.watchlistRisks)].slice(0, 4);
-
-  const aplusLive = readNumber(readFirst(creative.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
-  const aplusTotal = readNumber(readFirst(creative.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
+  const aplusLive = readNumber(readFirst(creativeSummary.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
+  const aplusTotal = readNumber(readFirst(creativeSummary.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
 
   const placeholderImg = "https://placehold.co/400x400/f8fafc/a1a1aa?text=Product+Image";
 
   return (
-    <div className="w-full px-4 md:px-6 lg:px-8 space-y-6">
+    <div className="w-full px-4 md:px-6 lg:px-8 space-y-6 pb-12">
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         
         {/* CARD 1: Command Center */}
@@ -281,14 +287,14 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
               </div>
               <div className="border border-blue-100 bg-blue-50/30 rounded-xl p-4 flex flex-col h-full relative overflow-hidden">
                  <div className="flex items-center gap-2 mb-2 font-bold text-blue-900">Pending Approvals</div>
-                 <p className="text-xs text-blue-700/70 mb-4 flex-1">{pendingApprovalCount} items waiting in Action Ledger.</p>
+                 <p className="text-xs text-blue-700/70 mb-4 flex-1">{pendingCount} items waiting in Action Ledger.</p>
                  <button className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded-lg w-full transition" onClick={() => navigate("Approvals")}>Review Now</button>
-                 <div className="absolute top-4 right-4 bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{pendingApprovalCount}</div>
+                 <div className="absolute top-4 right-4 bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{pendingCount}</div>
               </div>
               <div className="border border-orange-100 bg-orange-50/30 rounded-xl p-4 flex flex-col h-full relative overflow-hidden">
                  <div className="flex items-center gap-2 mb-2 font-bold text-orange-900">Missing Cost Data</div>
                  <p className="text-xs text-orange-700/70 mb-4 flex-1">{missingCostCount} products missing passport costs.</p>
-                 <button className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-2 px-4 rounded-lg w-full transition" onClick={() => navigate("Products")}>Fix Now</button>
+                 <button className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-2 px-4 rounded-lg w-full transition" onClick={() => navigate("Catalog")}>Fix Now</button>
                  <div className="absolute top-4 right-4 bg-orange-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{missingCostCount}</div>
               </div>
             </div>
@@ -327,7 +333,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 
         {/* CARD 2: Catalog / Product List */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[500px]">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition" onClick={() => navigate("Products")}>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition" onClick={() => navigate("Catalog")}>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-full bg-green-800 text-white flex items-center justify-center font-bold text-sm">2</span>
               <h2 className="text-lg font-bold text-gray-900">Catalog / Product List</h2>
@@ -353,7 +359,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                       <td colSpan={5}>
                         <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                           <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                            <FounderIcon name="box" />
+                            <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
                           </div>
                           <h3 className="text-sm font-bold text-gray-900 mb-1">No products found</h3>
                           <p className="text-xs text-gray-500 max-w-xs">Your backend database is currently empty. Connect your catalog to populate this list.</p>
@@ -380,7 +386,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 </tbody>
               </table>
             </div>
-            <button className="w-full text-center mt-4 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Products")}>
+            <button className="w-full text-center mt-4 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Catalog")}>
               View all {productCount} backend products →
             </button>
           </div>
@@ -403,7 +409,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
              {products.length === 0 ? (
                <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                   <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                    <FounderIcon name="chart" />
+                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4-4m-4 4l-4-4" /></svg>
                   </div>
                   <h3 className="text-sm font-bold text-gray-900 mb-1">No product selected</h3>
                   <p className="text-xs text-gray-500 max-w-xs">Add products to your catalog to view deep intelligence.</p>
@@ -446,7 +452,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 {approvalRows.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                     <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mb-3">
-                      <FounderIcon name="approval" />
+                      <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                     </div>
                     <h3 className="text-sm font-bold text-gray-900 mb-1">Inbox Zero</h3>
                     <p className="text-xs text-gray-500 max-w-xs">No pending action ledger records requiring your review.</p>
@@ -469,7 +475,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 )}
              </div>
              <button className="w-full text-center mt-4 pt-4 border-t border-gray-100 text-sm font-bold text-blue-600 hover:text-blue-800 transition" onClick={() => navigate("Approvals")}>
-              View all {pendingApprovalCount} approvals →
+              View all {pendingCount} approvals →
             </button>
           </div>
         </div>
@@ -492,7 +498,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 {growthOpportunities.length === 0 ? (
                    <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                     <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
-                      <FounderIcon name="growth" />
+                      <svg className="w-6 h-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
                     </div>
                     <h3 className="text-sm font-bold text-gray-900 mb-1">No PPC Opportunities</h3>
                     <p className="text-xs text-gray-500 max-w-xs">Connect your ads data to discover growth and optimization ideas.</p>
@@ -566,41 +572,77 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
     </div>
   );
 }
-function App() {
+
+// -----------------------------------------------------------------------------
+// SECONDARY PAGES (Stubs to prevent TS2304)
+// -----------------------------------------------------------------------------
+function ProductsPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="Catalog / Products" navigate={navigate} />; }
+function ProductDetailPage({ navigate }: { product: FounderProduct | null; navigate: FounderNavigate }) { return <StubPage title="Product Detail" navigate={navigate} />; }
+function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="Approvals" navigate={navigate} />; }
+function GrowthPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="Growth Ideas" navigate={navigate} />; }
+function BrandPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="Brand Overview" navigate={navigate} />; }
+function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="Sales & Ads" navigate={navigate} />; }
+function ReportsPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="Reports" navigate={navigate} />; }
+function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) { return <StubPage title="More Tools" navigate={navigate} />; }
+
+function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (t: string) => void }) { return <StubPage title="Daily AI-CGO" navigate={() => setActiveTab("Today")} />; }
+function ProductPassportPage() { return <StubPage title="Product Passport" navigate={() => {}} />; }
+function ProductEconomicsPage() { return <StubPage title="Product Economics" navigate={() => {}} />; }
+function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: (t: string) => void }) { return <StubPage title="PPC Recommendations" navigate={() => setActiveTab("Today")} />; }
+function EngineCommandCenterPage() { return <StubPage title="Engine Command Center" navigate={() => {}} />; }
+function ApprovalCenterPage() { return <StubPage title="Approval Center" navigate={() => {}} />; }
+function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: (t: string) => void }) { return <StubPage title="Approval Execution" navigate={() => setActiveTab("Today")} />; }
+function ExecutionGatewayPage() { return <StubPage title="Execution Gateway" navigate={() => {}} />; }
+function LiveExecutionPage() { return <StubPage title="Live Execution" navigate={() => {}} />; }
+function RollbackCenterPage() { return <StubPage title="Rollback Center" navigate={() => {}} />; }
+function ListingDraftsPage({ setActiveTab }: { setActiveTab: (t: string) => void }) { return <StubPage title="Listing Drafts" navigate={() => setActiveTab("Today")} />; }
+function CreativeRecommendationsPage({ setActiveTab }: { setActiveTab: (t: string) => void }) { return <StubPage title="Image + A+" navigate={() => setActiveTab("Today")} />; }
+function SafetyControlPage() { return <StubPage title="Safety Control" navigate={() => {}} />; }
+function LaunchGatePage() { return <StubPage title="Launch Gate" navigate={() => {}} />; }
+function LaunchChecklistPage() { return <StubPage title="Launch Checklist" navigate={() => {}} />; }
+function SchedulerControlPage() { return <StubPage title="Scheduler Control" navigate={() => {}} />; }
+function NotificationOutboxPage() { return <StubPage title="Notification Outbox" navigate={() => {}} />; }
+function SecurityGuardrailsPage() { return <StubPage title="Security Guardrails" navigate={() => {}} />; }
+function AlertCenterPage({ setActiveTab }: { setActiveTab: (t: string) => void }) { return <StubPage title="Alert Center" navigate={() => setActiveTab("Today")} />; }
+function ExperimentsPage() { return <StubPage title="Experiments" navigate={() => {}} />; }
+function DataFreshnessPage() { return <StubPage title="Data Freshness" navigate={() => {}} />; }
+function AiGatewayPage() { return <StubPage title="AI Gateway" navigate={() => {}} />; }
+function ProductionHealthPage() { return <StubPage title="Production Health" navigate={() => {}} />; }
+function QaSmokePage() { return <StubPage title="QA Smoke" navigate={() => {}} />; }
+function MaintenancePage() { return <StubPage title="Maintenance" navigate={() => {}} />; }
+function CeoReportPage() { return <StubPage title="CEO Report" navigate={() => {}} />; }
+function LearningPage() { return <StubPage title="Learning Loop" navigate={() => {}} />; }
+function ActivityLogsPage() { return <StubPage title="Activity Logs" navigate={() => {}} />; }
+function SettingsPage() { return <StubPage title="Settings" navigate={() => {}} />; }
+
+// -----------------------------------------------------------------------------
+// MAIN APP SHELL
+// -----------------------------------------------------------------------------
+export default function App() {
   const [activePage, setActivePage] = useState<AppPage>("Today");
   const [selectedProduct, setSelectedProduct] = useState<FounderProduct | null>(null);
-  const [logoFailed, setLogoFailed] = useState(false);
-  const mainContentRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    mainContentRef.current?.scrollTo({ top: 0 });
-  }, [activePage]);
 
   function navigate(page: AppPage, product: FounderProduct | null = null) {
     if (product) setSelectedProduct(product);
     setActivePage(page);
   }
 
-  function setTechnicalTab(tab: Tab) {
+  function setTechnicalTab(tab: string) {
     setActivePage(tab);
   }
 
-  const activeFounderTab: FounderTab = activePage === "Product Detail"
-    ? "Products"
-    : founderTabs.includes(activePage as FounderTab)
-      ? activePage as FounderTab
-      : "More";
+  const activeFounderTab: FounderTab = founderTabs.includes(activePage as FounderTab) 
+    ? (activePage as FounderTab) 
+    : "More";
 
   return (
     <div className="w-full min-h-screen bg-[#f3f4f6] font-sans text-gray-900 selection:bg-green-100">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50 px-4 md:px-6 h-16 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4 md:gap-10 h-full">
           <button type="button" onClick={() => navigate("Today")} className="flex items-center gap-2 hover:opacity-80 transition shrink-0">
-            {logoFailed ? (
-              <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">LD</div>
-            ) : (
-              <img src="/ld-logo.png" alt="Leafy Dew" className="w-8 h-8 rounded-lg" onError={() => setLogoFailed(true)} />
-            )}
+            <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">
+              LD
+            </div>
             <span className="text-lg font-extrabold tracking-tight text-gray-900">
               Leafy Dew <span className="text-gray-500 font-medium text-sm ml-1 hidden lg:inline-block">AI-CGO</span>
             </span>
@@ -626,16 +668,13 @@ function App() {
         <div className="flex items-center gap-4 shrink-0">
           <div className="hidden xl:flex items-center gap-3">
             <span className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold border border-green-100">
-              <FounderIcon name="shield" /> Safe Mode ON
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Safe Mode ON
             </span>
             <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-bold border border-gray-200">
               Shadow Mode OFF
             </span>
           </div>
-          <button type="button" className="relative p-2 text-gray-400 hover:text-gray-600 transition" aria-label="Notifications">
-            <FounderIcon name="bell" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-          </button>
           <div className="flex items-center gap-2 pl-4 border-l border-gray-200 cursor-pointer hover:opacity-80">
             <div className="w-8 h-8 rounded-full bg-gray-800 text-white flex items-center justify-center font-bold text-xs">F</div>
             <span className="text-sm font-semibold hidden sm:block">Founder</span>
@@ -643,8 +682,9 @@ function App() {
         </div>
       </header>
 
-      <main className="w-full pt-6 pb-12" ref={mainContentRef}>
+      <main className="w-full pt-6">
          {activePage === "Today" && <TodayDashboard navigate={navigate} />}
+         {activePage === "Catalog" && <ProductsPage navigate={navigate} />}
          {activePage === "Products" && <ProductsPage navigate={navigate} />}
          {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
          {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
