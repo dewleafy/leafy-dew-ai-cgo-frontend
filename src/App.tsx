@@ -1632,6 +1632,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   
   const data = todayCommandSummaryOf(today.data);
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
+  const products = mergeFounderProducts(economics.data);
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
@@ -1646,12 +1647,12 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} tone="neutral" icon="chart" />
         <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} tone="gold" icon="spark" />
         <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} tone="green" icon="check" />
-        <FounderMetric label="PPC Risk" value={ppcRisks.length} tone={ppcRisks.length > 0 ? "gold" : "neutral"} badge icon="shield" />
+        <FounderMetric label="PPC Risk" value={ppcRisks.length} tone={ppcRisks.length > 0 ? "neutral" : "neutral"} badge icon="shield" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
-          Sales Trend Data Loading...
+          Sales Trend Data Loading... ({products.length} products available)
         </div>
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
           Ad Spend vs Sales Data Loading...
@@ -1671,6 +1672,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
       
       <div className="flex gap-4 pt-8 border-t border-gray-100">
         <button 
+          type="button"
           className="text-sm text-gray-500 hover:text-green-600 transition-colors" 
           onClick={() => navigate("Today")}
         >
@@ -1680,7 +1682,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
     </div>
   );
 }
-
+    
 function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
   const reports = [
     { title: "CEO Report", page: "CEO Report" as AppPage },
