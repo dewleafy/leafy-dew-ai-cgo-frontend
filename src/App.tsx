@@ -180,7 +180,7 @@ function StatusBadge({ value }: { value: unknown }) {
   const label = formatEmpty(value).toUpperCase();
   const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "RUNNING", "SUCCESS", "GOOD", "PROFITABLE"].includes(label)
     ? "good"
-    : ["WATCH", "WARN", "PENDING", "DRAFT"].includes(label)
+    : ["WATCH", "WARN", "PENDING", "DRAFT", "REVIEW", "MEDIUM"].includes(label)
       ? "watch"
       : ["RISK", "ERROR", "FAIL", "REJECTED", "HIGH"].includes(label)
         ? "risk"
@@ -326,8 +326,8 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   <tr>
                     <th className="px-4 py-3 font-semibold">Product</th>
                     <th className="px-2 py-3 font-semibold">Price</th>
-                    <th className="px-2 py-3 font-semibold">Net Profit</th>
                     <th className="px-2 py-3 font-semibold">Profit Status</th>
+                    <th className="px-2 py-3 font-semibold">Readiness</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
@@ -338,8 +338,8 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                         <span className="font-semibold text-gray-800 truncate max-w-[180px]">{p.name}</span>
                       </td>
                       <td className="px-2 py-3 font-medium">₹{p.price}</td>
-                      <td className="px-2 py-3 font-bold text-green-600">{p.margin}%</td>
-                      <td className="px-2 py-3"><Badge tone={p.status === "PROFITABLE" || p.status === "GOOD" ? "good" : "watch"}>{p.status}</Badge></td>
+                      <td className="px-2 py-3"><StatusBadge value={p.status} /></td>
+                      <td className="px-2 py-3"><StatusBadge value={p.readiness} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -402,7 +402,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 ].map((item, i) => (
                    <div key={i} className="flex justify-between items-center p-4 border border-gray-100 rounded-xl bg-white shadow-sm">
                       <div className="flex gap-4 items-start">
-                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100">{item.tag}</span>
+                         <StatusBadge value={item.tag} />
                          <div>
                             <h4 className="text-sm font-bold text-gray-900">{item.title}</h4>
                             <p className="text-[10px] text-gray-500 uppercase">{item.type}</p>
@@ -427,6 +427,73 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 }
 
 // -----------------------------------------------------------------------------
-// APP MOUNT
+// MAIN APP SHELL
 // -----------------------------------------------------------------------------
-export default App;
+export default function App() {
+  const [activePage, setActivePage] = useState<AppPage>("Today");
+
+  function navigate(page: AppPage) {
+    setActivePage(page);
+  }
+
+  const activeFounderTab: FounderTab = founderTabs.includes(activePage as FounderTab) 
+    ? (activePage as FounderTab) 
+    : "More";
+
+  return (
+    <div className="min-h-screen bg-[#f3f4f6] font-sans text-gray-900 selection:bg-green-100">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-10 h-full">
+          <button type="button" onClick={() => navigate("Today")} className="flex items-center gap-2 hover:opacity-80 transition">
+            <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">
+              LD
+            </div>
+            <span className="text-lg font-extrabold tracking-tight text-gray-900">
+              Leafy Dew <span className="text-gray-500 font-medium text-sm ml-1 hidden sm:inline-block">AI-CGO</span>
+            </span>
+          </button>
+          
+          <nav className="hidden lg:flex items-center h-full gap-1">
+            {founderTabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => navigate(tab)}
+                className={`h-full px-4 text-sm font-semibold border-b-2 transition-colors ${
+                  activeFounderTab === tab 
+                    ? "border-green-600 text-green-700" 
+                    : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="hidden md:flex items-center gap-3">
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold border border-green-100">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Safe Mode ON
+            </span>
+            <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-bold">
+              Shadow Mode OFF
+            </span>
+          </div>
+          <div className="flex items-center gap-2 pl-4 border-l border-gray-200 cursor-pointer hover:opacity-80">
+            <div className="w-8 h-8 rounded-full bg-gray-800 text-white flex items-center justify-center font-bold text-xs">F</div>
+            <span className="text-sm font-semibold hidden sm:block">Founder</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="w-full">
+        {activePage === "Today" ? (
+          <TodayDashboard navigate={navigate} />
+        ) : (
+          <StubPage title={activePage} navigate={navigate} />
+        )}
+      </main>
+    </div>
+  );
+}
