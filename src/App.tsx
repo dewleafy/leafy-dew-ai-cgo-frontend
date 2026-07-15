@@ -1656,8 +1656,25 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  
+  // NEW: Fetch brand store data from backend
+  const brandStore = useApi<AnyRecord>(() => getJson(`/api/brand-store/summary?sellerId=${SELLER_ID}`));
+  const brandInsights = useApi<AnyRecord>(() => getJson(`/api/brand-store/insights?sellerId=${SELLER_ID}`));
+  
   const products = mergeFounderProducts(passports.data, economics.data);
   const topProducts = products.slice(0, 4);
+  
+  // Extract real brand store data with fallbacks
+  const storeData = recordOf(brandStore.data?.data ?? brandStore.data?.summary ?? brandStore.data);
+  const insightsData = recordOf(brandInsights.data?.data ?? brandInsights.data?.summary ?? brandInsights.data);
+  
+  const healthScore = readNumber(storeData.healthScore ?? insightsData.healthScore ?? storeData.storeHealthScore ?? storeData.brandHealthScore);
+  const storeStatus = cleanFounderText(storeData.status ?? storeData.storeStatus ?? insightsData.status ?? insightsData.storeStatus, "Not connected yet");
+  const storeTraffic = readNumber(storeData.traffic7d ?? storeData.traffic ?? storeData.storeTraffic ?? insightsData.traffic7d);
+  const storeSales = readNumber(storeData.sales7d ?? storeData.sales ?? storeData.storeSales ?? insightsData.sales7d);
+  const storeConversion = readNumber(storeData.conversionRate ?? storeData.storeConversionRate ?? insightsData.conversionRate);
+  const pageCount = readNumber(storeData.pageCount ?? storeData.pages ?? storeData.storePages ?? insightsData.pageCount);
+  const isConnected = healthScore > 0 || normalizeState(storeStatus).includes("ACTIVE") || normalizeState(storeStatus).includes("LIVE") || normalizeState(storeStatus).includes("CONNECTED");
 
   return (
     <div className="page founder-page">
@@ -1670,23 +1687,55 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         </div>
         <div className="brand-hero-score">
           <span>Brand Health Score</span>
-          <strong>82</strong>
-          <FounderBadge value="Healthy" tone="good" />
+          <strong>{healthScore > 0 ? healthScore : "—"}</strong>
+          <FounderBadge 
+            value={isConnected ? (healthScore >= 70 ? "Healthy" : healthScore >= 40 ? "Needs Work" : "At Risk") : "Not Connected"} 
+            tone={isConnected ? (healthScore >= 70 ? "good" : healthScore >= 40 ? "watch" : "risk") : "neutral"} 
+          />
         </div>
       </section>
       <div className="brand-grid">
-        <FounderMetric label="Brand Health Score" value="82" />
+        <FounderMetric label="Brand Health Score" value={healthScore > 0 ? healthScore : "Not available"} badge={healthScore > 0} />
         <FounderMetric label="A+ Content Status" value={readNumber(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"])) > 0 ? "Needs review" : "Not available yet"} badge />
-        <FounderMetric label="Store Status" value="Not connected yet" badge />
+        <FounderMetric label="Store Status" value={storeStatus} badge />
+        <FounderMetric label="Store Pages" value={pageCount > 0 ? pageCount : "—"} />
+        <FounderMetric label="Store Traffic 7D" value={storeTraffic > 0 ? storeTraffic : "—"} />
+        <FounderMetric label="Store Sales 7D" value={storeSales > 0 ? formatMoney(storeSales) : "—"} />
+        <FounderMetric label="Store Conversion" value={storeConversion > 0 ? `${storeConversion.toFixed(2)}%` : "—"} />
         <FounderMetric label="Creative Assets" value={readNumber(readFirst(creative.data, ["totalRecommendations", "total"]))} />
-        <FounderMetric label="Brand Insights" value="Ready" badge />
         <FounderMetric label="Top Brand Products" value={topProducts.length} />
       </div>
       <section className="brand-sections">
         <article className="brand-card brand-store-card">
           <h2>Brand Store</h2>
-          <ProductThumbnail title="Leafy Dew Brand Store" variant="large" fallbackType="brand" className="brand-store-preview" />
-          <p>Status: Not Connected / Needs Setup</p>
+          {isConnected ? (
+            <>
+              <div className="brand-store-stats">
+                <div className="store-stat">
+                  <span>Pages</span>
+                  <strong>{pageCount > 0 ? pageCount : "—"}</strong>
+                </div>
+                <div className="store-stat">
+                  <span>Traffic 7D</span>
+                  <strong>{storeTraffic > 0 ? storeTraffic : "—"}</strong>
+                </div>
+                <div className="store-stat">
+                  <span>Sales 7D</span>
+                  <strong>{storeSales > 0 ? formatMoney(storeSales) : "—"}</strong>
+                </div>
+                <div className="store-stat">
+                  <span>Conversion</span>
+                  <strong>{storeConversion > 0 ? `${storeConversion.toFixed(1)}%` : "—"}</strong>
+                </div>
+              </div>
+              <p>Status: {storeStatus}</p>
+            </>
+          ) : (
+            <>
+              <ProductThumbnail title="Leafy Dew Brand Store" variant="large" fallbackType="brand" className="brand-store-preview" />
+              <p>Status: Not Connected / Needs Setup</p>
+            </>
+          )}
           <button type="button" onClick={() => navigate("Image + A+")}>Open Brand Plan</button>
         </article>
         <article className="brand-card">
@@ -1727,7 +1776,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
     </div>
   );
 }
-
+    
 function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
   const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
