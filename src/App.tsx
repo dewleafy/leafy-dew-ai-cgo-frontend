@@ -1,16 +1,8 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import "./App.css";
 import { getJson } from "./api";
-import type {
-  ActionLedgerRow,
-  ActionLedgerSummary,
-  AnyRecord,
-  ApiRows,
-  ProductEconomics,
-  ProductPassport,
-  TodayCommandSummary
-} from "./types";
+import type { AnyRecord, ApiRows } from "./types";
 
 const SELLER_ID = "default";
 
@@ -38,7 +30,10 @@ function useApi<T>(loader: () => Promise<T>, deps: unknown[] = []) {
       .catch(() => {
         if (alive) setState({ data: null, loading: false, error: "Error loading data." });
       });
-    return () => { alive = false; };
+
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey, ...deps]);
 
@@ -106,13 +101,12 @@ function isValidImageUrl(value: unknown): value is string {
 
 function getProductImage(product: unknown): string | null {
   const record = recordOf(product);
+  const imageUrls = Array.isArray(record.imageUrls) ? (record.imageUrls as string[]) : [];
+  const images = Array.isArray(record.images) ? (record.images as string[]) : [];
   
-  if (Array.isArray(record.imageUrls) && isValidImageUrl(record.imageUrls[0])) return record.imageUrls[0] as string;
-  if (Array.isArray(record.images) && isValidImageUrl(record.images[0])) return record.images[0] as string;
-
   const candidates = [
     record.mainImageUrl, record.imageUrl, record.amazonImageUrl, 
-    record.image_url, record.productImageUrl
+    record.image_url, record.productImageUrl, imageUrls[0], images[0]
   ];
   
   for (const candidate of candidates) {
@@ -224,6 +218,7 @@ function StubPage({ title, navigate }: { title: string; navigate: FounderNavigat
 // DASHBOARD (REAL BACKEND INTEGRATION)
 // -----------------------------------------------------------------------------
 function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
+  // Fetch Real Backend Data
   const today = useApi<AnyRecord>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
   const approvalsSummary = useApi<AnyRecord>(() => getJson(`/api/action-ledger/summary?sellerId=${SELLER_ID}`));
   const approvalsList = useApi<AnyRecord>(() => getJson(`/api/action-ledger?sellerId=${SELLER_ID}&limit=10`));
@@ -232,11 +227,13 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30`));
   const creativeSummary = useApi<AnyRecord>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
 
+  // Parse Data
   const data = recordOf(today.data?.summary ?? today.data?.todayCommand ?? today.data);
   const products = mergeFounderProducts(passports.data, economics.data);
   const approvalRows = recordsOf(approvalsList.data?.rows).slice(0, 4);
   const growthOpportunities = [...recordsOf(ppc.data?.scaleOpportunities), ...recordsOf(ppc.data?.watchlistRisks)].slice(0, 4);
   
+  // Calculate Metrics from Backend
   const productCount = products.length;
   const activeListings = products.filter(p => String(p.status).toUpperCase().includes("ACTIVE")).length;
   const pendingCount = readNumber(readFirst(approvalsSummary.data, ["pendingCount", "summary.pendingCount"]));
@@ -248,10 +245,13 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const revenueValue = formatMoney(readFirst(data, ["sales7d", "revenue", "metrics.sales7d"]));
   const profitValue = formatMoney(readFirst(data, ["netProfit7d", "profit", "metrics.netProfit7d"]));
 
+  // Brand Metrics from Backend
   const aplusLive = readNumber(readFirst(creativeSummary.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
   const aplusTotal = readNumber(readFirst(creativeSummary.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
 
+  // Placeholder Fallbacks
   const placeholderImg = "https://placehold.co/400x400/f8fafc/a1a1aa?text=Product+Image";
+  const placeholderProducts = products.length > 0 ? products : [];
 
   return (
     <div className="w-full px-4 md:px-6 lg:px-8 space-y-6 pb-12">
@@ -354,7 +354,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {products.length === 0 ? (
+                  {placeholderProducts.length === 0 ? (
                     <tr>
                       <td colSpan={5}>
                         <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
@@ -367,7 +367,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                       </td>
                     </tr>
                   ) : (
-                    products.slice(0, 5).map((p, i) => {
+                    placeholderProducts.slice(0, 5).map((p, i) => {
                       const img = getProductImage(p.raw) || placeholderImg;
                       return (
                         <tr key={String(p.key || i)} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
