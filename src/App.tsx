@@ -1633,55 +1633,169 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
 
+  // Mock data for Recharts
+  const salesTrendData = [
+    { name: 'Mon', sales: 4000 },
+    { name: 'Tue', sales: 3000 },
+    { name: 'Wed', sales: 5000 },
+    { name: 'Thu', sales: 2780 },
+    { name: 'Fri', sales: 6890 },
+    { name: 'Sat', sales: 8390 },
+    { name: 'Sun', sales: 7490 },
+  ];
+
+  const adSpendData = [
+    { name: 'Mon', spend: 2400, sales: 4000 },
+    { name: 'Tue', spend: 1398, sales: 3000 },
+    { name: 'Wed', spend: 3800, sales: 5000 },
+    { name: 'Thu', spend: 1908, sales: 2780 },
+    { name: 'Fri', spend: 4800, sales: 6890 },
+    { name: 'Sat', spend: 3800, sales: 8390 },
+    { name: 'Sun', spend: 4300, sales: 7490 },
+  ];
+
+  // We have to pull the Recharts components from the global window object since we used a CDN
+  const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area } = window.Recharts || {};
+
   return (
-    <div className="page founder-page">
-      <PageHeader title="Sales & Ads" subtitle="Understand sales, ads, ACOS, and profit health." />
-      <div className="quick-status-strip">
-        <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} />
-        <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} />
-        <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} />
-        <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} />
-        <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} />
-        <FounderMetric label="PPC Risk" value={ppcRisks.length} />
+    <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
+      
+      {/* Header */}
+      <div className="mb-8 border-b border-gray-200 pb-6">
+        <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Sales & Ads</h1>
+        <p className="text-gray-500 mt-2 text-sm">Understand sales, ads, ACOS, and profit health.</p>
       </div>
-      <div className="sales-layout">
-        <Card title="Sales Trend">
-          <div className="simple-chart">
-            {[42, 58, 44, 70, 64, 78, 86].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
+
+      {/* Top Metric Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} tone="green" icon="sales" />
+        <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} tone="blue" icon="box" />
+        <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} tone="neutral" icon="chart" />
+        <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} tone="gold" icon="spark" />
+        <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} tone="green" icon="check" />
+        <FounderMetric label="PPC Risk" value={ppcRisks.length} tone={ppcRisks.length > 0 ? "risk" : "good"} badge icon="shield" />
+      </div>
+
+      {/* Chart Layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
+        
+        {/* Sales Trend Chart */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-6">Sales Trend (7 Days)</h2>
+          <div className="h-72 w-full">
+            {ResponsiveContainer ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={salesTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value) => `₹${value}`} dx={-10} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                    itemStyle={{ color: '#111827', fontWeight: 'bold' }}
+                  />
+                  <Area type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg">Loading Chart Engine...</div>
+            )}
           </div>
-        </Card>
-        <Card title="Ad Spend vs Sales">
-          <div className="simple-chart ads-chart">
-            {[34, 52, 40, 62, 54, 66, 72].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
+        </div>
+
+        {/* Ad Spend vs Sales Chart */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-6">Ad Spend vs Sales</h2>
+          <div className="h-72 w-full">
+            {ResponsiveContainer ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={adSpendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(value) => `₹${value}`} dx={-10} />
+                  <Tooltip 
+                    cursor={{fill: '#f9fafb'}}
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                  />
+                  <Bar dataKey="spend" name="Ad Spend" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Bar dataKey="sales" name="Sales" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400 bg-gray-50 rounded-lg">Loading Chart Engine...</div>
+            )}
           </div>
-        </Card>
-        <Card title="Top PPC Risks">
-          {ppc.loading ? <LoadingBlock /> : ppcRisks.length === 0 ? <EmptyBlock text="No PPC risks returned yet." /> : (
-            <div className="card-list">
+        </div>
+      </div>
+
+      {/* Risk and Warnings Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        
+        {/* Top PPC Risks */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            Top PPC Risks
+            <span className="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-semibold">{ppcRisks.length}</span>
+          </h2>
+          {ppc.loading ? <LoadingBlock /> : ppcRisks.length === 0 ? (
+            <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500 text-sm">No PPC risks returned yet. Safe Mode is ON.</div>
+          ) : (
+            <div className="space-y-3">
               {ppcRisks.map((risk, index) => (
-                <article className="item-card compact-card" key={String(readFirst(risk, ["id", "entityValue"]) ?? index)}>
-                  <strong>{cleanFounderText(readFirst(risk, ["title", "entityValue", "campaignName"]), "PPC risk")}</strong>
-                  <p>{cleanFounderText(readFirst(risk, ["reason", "summary", "recommendedAction"]))}</p>
+                <article className="p-4 border border-gray-100 rounded-xl hover:border-red-200 hover:bg-red-50/50 transition-colors" key={String(readFirst(risk, ["id", "entityValue"]) ?? index)}>
+                  <strong className="text-gray-900 block mb-1">{cleanFounderText(readFirst(risk, ["title", "entityValue", "campaignName"]), "PPC risk")}</strong>
+                  <p className="text-gray-600 text-sm">{cleanFounderText(readFirst(risk, ["reason", "summary", "recommendedAction"]))}</p>
                 </article>
               ))}
             </div>
           )}
-        </Card>
-        <Card title="Profit Warnings">
-          {products.filter(productLowProfit).slice(0, 4).map((product) => (
-            <button type="button" className="brand-product-row" key={product.key} onClick={() => navigate("Product Detail", product)}>
-              <ProductThumb product={product} className="product-thumb" />
-              <span>{product.name}</span>
-              <FounderBadge value={product.profitStatus ?? "Watch"} />
-            </button>
-          ))}
-          {products.filter(productLowProfit).length === 0 ? <EmptyBlock text="No profit warnings are visible yet." /> : null}
-        </Card>
+        </div>
+
+        {/* Profit Warnings */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            Profit Warnings
+            <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full font-semibold">{products.filter(productLowProfit).length}</span>
+          </h2>
+          {products.filter(productLowProfit).length === 0 ? (
+            <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500 text-sm">No profit warnings are visible yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {products.filter(productLowProfit).slice(0, 4).map((product) => (
+                <button 
+                  type="button" 
+                  className="w-full flex items-center justify-between p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors text-left" 
+                  key={product.key} 
+                  onClick={() => navigate("Product Detail", product)}
+                >
+                  <div className="flex items-center gap-3">
+                    <ProductThumb product={product} className="w-10 h-10 rounded-md object-cover border border-gray-200" />
+                    <span className="font-medium text-gray-900 line-clamp-1">{product.name}</span>
+                  </div>
+                  <FounderBadge value={product.profitStatus ?? "Watch"} tone="watch" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
-      <div className="button-row">
-        <button type="button" className="secondary" onClick={() => navigate("CEO Report")}>Open CEO Report</button>
-        <button type="button" className="secondary" onClick={() => navigate("PPC Recommendations")}>Open PPC Recommendations</button>
+
+      {/* Bottom Actions */}
+      <div className="flex gap-4">
+        <button type="button" className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold rounded-lg transition-colors" onClick={() => navigate("CEO Report")}>
+          Open CEO Report
+        </button>
+        <button type="button" className="px-5 py-2.5 bg-white border border-gray-200 hover:border-green-500 hover:text-green-700 text-gray-800 font-semibold rounded-lg transition-colors" onClick={() => navigate("PPC Recommendations")}>
+          Open PPC Recommendations
+        </button>
       </div>
+
     </div>
   );
 }
