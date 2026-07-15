@@ -1,16 +1,8 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import "./App.css";
 import { getJson } from "./api";
-import type {
-  ActionLedgerRow,
-  ActionLedgerSummary,
-  AnyRecord,
-  ApiRows,
-  ProductEconomics,
-  ProductPassport,
-  TodayCommandSummary
-} from "./types";
+import type { AnyRecord, ApiRows } from "./types";
 
 const SELLER_ID = "default";
 
@@ -107,7 +99,6 @@ function isValidImageUrl(value: unknown): value is string {
   return trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:") || trimmed.startsWith("/");
 }
 
-// FIXED: Strict Array Type Checking to resolve TS7053
 function getProductImage(product: unknown): string | null {
   const record = recordOf(product);
   const imageUrls = Array.isArray(record.imageUrls) ? (record.imageUrls as string[]) : [];
@@ -258,10 +249,11 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const aplusLive = readNumber(readFirst(creativeSummary.data, ["aplusLive", "aPlusContentLive", "summary.aplusLive"]));
   const aplusTotal = readNumber(readFirst(creativeSummary.data, ["aplusTotal", "aPlusContentTotal", "summary.aplusTotal"])) || 18;
 
+  // Placeholder Fallbacks
   const placeholderImg = "https://placehold.co/400x400/f8fafc/a1a1aa?text=Product+Image";
+  const placeholderProducts = products.length > 0 ? products : [];
 
   return (
-    // FULL WIDTH CONTAINER: w-full instead of max-w
     <div className="w-full px-4 md:px-6 lg:px-8 space-y-6 pb-12">
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         
@@ -362,7 +354,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {products.length === 0 ? (
+                  {placeholderProducts.length === 0 ? (
                     <tr>
                       <td colSpan={5}>
                         <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
@@ -375,7 +367,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                       </td>
                     </tr>
                   ) : (
-                    products.slice(0, 5).map((p, i) => {
+                    placeholderProducts.slice(0, 5).map((p, i) => {
                       const img = getProductImage(p.raw) || placeholderImg;
                       return (
                         <tr key={String(p.key || i)} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
@@ -582,39 +574,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 }
 
 // -----------------------------------------------------------------------------
-// TECHNICAL PAGES (Stubs to satisfy React Router without bloating the file)
-// -----------------------------------------------------------------------------
-function DailyAiCgoPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Daily AI-CGO" navigate={() => setActiveTab("Today")} />; }
-function ProductPassportPage() { return <StubPage title="Product Passport" navigate={() => {}} />; }
-function ProductEconomicsPage() { return <StubPage title="Product Economics" navigate={() => {}} />; }
-function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="PPC Recommendations" navigate={() => setActiveTab("Today")} />; }
-function EngineCommandCenterPage() { return <StubPage title="Engine Command Center" navigate={() => {}} />; }
-function ApprovalCenterPage() { return <StubPage title="Approval Center" navigate={() => {}} />; }
-function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Approval Execution" navigate={() => setActiveTab("Today")} />; }
-function ExecutionGatewayPage() { return <StubPage title="Execution Gateway" navigate={() => {}} />; }
-function LiveExecutionPage() { return <StubPage title="Live Execution" navigate={() => {}} />; }
-function RollbackCenterPage() { return <StubPage title="Rollback Center" navigate={() => {}} />; }
-function ListingDraftsPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Listing Drafts" navigate={() => setActiveTab("Today")} />; }
-function CreativeRecommendationsPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Image + A+" navigate={() => setActiveTab("Today")} />; }
-function SafetyControlPage() { return <StubPage title="Safety Control" navigate={() => {}} />; }
-function LaunchGatePage() { return <StubPage title="Launch Gate" navigate={() => {}} />; }
-function LaunchChecklistPage() { return <StubPage title="Launch Checklist" navigate={() => {}} />; }
-function SchedulerControlPage() { return <StubPage title="Scheduler Control" navigate={() => {}} />; }
-function NotificationOutboxPage() { return <StubPage title="Notification Outbox" navigate={() => {}} />; }
-function SecurityGuardrailsPage() { return <StubPage title="Security Guardrails" navigate={() => {}} />; }
-function AlertCenterPage({ setActiveTab }: { setActiveTab: any }) { return <StubPage title="Alert Center" navigate={() => setActiveTab("Today")} />; }
-function ExperimentsPage() { return <StubPage title="Experiments" navigate={() => {}} />; }
-function DataFreshnessPage() { return <StubPage title="Data Freshness" navigate={() => {}} />; }
-function AiGatewayPage() { return <StubPage title="AI Gateway" navigate={() => {}} />; }
-function ProductionHealthPage() { return <StubPage title="Production Health" navigate={() => {}} />; }
-function QaSmokePage() { return <StubPage title="QA Smoke" navigate={() => {}} />; }
-function MaintenancePage() { return <StubPage title="Maintenance" navigate={() => {}} />; }
-function CeoReportPage() { return <StubPage title="CEO Report" navigate={() => {}} />; }
-function LearningPage() { return <StubPage title="Learning Loop" navigate={() => {}} />; }
-function ActivityLogsPage() { return <StubPage title="Activity Logs" navigate={() => {}} />; }
-function SettingsPage() { return <StubPage title="Settings" navigate={() => {}} />; }
-
-// -----------------------------------------------------------------------------
 // MAIN APP SHELL
 // -----------------------------------------------------------------------------
 export default function App() {
@@ -622,10 +581,6 @@ export default function App() {
 
   function navigate(page: AppPage) {
     setActivePage(page);
-  }
-
-  function setTechnicalTab(tab: string) {
-    setActivePage(tab);
   }
 
   const activeFounderTab: FounderTab = founderTabs.includes(activePage as FounderTab) 
