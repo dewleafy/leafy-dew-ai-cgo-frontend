@@ -1634,10 +1634,6 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
 
-  // Use the declared variables to satisfy TypeScript
-  const _navigate = navigate;
-  const _products = products;
-
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 font-sans text-gray-800">
       <div className="mb-8 border-b border-gray-200 pb-6">
@@ -1674,8 +1670,12 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         </div>
       </div>
       
-      {/* Invisible element to use variables and pass TypeScript check */}
-      <div className="hidden">{_navigate("Today")} {_products.length}</div>
+      {/* Footer Navigation */}
+      <div className="flex gap-4 pt-8 border-t border-gray-100">
+        <button className="text-sm text-gray-500 hover:text-green-600 transition-colors" onClick={() => navigate("Today")}>
+          Return to Dashboard
+        </button>
+      </div>
     </div>
   );
 }
