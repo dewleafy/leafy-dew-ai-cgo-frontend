@@ -1708,10 +1708,15 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
             {days.map((day, i) => (
               <div key={day} className="relative z-10 flex flex-1 gap-1 h-full items-end group">
                 <div 
-                  className="flex-1 bg-blue-500 rounded-t-sm hover:bg-blue-400 transition-colors" 
+                  className="w-full bg-blue-500 rounded-t-sm hover:bg-blue-400 transition-colors" 
                   style={{ height: `${spendBars[i]}%` }}
                 ></div>
                 <div 
+                  className="w-full bg-green-500 rounded-t-sm hover:bg-green-400 transition-colors" 
+                  style={{ height: `${salesBars[i]}%` }}
+                ></div>
+              </div>
+            ))}
                   className="flex-1 bg-green-500 rounded-t-sm hover:bg-green-400 transition-colors" 
                   style={{ height: `${salesBars[i]}%` }}
                 ></div>
