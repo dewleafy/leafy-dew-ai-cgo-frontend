@@ -179,6 +179,28 @@ function mergeFounderProducts(...sources: unknown[]): FounderProduct[] {
 // -----------------------------------------------------------------------------
 // UI COMPONENTS
 // -----------------------------------------------------------------------------
+type FounderIconName = "spark" | "check" | "cost" | "box" | "approval" | "growth" | "brand" | "sales" | "report" | "shield" | "bell" | "arrow" | "chart";
+
+function FounderIcon({ name, className = "w-5 h-5" }: { name: FounderIconName; className?: string }) {
+  const common = { fill: "none", stroke: "currentColor", strokeLinecap: "round" as const, strokeLinejoin: "round" as const, strokeWidth: 2 };
+  const paths: Record<FounderIconName, ReactNode> = {
+    spark: <><path {...common} d="M12 3l1.5 5 5 1.5-5 1.5-1.5 5-1.5-5-5-1.5 5-1.5L12 3z" /><path {...common} d="M19 15l.8 2.7 2.7.8-2.7.8L19 23l-.8-2.7-2.7-.8 2.7-.8L19 15z" /></>,
+    check: <><path {...common} d="M20 6L9 17l-5-5" /><path {...common} d="M21 12a9 9 0 1 1-3-6.7" /></>,
+    cost: <><path {...common} d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2z" /><path {...common} d="M9 9h6M9 13h6" /></>,
+    box: <><path {...common} d="M4 8l8-4 8 4-8 4-8-4z" /><path {...common} d="M4 8v8l8 4 8-4V8" /><path {...common} d="M12 12v8" /></>,
+    approval: <><path {...common} d="M5 12l4 4L19 6" /><path {...common} d="M4 20h16" /></>,
+    growth: <><path {...common} d="M4 19V5" /><path {...common} d="M4 19h16" /><path {...common} d="M7 15l4-4 3 3 5-7" /></>,
+    brand: <><path {...common} d="M12 3l7 4v5c0 4.5-2.9 7.7-7 9-4.1-1.3-7-4.5-7-9V7l7-4z" /><path {...common} d="M9 12h6" /></>,
+    sales: <><path {...common} d="M5 19V9" /><path {...common} d="M12 19V5" /><path {...common} d="M19 19v-7" /></>,
+    report: <><path {...common} d="M7 3h7l5 5v13H7z" /><path {...common} d="M14 3v5h5" /><path {...common} d="M9 14h6M9 18h4" /></>,
+    shield: <><path {...common} d="M12 3l7 4v5c0 4.5-2.9 7.7-7 9-4.1-1.3-7-4.5-7-9V7l7-4z" /><path {...common} d="M9 12l2 2 4-4" /></>,
+    bell: <><path {...common} d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path {...common} d="M10 21h4" /></>,
+    arrow: <><path {...common} d="M5 12h14" /><path {...common} d="M13 6l6 6-6 6" /></>,
+    chart: <><path {...common} d="M4 19h16" /><path {...common} d="M7 16v-5" /><path {...common} d="M12 16V7" /><path {...common} d="M17 16v-8" /></>
+  };
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className}>{paths[name]}</svg>;
+}
+
 function Badge({ children, tone = "neutral", className = "" }: { children: ReactNode; tone?: string; className?: string }) {
   const baseClasses = "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider whitespace-nowrap";
   const toneClasses = {
@@ -206,7 +228,7 @@ function StubPage({ title, navigate }: { title: string; navigate: FounderNavigat
   return (
     <div className="p-8 max-w-4xl mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-gray-100 text-center">
       <h1 className="text-2xl font-bold text-gray-900 mb-4">{title}</h1>
-      <p className="text-gray-500 mb-8">This module is part of the workspace. Connect backend functionality to view.</p>
+      <p className="text-gray-500 mb-8">This module is part of the backend workspace. It is currently under construction.</p>
       <button onClick={() => navigate("Today")} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition">
         Return to Dashboard
       </button>
@@ -251,7 +273,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 
   // Placeholder Fallbacks
   const placeholderImg = "https://placehold.co/400x400/f8fafc/a1a1aa?text=Product+Image";
-  const placeholderProducts = products.length > 0 ? products : [];
 
   return (
     <div className="w-full px-4 md:px-6 lg:px-8 space-y-6 pb-12">
@@ -354,12 +375,12 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {placeholderProducts.length === 0 ? (
+                  {products.length === 0 ? (
                     <tr>
                       <td colSpan={5}>
                         <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                           <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                            <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                            <FounderIcon name="box" className="w-6 h-6 text-gray-400" />
                           </div>
                           <h3 className="text-sm font-bold text-gray-900 mb-1">No products found</h3>
                           <p className="text-xs text-gray-500 max-w-xs">Your backend database is currently empty. Connect your catalog to populate this list.</p>
@@ -367,7 +388,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                       </td>
                     </tr>
                   ) : (
-                    placeholderProducts.slice(0, 5).map((p, i) => {
+                    products.slice(0, 5).map((p, i) => {
                       const img = getProductImage(p.raw) || placeholderImg;
                       return (
                         <tr key={String(p.key || i)} className="hover:bg-gray-50/50 transition cursor-pointer" onClick={() => navigate("Product Detail", p)}>
@@ -409,7 +430,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
              {products.length === 0 ? (
                <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                   <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4-4m-4 4l-4-4" /></svg>
+                    <FounderIcon name="chart" className="w-6 h-6 text-gray-400" />
                   </div>
                   <h3 className="text-sm font-bold text-gray-900 mb-1">No product selected</h3>
                   <p className="text-xs text-gray-500 max-w-xs">Add products to your catalog to view deep intelligence.</p>
@@ -452,7 +473,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 {approvalRows.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                     <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                      <FounderIcon name="approval" className="w-6 h-6 text-green-500" />
                     </div>
                     <h3 className="text-sm font-bold text-gray-900 mb-1">Inbox Zero</h3>
                     <p className="text-xs text-gray-500 max-w-xs">No pending action ledger records requiring your review.</p>
@@ -498,7 +519,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
                 {growthOpportunities.length === 0 ? (
                    <div className="flex flex-col items-center justify-center h-full py-12 px-4 text-center">
                     <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                      <FounderIcon name="growth" className="w-6 h-6 text-blue-400" />
                     </div>
                     <h3 className="text-sm font-bold text-gray-900 mb-1">No PPC Opportunities</h3>
                     <p className="text-xs text-gray-500 max-w-xs">Connect your ads data to discover growth and optimization ideas.</p>
@@ -668,8 +689,7 @@ export default function App() {
         <div className="flex items-center gap-4 shrink-0">
           <div className="hidden xl:flex items-center gap-3">
             <span className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold border border-green-100">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              Safe Mode ON
+              <FounderIcon name="shield" className="w-3 h-3" /> Safe Mode ON
             </span>
             <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-bold border border-gray-200">
               Shadow Mode OFF
@@ -686,7 +706,7 @@ export default function App() {
          {activePage === "Today" && <TodayDashboard navigate={navigate} />}
          {activePage === "Catalog" && <ProductsPage navigate={navigate} />}
          {activePage === "Products" && <ProductsPage navigate={navigate} />}
-         {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
+         {activePage === "Product Detail" && <ProductDetailPage navigate={navigate} product={selectedProduct} />}
          {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
          {activePage === "Growth" && <GrowthPage navigate={navigate} />}
          {activePage === "Brand" && <BrandPage navigate={navigate} />}
