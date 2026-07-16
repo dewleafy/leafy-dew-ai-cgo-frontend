@@ -162,7 +162,7 @@ function rowsOf<T>(value: unknown): T[] {
   return Array.isArray(rows) ? rows : [];
 }
 
-function actionLedgerRowsOf(value: unknown): ActionLedgerRow[] {
+function actionLedgerRowsOf(value: unknown): AnyRecord[] {
   if (Array.isArray(value)) return value as ActionLedgerRow[];
   return rowsOf<ActionLedgerRow>(value);
 }
@@ -1035,17 +1035,17 @@ function App() {
           {activePage === "Sales & Ads" && <SalesAdsPage navigate={navigate} />}
           {activePage === "Reports" && <ReportsPage navigate={navigate} />}
           {activePage === "More" && <MoreToolsPage navigate={navigate} />}
-          {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Daily AI-CGO" && <DailyAiCgoPage />}
           {activePage === "Product Passport" && <ProductPassportPage />}
           {activePage === "Product Economics" && <ProductEconomicsPage />}
-          {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "PPC Recommendations" && <PpcRecommendationsPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Center" && <ApprovalCenterPage />}
-          {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Approval Execution" && <ApprovalExecutionPage />}
           {activePage === "Execution Gateway" && <ExecutionGatewayPage />}
           {activePage === "Live Execution" && <LiveExecutionPage />}
           {activePage === "Rollback Center" && <RollbackCenterPage />}
-          {activePage === "Listing Drafts" && <ListingDraftsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Listing Drafts" && <ListingDraftsPage />}
           {activePage === "Image + A+" && <ImageAplusPage />}
           {activePage === "CEO Report" && <CeoReportPage />}
           {activePage === "Settings" && <SettingsPage />}
@@ -1166,7 +1166,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
         ) : (
           <div className="action-list">
             {topActions.map((action) => (
-              <div className="action-item" key={action.actionId}>
+              <div className="action-item" key={String(action.actionId)}>
                 <div className="action-item-top">
                   <strong>{action.actionTitle}</strong>
                   <StatusBadge value={action.actionStatus} />
@@ -1215,7 +1215,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           </div>
           <div className="action-list">
             {todayItems.map((item) => (
-              <div className="action-item" key={item.actionId}>
+              <div className="action-item" key={String(item.actionId)}>
                 <div className="action-item-top">
                   <strong>{item.actionTitle}</strong>
                   <StatusBadge value={item.actionStatus} />
@@ -1599,7 +1599,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
           </div>
           <div className="action-list">
             {pending.map((action) => (
-              <div className="action-item" key={action.actionId}>
+              <div className="action-item" key={String(action.actionId)}>
                 <div className="action-item-top">
                   <strong>{action.actionTitle}</strong>
                   <StatusBadge value={action.actionStatus} />
@@ -1627,7 +1627,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
           </div>
           <div className="action-list">
             {approved.map((action) => (
-              <div className="action-item" key={action.actionId}>
+              <div className="action-item" key={String(action.actionId)}>
                 <div className="action-item-top">
                   <strong>{action.actionTitle}</strong>
                   <StatusBadge value={action.actionStatus} />
@@ -1805,7 +1805,7 @@ function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
-function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+function DailyAiCgoPage() {
   const daily = useApi<DailyOrchestratorStatus>(() => getJson(`/api/daily-orchestrator/status?sellerId=${SELLER_ID}`));
   const runs = useApi<DailyOrchestratorRun[]>(() => getJson(`/api/daily-orchestrator/runs?sellerId=${SELLER_ID}`));
   const commands = useApi<TodayCommandSummary>(() => getJson(`/api/today?sellerId=${SELLER_ID}`));
@@ -1828,7 +1828,7 @@ function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
               <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Commands</th><th>Actions</th></tr></thead>
               <tbody>
                 {runs.data.map((run) => (
-                  <tr key={run.runId}>
+                  <tr key={String(run.runId)}>
                     <td>{formatShortId(run.runId)}</td>
                     <td>{formatEmpty(run.runDate)}</td>
                     <td><StatusBadge value={run.status} /></td>
@@ -1846,7 +1846,7 @@ function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
         {commands.loading ? <LoadingBlock /> : commands.error ? <ErrorBlock /> : (
           <div className="action-list">
             {actionLedgerRowsOf(commands.data).slice(0, 10).map((cmd) => (
-              <div className="action-item" key={cmd.actionId}>
+              <div className="action-item" key={String(cmd.actionId)}>
                 <div className="action-item-top">
                   <strong>{cmd.actionTitle}</strong>
                   <StatusBadge value={cmd.actionStatus} />
@@ -1936,7 +1936,7 @@ function ProductEconomicsPage() {
   );
 }
 
-function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+function PpcRecommendationsPage() {
   const recommendations = useApi<ApiRows<Recommendation>>(() => getJson(`/api/ppc-recommendations?sellerId=${SELLER_ID}`));
   const rows = rowsOf<Recommendation>(recommendations.data);
 
@@ -1972,7 +1972,7 @@ function EngineCommandCenterPage() {
               <thead><tr><th>Engine</th><th>Status</th><th>Last Run</th><th>Health</th></tr></thead>
               <tbody>
                 {registry.data.map((engine) => (
-                  <tr key={engine.engineId}>
+                  <tr key={String(engine.engineId)}>
                     <td>{formatEmpty(engine.name)}</td>
                     <td><StatusBadge value={engine.status} /></td>
                     <td>{formatEmpty(engine.lastRunDate)}</td>
@@ -1992,7 +1992,7 @@ function EngineCommandCenterPage() {
               <thead><tr><th>Log ID</th><th>Engine</th><th>Date</th><th>Status</th><th>Duration</th></tr></thead>
               <tbody>
                 {logs.data.map((log) => (
-                  <tr key={log.logId}>
+                  <tr key={String(log.logId)}>
                     <td>{formatShortId(log.logId)}</td>
                     <td>{formatEmpty(log.engineName)}</td>
                     <td>{formatEmpty(log.runDate)}</td>
@@ -2037,7 +2037,7 @@ function ApprovalCenterPage() {
               <thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Created</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.actionId}>
+                  <tr key={String(row.actionId)}>
                     <td>{formatShortId(row.actionId)}</td>
                     <td>{formatEmpty(row.actionTitle)}</td>
                     <td>{formatEmpty(row.actionType)}</td>
@@ -2054,7 +2054,7 @@ function ApprovalCenterPage() {
   );
 }
 
-function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+function ApprovalExecutionPage() {
   const summary = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
   const rows = actionLedgerRowsOf(summary.data);
 
@@ -2069,7 +2069,7 @@ function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: (tab: Tab) => v
               <thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Risk</th><th>Created</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.actionId}>
+                  <tr key={String(row.actionId)}>
                     <td>{formatShortId(row.actionId)}</td>
                     <td>{formatEmpty(row.actionTitle)}</td>
                     <td>{formatEmpty(row.actionType)}</td>
@@ -2113,7 +2113,7 @@ function ExecutionGatewayPage() {
               <thead><tr><th>ID</th><th>Action</th><th>Date</th><th>Status</th><th>Error</th></tr></thead>
               <tbody>
                 {attempts.data.map((attempt) => (
-                  <tr key={attempt.attemptId}>
+                  <tr key={String(attempt.attemptId)}>
                     <td>{formatShortId(attempt.attemptId)}</td>
                     <td>{formatEmpty(attempt.actionTitle)}</td>
                     <td>{formatEmpty(attempt.attemptDate)}</td>
@@ -2156,7 +2156,7 @@ function LiveExecutionPage() {
               <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Actions</th><th>Duration</th></tr></thead>
               <tbody>
                 {runs.data.map((run) => (
-                  <tr key={run.runId}>
+                  <tr key={String(run.runId)}>
                     <td>{formatShortId(run.runId)}</td>
                     <td>{formatEmpty(run.runDate)}</td>
                     <td><StatusBadge value={run.status} /></td>
@@ -2198,7 +2198,7 @@ function RollbackCenterPage() {
               <thead><tr><th>ID</th><th>Date</th><th>Type</th><th>Status</th></tr></thead>
               <tbody>
                 {snapshots.data.map((snapshot) => (
-                  <tr key={snapshot.snapshotId}>
+                  <tr key={String(snapshot.snapshotId)}>
                     <td>{formatShortId(snapshot.snapshotId)}</td>
                     <td>{formatEmpty(snapshot.createdAt)}</td>
                     <td>{formatEmpty(snapshot.snapshotType)}</td>
@@ -2214,7 +2214,7 @@ function RollbackCenterPage() {
   );
 }
 
-function ListingDraftsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+function ListingDraftsPage() {
   const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}`));
   const rows = rowsOf<ListingDraft>(drafts.data);
 
@@ -2360,7 +2360,7 @@ function LaunchGatePage() {
               <thead><tr><th>Check</th><th>Status</th><th>Message</th></tr></thead>
               <tbody>
                 {items.data.map((check) => (
-                  <tr key={check.checkId}>
+                  <tr key={String(check.checkId)}>
                     <td>{formatEmpty(check.checkName)}</td>
                     <td><StatusBadge value={check.status} /></td>
                     <td>{formatEmpty(check.message)}</td>
@@ -2401,7 +2401,7 @@ function LaunchChecklistPage() {
               <thead><tr><th>Item</th><th>Status</th><th>Priority</th></tr></thead>
               <tbody>
                 {items.data.map((item) => (
-                  <tr key={item.itemId}>
+                  <tr key={String(item.itemId)}>
                     <td>{formatEmpty(item.itemName)}</td>
                     <td><StatusBadge value={item.status} /></td>
                     <td><StatusBadge value={item.priority} /></td>
@@ -2442,7 +2442,7 @@ function SchedulerPage() {
               <thead><tr><th>Job</th><th>Schedule</th><th>Status</th><th>Last Run</th></tr></thead>
               <tbody>
                 {jobs.data.map((job) => (
-                  <tr key={job.jobId}>
+                  <tr key={String(job.jobId)}>
                     <td>{formatEmpty(job.jobName)}</td>
                     <td>{formatEmpty(job.schedule)}</td>
                     <td><StatusBadge value={job.status} /></td>
@@ -2484,7 +2484,7 @@ function NotificationOutboxPage() {
               <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Sent</th></tr></thead>
               <tbody>
                 {messages.data.map((msg) => (
-                  <tr key={msg.messageId}>
+                  <tr key={String(msg.messageId)}>
                     <td>{formatShortId(msg.messageId)}</td>
                     <td>{formatEmpty(msg.messageType)}</td>
                     <td><StatusBadge value={msg.status} /></td>
@@ -2526,7 +2526,7 @@ function SecurityGuardrailsPage() {
               <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Date</th></tr></thead>
               <tbody>
                 {events.data.map((event) => (
-                  <tr key={event.eventId}>
+                  <tr key={String(event.eventId)}>
                     <td>{formatShortId(event.eventId)}</td>
                     <td>{formatEmpty(event.eventType)}</td>
                     <td><StatusBadge value={event.severity} /></td>
@@ -2568,7 +2568,7 @@ function ProductionHealthPage() {
               <thead><tr><th>Module</th><th>Status</th><th>Latency</th><th>Last Check</th></tr></thead>
               <tbody>
                 {modules.data.map((module) => (
-                  <tr key={module.moduleId}>
+                  <tr key={String(module.moduleId)}>
                     <td>{formatEmpty(module.moduleName)}</td>
                     <td><StatusBadge value={module.status} /></td>
                     <td>{readNumber(module.latencyMs)}ms</td>
@@ -2611,7 +2611,7 @@ function QaSmokePage() {
               <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Passed</th><th>Failed</th></tr></thead>
               <tbody>
                 {runs.data.map((run) => (
-                  <tr key={run.runId}>
+                  <tr key={String(run.runId)}>
                     <td>{formatShortId(run.runId)}</td>
                     <td>{formatEmpty(run.runDate)}</td>
                     <td><StatusBadge value={run.status} /></td>
@@ -2654,7 +2654,7 @@ function MaintenancePage() {
               <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Duration</th></tr></thead>
               <tbody>
                 {runs.data.map((run) => (
-                  <tr key={run.runId}>
+                  <tr key={String(run.runId)}>
                     <td>{formatShortId(run.runId)}</td>
                     <td>{formatEmpty(run.runDate)}</td>
                     <td><StatusBadge value={run.status} /></td>
@@ -2696,7 +2696,7 @@ function ActivityLogsPage() {
               <thead><tr><th>ID</th><th>Type</th><th>Level</th><th>Date</th></tr></thead>
               <tbody>
                 {events.data.map((event) => (
-                  <tr key={event.eventId}>
+                  <tr key={String(event.eventId)}>
                     <td>{formatShortId(event.eventId)}</td>
                     <td>{formatEmpty(event.eventType)}</td>
                     <td><StatusBadge value={event.level} /></td>
@@ -2738,7 +2738,7 @@ function DataFreshnessPage() {
               <thead><tr><th>Source</th><th>Status</th><th>Last Update</th><th>Age</th></tr></thead>
               <tbody>
                 {rows.data.map((row) => (
-                  <tr key={row.sourceId}>
+                  <tr key={String(row.sourceId)}>
                     <td>{formatEmpty(row.sourceName)}</td>
                     <td><StatusBadge value={row.status} /></td>
                     <td>{formatEmpty(row.lastUpdateDate)}</td>
@@ -2792,7 +2792,7 @@ function AiGatewayPage() {
               <thead><tr><th>Model</th><th>Estimated Cost</th><th>Confidence</th></tr></thead>
               <tbody>
                 {estimates.data.map((estimate) => (
-                  <tr key={estimate.estimateId}>
+                  <tr key={String(estimate.estimateId)}>
                     <td>{formatEmpty(estimate.modelName)}</td>
                     <td>{formatMoney(estimate.estimatedCost)}</td>
                     <td>{formatPercent(estimate.confidence)}</td>
@@ -2833,7 +2833,7 @@ function AlertCenterPage() {
               <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Status</th><th>Date</th></tr></thead>
               <tbody>
                 {events.data.map((event) => (
-                  <tr key={event.alertId}>
+                  <tr key={String(event.alertId)}>
                     <td>{formatShortId(event.alertId)}</td>
                     <td>{formatEmpty(event.alertType)}</td>
                     <td><StatusBadge value={event.severity} /></td>
@@ -2876,7 +2876,7 @@ function LearningPage() {
               <thead><tr><th>ID</th><th>Type</th><th>Impact</th><th>Date</th></tr></thead>
               <tbody>
                 {events.data.map((event) => (
-                  <tr key={event.eventId}>
+                  <tr key={String(event.eventId)}>
                     <td>{formatShortId(event.eventId)}</td>
                     <td>{formatEmpty(event.eventType)}</td>
                     <td><StatusBadge value={event.impact} /></td>
@@ -2894,7 +2894,7 @@ function LearningPage() {
 
 function ExperimentsPage() {
   const summary = useApi<ExperimentSummary>(() => getJson(`/api/experiments/summary?sellerId=${SELLER_ID}`));
-  const experiments = useApi<Experiment[]>(() => getJson(`/api/experiments/list?sellerId=${SELLER_ID}`));
+  const experiments = useApi<AnyRecord[]>(() => getJson(`/api/experiments/list?sellerId=${SELLER_ID}`));
 
   return (
     <div className="page">
@@ -2918,7 +2918,7 @@ function ExperimentsPage() {
               <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Winner</th></tr></thead>
               <tbody>
                 {experiments.data.map((exp) => (
-                  <tr key={exp.experimentId}>
+                  <tr key={String(exp.experimentId)}>
                     <td>{formatShortId(exp.experimentId)}</td>
                     <td>{formatEmpty(exp.experimentName)}</td>
                     <td><StatusBadge value={exp.status} /></td>
@@ -2960,7 +2960,7 @@ function SafetyControlPage() {
               <thead><tr><th>ID</th><th>Type</th><th>Result</th><th>Date</th></tr></thead>
               <tbody>
                 {events.data.map((event) => (
-                  <tr key={event.eventId}>
+                  <tr key={String(event.eventId)}>
                     <td>{formatShortId(event.eventId)}</td>
                     <td>{formatEmpty(event.eventType)}</td>
                     <td><StatusBadge value={event.result} /></td>
