@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ButtonHTMLAttributes, FormEvent, ReactNode, RefObject } from "react";
 import "./App.css";
 import {
   activityLogsApi,
@@ -120,11 +120,12 @@ const technicalTabs = [
   "Settings"
 ] as const;
 
-const founderTabs = ["Today", "Products", "Approvals", "Growth", "Brand", "Sales & Ads", "Reports", "More"] as const;
+const founderTabs = ["Today", "Products", "AI Actions", "Growth Engine", "Brand Center", "Sales & Ads", "Reports"] as const;
 
 type Tab = (typeof technicalTabs)[number];
 type FounderTab = (typeof founderTabs)[number];
-type AppPage = FounderTab | Tab | "Product Detail";
+type LegacyFounderPage = "Approvals" | "Growth" | "Brand" | "More";
+type AppPage = FounderTab | LegacyFounderPage | Tab | "Product Detail" | "Advanced Admin";
 type LoadState<T> = { data: T | null; loading: boolean; error: string | null };
 type ProductPassportSection = "READINESS" | "COST_COMPLETION";
 
@@ -239,6 +240,14 @@ function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: str
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+function Button({ children, className = "", type = "button", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type={type} className={className} {...props}>
+      {children}
+    </button>
+  );
+}
+
 function StatusBadge({ value }: { value: unknown }) {
   const label = formatEmpty(value).toUpperCase();
   const tone = ["READY", "PASS", "APPROVED", "ACTIVE", "RUNNING", "SUCCESS", "SHADOW", "GOOD", "AVAILABLE", "LOW", "SAFE", "DISABLED", "REQUIRED", "FRESH", "WON"].includes(label)
@@ -272,6 +281,15 @@ function Card({ title, children, action }: { title: string; children: ReactNode;
       </div>
       {children}
     </section>
+  );
+}
+
+function PageLayout({ title, subtitle, children, className = "" }: { title?: string; subtitle?: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={`page founder-page ${className}`}>
+      {title && subtitle ? <PageHeader title={title} subtitle={subtitle} /> : null}
+      {children}
+    </div>
   );
 }
 
@@ -400,31 +418,13 @@ type FounderProduct = {
 
 type FounderNavigate = (page: AppPage, product?: FounderProduct | null) => void;
 
-const sampleFounderProduct: FounderProduct = {
-  key: "sample-product",
-  id: "sample-product",
-  name: "Leafy Dew Amazon Product",
-  brand: "Leafy Dew",
-  sku: "Connect SKU",
-  asin: "Connect ASIN",
-  category: "Home and lifestyle",
-  price: null,
-  netProfit: null,
-  margin: null,
-  profitStatus: "Not available yet",
-  readiness: "Needs data",
-  costStatus: "Connect cost data",
-  listingScore: "Not available yet",
-  inventory: "Not available yet",
-  status: "Draft",
-  bullets: [
-    "Connect catalog data to preview the live listing.",
-    "Add cost data to unlock profit and ACOS guidance.",
-    "Review AI recommendations before any Amazon change."
-  ],
-  description: "Connect product, catalog, and economics data to make this detail page fully business-ready.",
-  raw: {}
-};
+function normalizeAppPage(page: AppPage): AppPage {
+  if (page === "Approvals") return "AI Actions";
+  if (page === "Growth") return "Growth Engine";
+  if (page === "Brand") return "Brand Center";
+  if (page === "More") return "Advanced Admin";
+  return page;
+}
 
 function cleanFounderText(value: unknown, fallback = "Not available yet"): string {
   if (value === null || value === undefined || value === "") return fallback;
@@ -454,38 +454,36 @@ function readImagePath(source: unknown, path: string): unknown {
 }
 
 function firstValidImageUrl(value: unknown, depth = 0): string | null {
-  if (isValidImageUrl(value)) return value.trim();
-  if (depth > 2 || value === null || value === undefined) return null;
+  if (depth > 5 || value == null) return null;
+
+  if (typeof value === "string") {
+    const v = value.trim();
+
+    if (
+      v.startsWith("http://") ||
+      v.startsWith("https://")
+    ) {
+      return v;
+    }
+
+    return null;
+  }
+
   if (Array.isArray(value)) {
     for (const item of value) {
-      const nested = firstValidImageUrl(item, depth + 1);
-      if (nested) return nested;
+      const found = firstValidImageUrl(item, depth + 1);
+      if (found) return found;
     }
     return null;
   }
+
   if (typeof value === "object") {
-    const record = recordOf(value);
-    const objectCandidates = [
-      record.mainImageUrl,
-      record.imageUrl,
-      record.amazonImageUrl,
-      record.imageUrls,
-      record.images,
-      record.url,
-      record.link,
-      record.src,
-      record.main_image_url,
-      record.image_url,
-      record.amazon_image_url,
-      record.image_urls,
-      record.productImageUrl,
-      record.product_image_url
-    ];
-    for (const candidate of objectCandidates) {
-      const nested = firstValidImageUrl(candidate, depth + 1);
-      if (nested) return nested;
+    for (const item of Object.values(value)) {
+      const found = firstValidImageUrl(item, depth + 1);
+      if (found) return found;
     }
   }
+
   return null;
 }
 
@@ -826,18 +824,44 @@ function ProductPlaceholder({
   className?: string;
 }) {
   const resolvedFallback = fallbackTypeForTitle(title, fallbackType);
-  const normalizedTitle = title.toLowerCase();
-  const theme = /(yoga|mat|band|fitness|gym)/.test(normalizedTitle)
-    ? "fitness"
-    : /bottle/.test(normalizedTitle)
-      ? "bottle"
-      : resolvedFallback;
   return (
-    <div className={`product-placeholder product-placeholder-${variant} product-placeholder-${theme} ${className}`} aria-label={`${title} image placeholder`}>
+    <div className={`product-placeholder product-placeholder-${variant} product-placeholder-${resolvedFallback} ${className}`} aria-label={`${title} image placeholder`}>
       <FounderIcon name="box" />
-      {variant !== "small" ? <span>{resolvedFallback === "creative" ? "Creative asset" : resolvedFallback === "brand" ? "Brand asset" : resolvedFallback === "listing" ? "Listing preview" : "Product image"}</span> : null}
+      {variant !== "small" ? <span>No product data available</span> : null}
     </div>
   );
+}
+
+function ProductImage({
+  src,
+  product,
+  mainImageUrl,
+  imageUrl,
+  amazonImageUrl,
+  imageUrls,
+  title,
+  variant = "medium",
+  fallbackType = "product",
+  className = ""
+}: {
+  src?: unknown;
+  product?: unknown;
+  mainImageUrl?: unknown;
+  imageUrl?: unknown;
+  amazonImageUrl?: unknown;
+  imageUrls?: unknown;
+  title: string;
+  variant?: ProductThumbnailVariant;
+  fallbackType?: ProductFallbackType;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const image = firstValidImageUrl([mainImageUrl, imageUrl, amazonImageUrl, imageUrls, src]) ?? getProductImage(product);
+  useEffect(() => {
+    setFailed(false);
+  }, [image]);
+  if (!image || failed) return <ProductPlaceholder title={title} variant={variant} fallbackType={fallbackType} className={className} />;
+  return <img loading="lazy" decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
 }
 
 function ProductThumbnail({
@@ -854,13 +878,7 @@ function ProductThumbnail({
   fallbackType?: ProductFallbackType;
   className?: string;
 }) {
-  const [failed, setFailed] = useState(false);
-  const image = firstValidImageUrl(src);
-  useEffect(() => {
-    setFailed(false);
-  }, [image]);
-  if (!image || failed) return <ProductPlaceholder title={title} variant={variant} fallbackType={fallbackType} className={className} />;
-  return <img loading="lazy" decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
+  return <ProductImage src={src} title={title} variant={variant} fallbackType={fallbackType} className={className} />;
 }
 
 function ProductThumb({
@@ -877,10 +895,10 @@ function ProductThumb({
   const image = getProductImage("raw" in product ? product.raw : product);
   const inferredVariant = variant ?? (className.includes("main") ? "hero" : className.includes("growth") ? "large" : className.includes("thumb") ? "small" : "medium");
   const title = cleanFounderText("name" in product ? product.name : readFirst(product, ["productName", "title", "name"]), "Product");
-  return <ProductThumbnail src={image} title={title} variant={inferredVariant} fallbackType={fallbackType} className={className} />;
+  return <ProductImage product={"raw" in product ? product.raw : product} src={image} title={title} variant={inferredVariant} fallbackType={fallbackType} className={className} />;
 }
 
-function FounderMetric({ label, value, badge, icon = "chart", trend = "Ready for review", tone = "green" }: { label: string; value: ReactNode; badge?: boolean; icon?: FounderIconName; trend?: string; tone?: "green" | "gold" | "blue" | "neutral" }) {
+function MetricCard({ label, value, badge, icon = "chart", trend = "Ready for review", tone = "green" }: { label: string; value: ReactNode; badge?: boolean; icon?: FounderIconName; trend?: string; tone?: "green" | "gold" | "blue" | "neutral" }) {
   return (
     <div className={`metric-card metric-card-${tone}`}>
       <div className="metric-card-top">
@@ -889,6 +907,79 @@ function FounderMetric({ label, value, badge, icon = "chart", trend = "Ready for
       </div>
       <strong>{badge ? <FounderBadge value={value} /> : value}</strong>
       <em><i />{trend}</em>
+    </div>
+  );
+}
+
+function FounderMetric(props: { label: string; value: ReactNode; badge?: boolean; icon?: FounderIconName; trend?: string; tone?: "green" | "gold" | "blue" | "neutral" }) {
+  return <MetricCard {...props} />;
+}
+
+function TopNavigation({
+  activeTab,
+  onNavigate
+}: {
+  activeTab: FounderTab | null;
+  onNavigate: (tab: FounderTab) => void;
+}) {
+  return (
+    <nav className="top-nav" aria-label="Primary navigation">
+      {founderTabs.map((tab) => (
+        <Button
+          key={tab}
+          className={`nav-tab ${activeTab === tab ? "nav-tab-active" : ""}`}
+          onClick={() => onNavigate(tab)}
+        >
+          {tab}
+        </Button>
+      ))}
+    </nav>
+  );
+}
+
+function AppShell({
+  activeTab,
+  logoFailed,
+  onLogoFailed,
+  onNavigate,
+  children,
+  contentRef
+}: {
+  activeTab: FounderTab | null;
+  logoFailed: boolean;
+  onLogoFailed: () => void;
+  onNavigate: FounderNavigate;
+  children: ReactNode;
+  contentRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div className="app-shell founder-app-shell">
+      <header className="top-header">
+        <Button className="brand-left" onClick={() => onNavigate("Today")} aria-label="Open Today">
+          {logoFailed ? (
+            <div className="logo-fallback">LD</div>
+          ) : (
+            <img src="/ld-logo.png" alt="Leafy Dew" onError={onLogoFailed} />
+          )}
+          <span>
+            <strong>Leafy Dew AI-CGO</strong>
+            <small>AI Amazon Seller Operating System</small>
+          </span>
+        </Button>
+        <TopNavigation activeTab={activeTab} onNavigate={(tab) => onNavigate(tab)} />
+        <div className="header-actions">
+          <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks."><FounderIcon name="shield" />Safe Mode ON</span>
+          <Button className="ai-status-pill" onClick={() => onNavigate("Safety Control")} title="Open advanced safety status">AI Status</Button>
+          <Button className="icon-button" onClick={() => onNavigate("Notification Outbox")} aria-label="Notifications"><FounderIcon name="bell" /></Button>
+          <Button className="founder-menu" onClick={() => onNavigate("Advanced Admin")}>Founder Profile</Button>
+        </div>
+      </header>
+
+      <main className="main-panel founder-main-panel">
+        <div className="main-content page-container" ref={contentRef}>
+          {children}
+        </div>
+      </main>
     </div>
   );
 }
@@ -905,64 +996,36 @@ function App() {
 
   function navigate(page: AppPage, product: FounderProduct | null = null) {
     if (product) setSelectedProduct(product);
-    setActivePage(page);
+    setActivePage(normalizeAppPage(page));
   }
 
   function setTechnicalTab(tab: Tab) {
     setActivePage(tab);
   }
 
-  const activeFounderTab: FounderTab = activePage === "Product Detail"
+  const activeFounderTab: FounderTab | null = activePage === "Product Detail"
     ? "Products"
     : founderTabs.includes(activePage as FounderTab)
       ? activePage as FounderTab
-      : "More";
+      : null;
 
   return (
-    <div className="app-shell founder-app-shell">
-      <header className="top-header">
-        <button type="button" className="brand-left" onClick={() => navigate("Today")} aria-label="Open Today">
-          {logoFailed ? (
-            <div className="logo-fallback">LD</div>
-          ) : (
-            <img src="/ld-logo.png" alt="Leafy Dew" onError={() => setLogoFailed(true)} />
-          )}
-          <span>
-            <strong>Leafy Dew AI-CGO</strong>
-            <small>AI Co-Pilot for Amazon Growth</small>
-          </span>
-        </button>
-        <nav className="top-nav" aria-label="Founder navigation">
-          {founderTabs.map((tab) => (
-            <button
-              type="button"
-              key={tab}
-              className={`nav-tab ${activeFounderTab === tab ? "nav-tab-active" : ""}`}
-              onClick={() => navigate(tab)}
-            >
-              {tab}
-            </button>
-          ))}
-        </nav>
-        <div className="header-actions">
-          <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks."><FounderIcon name="shield" />Safe Mode ON</span>
-          <span className="change-lock-pill">No Amazon change is made</span>
-          <button type="button" className="icon-button" aria-label="Notifications"><FounderIcon name="bell" /></button>
-          <button type="button" className="founder-menu">Founder</button>
-        </div>
-      </header>
-
-      <main className="main-panel founder-main-panel">
-        <div className="main-content page-container" ref={mainContentRef}>
+    <AppShell
+      activeTab={activeFounderTab}
+      logoFailed={logoFailed}
+      onLogoFailed={() => setLogoFailed(true)}
+      onNavigate={navigate}
+      contentRef={mainContentRef}
+    >
           {activePage === "Today" && <TodayDashboard navigate={navigate} />}
           {activePage === "Products" && <ProductsPage navigate={navigate} />}
           {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
-          {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
-          {activePage === "Growth" && <GrowthPage navigate={navigate} />}
-          {activePage === "Brand" && <BrandPage navigate={navigate} />}
+          {activePage === "AI Actions" && <FounderApprovalsPage navigate={navigate} />}
+          {activePage === "Growth Engine" && <GrowthPage navigate={navigate} />}
+          {activePage === "Brand Center" && <BrandPage navigate={navigate} />}
           {activePage === "Sales & Ads" && <SalesAdsPage navigate={navigate} />}
           {activePage === "Reports" && <ReportsPage navigate={navigate} />}
-          {activePage === "More" && <MoreToolsPage navigate={navigate} />}
+          {activePage === "Advanced Admin" && <MoreToolsPage navigate={navigate} />}
           {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
           {activePage === "Product Passport" && <ProductPassportPage />}
           {activePage === "Product Economics" && <ProductEconomicsPage />}
@@ -992,9 +1055,7 @@ function App() {
           {activePage === "Learning" && <LearningPage />}
           {activePage === "Activity Logs" && <ActivityLogsPage />}
           {activePage === "Settings" && <SettingsPage />}
-        </div>
-      </main>
-    </div>
+    </AppShell>
   );
 }
 
@@ -1016,25 +1077,25 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
 
   const attentionItems = [
     missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
-    pendingApprovalCount > 0 ? { icon: "approval" as FounderIconName, title: "Pending approvals", text: `${pendingApprovalCount} recommendations are waiting for your decision.`, priority: "High", action: "Review Now", page: "Approvals" as AppPage } : null,
-    ppcRisks > 0 ? { icon: "sales" as FounderIconName, title: "PPC risk high", text: "Ad spend or ACOS needs a founder review before changes are made.", priority: "Watch", action: "Open Growth", page: "Growth" as AppPage } : null,
-    listingIdeas > 0 ? { icon: "spark" as FounderIconName, title: "Listing ideas ready", text: "Content improvements are drafted for review.", priority: "Ready", action: "View Ideas", page: "Growth" as AppPage } : null,
+    pendingApprovalCount > 0 ? { icon: "approval" as FounderIconName, title: "AI actions waiting", text: `${pendingApprovalCount} recommendations are waiting for your decision.`, priority: "High", action: "Review Now", page: "AI Actions" as AppPage } : null,
+    ppcRisks > 0 ? { icon: "sales" as FounderIconName, title: "PPC risk high", text: "Ad spend or ACOS needs a founder review before changes are made.", priority: "Watch", action: "Open Growth Engine", page: "Growth Engine" as AppPage } : null,
+    listingIdeas > 0 ? { icon: "spark" as FounderIconName, title: "Listing ideas ready", text: "Content improvements are drafted for review.", priority: "Ready", action: "View Ideas", page: "Growth Engine" as AppPage } : null,
     profitRisks > 0 ? { icon: "chart" as FounderIconName, title: "Profit risk", text: "Some products may need pricing, cost, or ads attention.", priority: "Watch", action: "Open Products", page: "Products" as AppPage } : null
   ].filter(Boolean).slice(0, 5) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
 
-  const previewProduct = products[0] ?? sampleFounderProduct;
-  const previewProducts = (products.length ? products : [sampleFounderProduct]).slice(0, 3);
+  const previewProduct = products[0] ?? null;
+  const previewProducts = products.slice(0, 3);
   const growthIdeaCount = ppcRisks + listingIdeas;
   const nextBestAction = pendingApprovalCount > 0 || missingCostCount > 0
     ? "Review high-priority approvals and fix missing cost data first."
     : "Run Daily AI to refresh growth, catalog, ads, and brand recommendations.";
-  const previewCards: Array<{ number: number; title: string; lines: string[]; icon: FounderIconName; page: AppPage; product?: FounderProduct; metric: string; kind: "today" | "products" | "detail" | "approvals" | "growth" | "brand" }> = [
+  const previewCards: Array<{ number: number; title: string; lines: string[]; icon: FounderIconName; page: AppPage; product?: FounderProduct | null; metric: string; kind: "today" | "products" | "detail" | "approvals" | "growth" | "brand" }> = [
     { number: 1, title: "Today / Command Center", lines: ["Daily priorities", "Safe actions only", "Founder summary"], icon: "spark", page: "Today", metric: `${attentionItems.length} priorities`, kind: "today" },
     { number: 2, title: "Products / Catalog", lines: [`${productCount} products connected`, "Costs and readiness", "Profit status"], icon: "box", page: "Products", metric: `${missingCostCount} need cost`, kind: "products" },
-    { number: 3, title: "Product Detail Preview", lines: [previewProduct.name, cleanFounderText(previewProduct.sku, "SKU pending"), "Amazon-like product view"], icon: "box", page: "Product Detail", product: previewProduct, metric: cleanFounderText(previewProduct.price, "Price pending"), kind: "detail" },
-    { number: 4, title: "Approvals / Decision Center", lines: [`${pendingApprovalCount} waiting`, "Approve, reject, watch", "You stay in control"], icon: "approval", page: "Approvals", metric: `${pendingApprovalCount} pending`, kind: "approvals" },
-    { number: 5, title: "Growth Ideas", lines: ["PPC opportunities", "Listing improvements", "Creative ideas"], icon: "growth", page: "Growth", metric: `${growthIdeaCount} ideas`, kind: "growth" },
-    { number: 6, title: "Brand Overview", lines: ["Brand health score", "A+ content status", "Creative assets"], icon: "brand", page: "Brand", metric: "82 score", kind: "brand" }
+    { number: 3, title: "Product Detail Preview", lines: [previewProduct?.name ?? "No product data available", previewProduct ? cleanFounderText(previewProduct.sku, "SKU pending") : "Live catalog required", "Amazon product workspace"], icon: "box", page: "Product Detail", product: previewProduct, metric: previewProduct ? cleanFounderText(previewProduct.price, "Price pending") : "No product data", kind: "detail" },
+    { number: 4, title: "AI Actions / Decision Center", lines: [`${pendingApprovalCount} waiting`, "Approve, reject, watch", "You stay in control"], icon: "approval", page: "AI Actions", metric: `${pendingApprovalCount} pending`, kind: "approvals" },
+    { number: 5, title: "Growth Engine", lines: ["PPC opportunities", "Listing improvements", "Creative ideas"], icon: "growth", page: "Growth Engine", metric: `${growthIdeaCount} ideas`, kind: "growth" },
+    { number: 6, title: "Brand Center", lines: ["Brand signals", "A+ content status", "Creative assets"], icon: "brand", page: "Brand Center", metric: "Not available yet", kind: "brand" }
   ];
 
   return (
@@ -1048,7 +1109,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           <div className="next-best-action">
             <span>Next Best Action</span>
             <strong>{nextBestAction}</strong>
-            <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "Approvals" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
+            <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "AI Actions" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
           </div>
         </div>
         <div className="hero-status-panel">
@@ -1068,11 +1129,11 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
         </article>
         <article className="action-card founder-action-card action-card-blue">
           <div className="card-icon"><FounderIcon name="approval" /></div>
-          <h2>Pending Approvals</h2>
+          <h2>AI Actions</h2>
           <p>Recommendations waiting for your decision.</p>
           <Badge tone={pendingApprovalCount > 0 ? "watch" : "good"}>{pendingApprovalCount} waiting</Badge>
           <div className="action-card-footer">
-            <button type="button" onClick={() => navigate("Approvals")}>Review Now</button>
+            <button type="button" onClick={() => navigate("AI Actions")}>Review Now</button>
           </div>
         </article>
         <article className="action-card founder-action-card action-card-gold">
@@ -1095,7 +1156,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           <Badge tone="good">Protected</Badge>
         </div>
       <section className="quick-status-strip">
-        <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? "+ catalog connected" : "Connect catalog data"} />
+        <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? "Catalog connected" : "No product data available"} />
         <FounderMetric label="Active Listings" value={activeListings || "-"} icon="check" trend={activeListings ? "Live catalog signal" : "Waiting for sync"} />
         <FounderMetric label="Sales 7D" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sevenDaySales"]))} icon="sales" trend="Last 7 days" tone="blue" />
         <FounderMetric label="Net Profit 7D" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit7d"]))} icon="chart" trend="After known costs" />
@@ -1148,27 +1209,29 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
               <div className={`preview-visual preview-visual-${card.kind}`}>
                 {card.kind === "products" ? (
                   <div className="preview-product-stack">
-                    {previewProducts.map((product) => <ProductThumb key={product.key} product={product} className="product-thumb" />)}
+                    {previewProducts.length ? previewProducts.map((product) => <ProductThumb key={product.key} product={product} className="product-thumb" />) : <span className="preview-empty">No product data available</span>}
                   </div>
-                ) : card.kind === "detail" ? (
+                ) : card.kind === "detail" && previewProduct ? (
                   <div className="preview-detail-product">
                     <ProductThumb product={previewProduct} className="product-thumb" />
                     <span>{previewProduct.name}</span>
                   </div>
+                ) : card.kind === "detail" ? (
+                  <span className="preview-empty">No product data available</span>
                 ) : card.kind === "approvals" ? (
                   <div className="preview-approval-stack"><Badge tone="watch">High</Badge><Badge tone="neutral">Watch</Badge><Badge tone="good">Safe</Badge></div>
-                ) : card.kind === "growth" ? (
+                ) : card.kind === "growth" && previewProducts.length ? (
                   <div className="preview-product-stack">
-                    <ProductThumb product={previewProducts[0] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
-                    <ProductThumb product={previewProducts[1] ?? previewProduct} variant="small" fallbackType="listing" className="product-thumb" />
-                    <ProductThumb product={previewProducts[2] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
+                    {previewProducts.map((product) => <ProductThumb key={product.key} product={product} variant="small" fallbackType="creative" className="product-thumb" />)}
+                  </div>
+                ) : card.kind === "growth" ? (
+                  <span className="preview-empty">No product data available</span>
+                ) : card.kind === "brand" && previewProducts.length ? (
+                  <div className="preview-product-stack">
+                    {previewProducts.map((product) => <ProductThumb key={product.key} product={product} variant="small" fallbackType="brand" className="product-thumb" />)}
                   </div>
                 ) : card.kind === "brand" ? (
-                  <div className="preview-product-stack">
-                    <ProductThumb product={previewProducts[0] ?? previewProduct} variant="small" fallbackType="brand" className="product-thumb" />
-                    <ProductThumb product={previewProducts[1] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
-                    <ProductThumb product={previewProducts[2] ?? previewProduct} variant="small" fallbackType="product" className="product-thumb" />
-                  </div>
+                  <span className="preview-empty">No product data available</span>
                 ) : (
                   <div className="preview-status-chips"><Badge tone="good">Daily priorities</Badge><Badge tone="good">Safe actions</Badge><Badge tone="neutral">Founder summary</Badge></div>
                 )}
@@ -1196,8 +1259,7 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   const [page, setPage] = useState(1);
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const hasRealProducts = products.length > 0;
-  const catalogProducts = hasRealProducts ? products : [sampleFounderProduct];
-  const filteredProducts = catalogProducts.filter((product) => {
+  const filteredProducts = products.filter((product) => {
     if (!productMatches(product, query)) return false;
     if (subTab === "Missing Costs" && !productNeedsCost(product)) return false;
     if (filter === "Active" && !normalizeState(product.status).includes("ACTIVE")) return false;
@@ -1222,9 +1284,9 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
         ))}
       </div>
       <div className="catalog-summary-chips">
-        <span><FounderIcon name="box" />{catalogProducts.length} products</span>
-        <span><FounderIcon name="cost" />{catalogProducts.filter(productNeedsCost).length} missing cost</span>
-        <span><FounderIcon name="chart" />{catalogProducts.filter(productLowProfit).length} profit watch</span>
+        <span><FounderIcon name="box" />{products.length} products</span>
+        <span><FounderIcon name="cost" />{products.filter(productNeedsCost).length} missing cost</span>
+        <span><FounderIcon name="chart" />{products.filter(productLowProfit).length} profit watch</span>
         <span><FounderIcon name="shield" />Safe Mode ON</span>
       </div>
       {subTab === "Profit Calculator" ? (
@@ -1243,9 +1305,8 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
           <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => { setFilter(label); setPage(1); }}>{label}</button>
         ))}
       </div>
-      {!loading && !hasRealProducts ? <div className="soft-state compact-state">Catalog data is not connected yet, so this preview row shows how products will appear once data is available.</div> : null}
       <Card title="Products">
-        {loading ? <LoadingBlock text="Loading products..." /> : filteredProducts.length === 0 ? <EmptyBlock text="No products match this filter." /> : (
+        {loading ? <LoadingBlock text="Loading products..." /> : !hasRealProducts ? <EmptyBlock text="No product data available" /> : filteredProducts.length === 0 ? <EmptyBlock text="No products match this filter." /> : (
           <>
             <div className="product-table">
               <div className="product-row product-row-head">
@@ -1293,11 +1354,28 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const [activeTab, setActiveTab] = useState("Overview");
   const products = mergeFounderProducts(passports.data, economics.data);
-  const detailProduct = product ?? products[0] ?? sampleFounderProduct;
+  const detailProduct = product ?? products[0] ?? null;
+
+  if (passports.loading || economics.loading) {
+    return (
+      <PageLayout title="Product Detail" subtitle="Live Amazon product workspace.">
+        <LoadingBlock text="Loading product data..." />
+      </PageLayout>
+    );
+  }
+
+  if (!detailProduct) {
+    return (
+      <PageLayout title="Product Detail" subtitle="Live Amazon product workspace.">
+        <EmptyBlock text="No product data available" />
+      </PageLayout>
+    );
+  }
+
   const detailImageSource = detailProduct.raw;
   const galleryImages = getProductImages(detailImageSource);
   const gallery = galleryImages.length ? galleryImages : [null, null, null];
-  const bullets = detailProduct.bullets.length ? detailProduct.bullets : sampleFounderProduct.bullets;
+  const bullets = detailProduct.bullets;
   const imageDebugFields = productImageDebugFields(detailImageSource);
 
   return (
@@ -1318,7 +1396,6 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
           <div className="main-product-image">
             <ProductThumb product={detailProduct} className="product-main-img" />
           </div>
-          <p>Roll over image to zoom in</p>
         </section>
         <section className="product-info-panel">
           <h1>{detailProduct.name}</h1>
@@ -1335,9 +1412,11 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <MetricRow label="Product Status" value={<FounderBadge value={detailProduct.status ?? "Not available yet"} />} />
           </div>
           <h2>About this item</h2>
-          <ul className="clean-list product-bullets">
-            {bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}
-          </ul>
+          {bullets.length ? (
+            <ul className="clean-list product-bullets">
+              {bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}
+            </ul>
+          ) : <EmptyBlock text="No product data available" />}
           <p className="product-description">{detailProduct.description}</p>
         </section>
         <aside className="product-side-panel">
@@ -1353,9 +1432,9 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
           </div>
           <div className="quick-actions-card">
             <h2>Quick Actions</h2>
-            <button type="button" onClick={() => navigate("Growth")}>Optimize Listing</button>
+            <button type="button" onClick={() => navigate("Growth Engine")}>Optimize Listing</button>
             <button type="button" onClick={() => navigate("Sales & Ads")}>Manage PPC & Ads</button>
-            <button type="button" onClick={() => navigate("Growth")}>Image & A+ Ideas</button>
+            <button type="button" onClick={() => navigate("Growth Engine")}>Image & A+ Ideas</button>
             <button type="button" onClick={() => navigate("Products")}>Fix Cost</button>
             <button type="button" onClick={() => navigate("Product Economics")}>Profit Calculator</button>
           </div>
@@ -1369,7 +1448,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
       <Card title={activeTab}>
         <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
         <details className="technical-accordion">
-          <summary>Technical Details</summary>
+          <summary>Advanced Details</summary>
           <div className="detail-grid">
             <MetricRow label="Internal Key" value={detailProduct.key} />
             <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
@@ -1420,7 +1499,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
 
   return (
     <div className="page founder-page">
-      <PageHeader title="Approvals" subtitle="These are recommendations. You decide what happens." />
+      <PageHeader title="AI Actions" subtitle="These are recommendations. You decide what happens." />
       <div className="warning-card founder-safety-banner">
         <p>Approving does not automatically change Amazon unless live execution is enabled and all safety checks pass.</p>
       </div>
@@ -1499,16 +1578,10 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
     ...creativeRecommendationRowsOf(creative.data).map((row) => ({ type: "Content & Creative", title: cleanFounderText(row.title ?? row.recommendationType, "Creative idea"), productName: row.productName, why: row.summary ?? row.recommendedAction, impact: row.confidenceLabel, risk: row.riskLevel, row })),
     ...experimentRowsOf(experiments.data).map((row) => ({ type: "Experiments", title: cleanFounderText(row.name ?? row.experimentName, "Experiment"), productName: row.sku ?? row.asin, why: row.hypothesis ?? row.description, impact: row.expectedResult ?? row.successMetric, risk: row.priority, row }))
   ].filter((card) => tab === "All Ideas" || card.type === tab).slice(0, 18);
-  const placeholderCards = [
-    { type: "PPC Opportunities", title: "Find efficient ad spend", productName: "Connect ads data", why: "AI will highlight campaigns where spend, ACOS, and profit need founder review.", impact: "Traffic growth", risk: "Low risk", row: { id: "placeholder-ppc" } },
-    { type: "Listing Improvements", title: "Improve conversion content", productName: "Connect catalog data", why: "AI will suggest title, bullet, keyword, and description improvements for approval.", impact: "Conversion lift", risk: "Low risk", row: { id: "placeholder-listing" } },
-    { type: "Content & Creative", title: "Upgrade image and A+ assets", productName: "Leafy Dew brand", why: "AI will surface creative opportunities for main images, infographics, lifestyle shots, and A+ modules.", impact: "Brand value", risk: "Safe preview", row: { id: "placeholder-creative" } }
-  ].filter((card) => tab === "All Ideas" || card.type === tab);
-  const displayCards = cards.length > 0 ? cards : placeholderCards;
 
   return (
     <div className="page founder-page">
-      <PageHeader title="Growth Ideas" subtitle="AI-powered ideas to grow traffic, conversion, and profit." />
+      <PageHeader title="Growth Engine" subtitle="AI-powered ideas to grow traffic, conversion, and profit." />
       <SafetyBanner text="Nothing changes on Amazon automatically from this page." />
       <div className="segmented founder-subtabs">
         {["All Ideas", "Listing Improvements", "PPC Opportunities", "Content & Creative", "Experiments"].map((label) => (
@@ -1517,7 +1590,7 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
       </div>
       {ppc.loading || drafts.loading || creative.loading || passports.loading || economics.loading ? <LoadingBlock text="Loading growth ideas..." /> : (
         <div className="growth-grid">
-          {displayCards.map((card, index) => {
+          {cards.length === 0 ? <EmptyBlock text="No product data available" /> : cards.map((card, index) => {
             const cardSku = cleanFounderText(readFirst(card.row, ["sku", "sellerSku"]), "");
             const cardAsin = cleanFounderText(readFirst(card.row, ["asin"]), "");
             const cardProductName = cleanFounderText(card.productName, "");
@@ -1525,10 +1598,11 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
               (cardSku && item.sku === cardSku)
               || (cardAsin && item.asin === cardAsin)
               || (cardProductName && item.name === cardProductName)
-            )) ?? sampleFounderProduct;
+            ));
+            const imageProduct = product ? { ...product, raw: { ...product.raw, ...recordOf(card.row) } } : recordOf(card.row);
             return (
               <article className="growth-card" key={String(readFirst(card.row, ["id"]) ?? index)}>
-                <ProductThumb product={{ ...product, raw: { ...product.raw, ...recordOf(card.row) } }} className="growth-img" />
+                <ProductThumb product={imageProduct} className="growth-img" />
                 <div>
                   <FounderBadge value={card.type} />
                   <h2>{card.title}</h2>
@@ -1538,7 +1612,7 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
                     <FounderBadge value={card.impact ?? "Impact pending"} />
                     <FounderBadge value={card.risk ?? "Low risk"} />
                   </div>
-                  <button type="button" onClick={() => navigate("Approvals")}>View Suggestion</button>
+                  <button type="button" onClick={() => navigate("AI Actions")}>View Suggestion</button>
                 </div>
               </article>
             );
@@ -1555,10 +1629,12 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
   const products = mergeFounderProducts(passports.data, economics.data);
   const topProducts = products.slice(0, 4);
+  const brandScore = readFirst(creative.data, ["brandHealthScore", "brandScore", "score", "healthScore"]);
+  const creativeAssetCount = readNumber(readFirst(creative.data, ["totalRecommendations", "total"]));
 
   return (
     <div className="page founder-page">
-      <PageHeader title="Brand Overview" subtitle="Track brand health, content, assets, and top products." />
+      <PageHeader title="Brand Center" subtitle="Track brand health, content, assets, and top products." />
       <section className="brand-hero-card">
         <div>
           <span className="eyebrow">Leafy Dew Brand Workspace</span>
@@ -1567,16 +1643,16 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         </div>
         <div className="brand-hero-score">
           <span>Brand Health Score</span>
-          <strong>82</strong>
-          <FounderBadge value="Healthy" tone="good" />
+          <strong>{cleanFounderText(brandScore)}</strong>
+          <FounderBadge value={brandScore === null || brandScore === undefined ? "Not available yet" : "Available"} tone={brandScore === null || brandScore === undefined ? "neutral" : "good"} />
         </div>
       </section>
       <div className="brand-grid">
-        <FounderMetric label="Brand Health Score" value="82" />
+        <FounderMetric label="Brand Health Score" value={cleanFounderText(brandScore)} />
         <FounderMetric label="A+ Content Status" value={readNumber(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"])) > 0 ? "Needs review" : "Not available yet"} badge />
         <FounderMetric label="Store Status" value="Not connected yet" badge />
-        <FounderMetric label="Creative Assets" value={readNumber(readFirst(creative.data, ["totalRecommendations", "total"]))} />
-        <FounderMetric label="Brand Insights" value="Ready" badge />
+        <FounderMetric label="Creative Assets" value={creativeAssetCount} />
+        <FounderMetric label="Brand Insights" value={creativeAssetCount > 0 ? "Available" : "Not available yet"} badge />
         <FounderMetric label="Top Brand Products" value={topProducts.length} />
       </div>
       <section className="brand-sections">
@@ -1593,20 +1669,17 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         </article>
         <article className="brand-card creative-assets-card">
           <h2>Creative Assets</h2>
-          <div className="asset-grid">
-            {["Main images", "Lifestyle", "Infographics", "Size charts", "Video"].map((label, index) => {
-              const product = topProducts[index % Math.max(1, topProducts.length)];
-              return product ? (
-                <ProductThumb key={label} product={product} variant="medium" fallbackType="creative" className="asset-placeholder" />
-              ) : (
-                <ProductThumbnail key={label} title={label} variant="medium" fallbackType="creative" className="asset-placeholder" />
-              );
-            })}
-          </div>
+          {topProducts.length === 0 ? <EmptyBlock text="No product data available" /> : (
+            <div className="asset-grid">
+              {topProducts.map((product) => (
+                <ProductThumb key={product.key} product={product} variant="medium" fallbackType="creative" className="asset-placeholder" />
+              ))}
+            </div>
+          )}
         </article>
         <article className="brand-card top-products-card">
           <h2>Top Brand Products</h2>
-          {topProducts.length === 0 ? <EmptyBlock text="Top products will appear once catalog data is connected." /> : topProducts.map((product) => (
+          {topProducts.length === 0 ? <EmptyBlock text="No product data available" /> : topProducts.map((product) => (
             <button type="button" className="brand-product-row" key={product.key} onClick={() => navigate("Product Detail", product)}>
               <ProductThumb product={product} className="product-thumb" />
               <span>{product.name}</span>
@@ -1618,7 +1691,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         <article className="brand-card campaign-card">
           <h2>Brand Ideas & Campaigns</h2>
           <p>Seasonal bundles, brand story refresh, and creative opportunities can be prepared for founder approval.</p>
-          <button type="button" onClick={() => navigate("Growth")}>Open Growth Ideas</button>
+          <button type="button" onClick={() => navigate("Growth Engine")}>Open Growth Engine</button>
         </article>
       </section>
     </div>
@@ -1632,6 +1705,10 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const data = todayCommandSummaryOf(today.data);
   const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
+  const salesTrend = readNumberSeries(data, ["salesTrend", "sales7dTrend", "dailySales", "salesSeries"]);
+  const adsTrend = readNumberSeries(data, ["adSpendTrend", "adSpend7dTrend", "dailyAdSpend", "adsSeries"]);
+  const salesMax = Math.max(...salesTrend, 0);
+  const adsMax = Math.max(...adsTrend, 0);
 
   return (
     <div className="page founder-page">
@@ -1646,14 +1723,18 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
       </div>
       <div className="sales-layout">
         <Card title="Sales Trend">
-          <div className="simple-chart">
-            {[42, 58, 44, 70, 64, 78, 86].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
-          </div>
+          {salesTrend.length === 0 ? <EmptyBlock text="No sales data available" /> : (
+            <div className="simple-chart">
+              {salesTrend.map((value, index) => <span key={index} style={{ height: `${salesMax > 0 ? Math.max(8, (value / salesMax) * 100) : 8}%` }} />)}
+            </div>
+          )}
         </Card>
         <Card title="Ad Spend vs Sales">
-          <div className="simple-chart ads-chart">
-            {[34, 52, 40, 62, 54, 66, 72].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
-          </div>
+          {adsTrend.length === 0 ? <EmptyBlock text="No ads data available" /> : (
+            <div className="simple-chart ads-chart">
+              {adsTrend.map((value, index) => <span key={index} style={{ height: `${adsMax > 0 ? Math.max(8, (value / adsMax) * 100) : 8}%` }} />)}
+            </div>
+          )}
         </Card>
         <Card title="Top PPC Risks">
           {ppc.loading ? <LoadingBlock /> : ppcRisks.length === 0 ? <EmptyBlock text="No PPC risks returned yet." /> : (
@@ -1712,41 +1793,41 @@ function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
 }
 
 function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
-  const groups: Array<{ title: string; tools: Array<{ label: string; page: Tab; note: string }> }> = [
+  const groups: Array<{ title: string; tools: Array<{ label: string; page: AppPage; note: string }> }> = [
     { title: "Settings & Controls", tools: [
       { label: "Settings", page: "Settings", note: "Workspace preferences" },
       { label: "Safety Settings", page: "Safety Control", note: "Safe mode and approval rules" },
-      { label: "AI Cost Control", page: "AI Gateway", note: "AI budget and usage" },
+      { label: "AI Budget", page: "AI Gateway", note: "AI budget and usage" },
       { label: "Notifications", page: "Notification Outbox", note: "Queued messages" }
     ] },
-    { title: "System", tools: [
-      { label: "System Health", page: "Production Health", note: "Production readiness" },
-      { label: "System Check", page: "QA Smoke", note: "Backend smoke checks" },
-      { label: "Maintenance", page: "Maintenance", note: "Safe housekeeping" },
-      { label: "Data Freshness", page: "Data Freshness", note: "Source freshness" },
+    { title: "Operations", tools: [
+      { label: "Business Health", page: "Production Health", note: "Operating readiness" },
+      { label: "Readiness Check", page: "QA Smoke", note: "Internal checks" },
+      { label: "Housekeeping", page: "Maintenance", note: "Safe housekeeping" },
+      { label: "Data Status", page: "Data Freshness", note: "Source status" },
       { label: "Activity Timeline", page: "Activity Logs", note: "Recent events" }
     ] },
     { title: "Automation", tools: [
       { label: "Daily AI Run", page: "Daily AI-CGO", note: "Generate safe recommendations" },
-      { label: "AI Engine Room", page: "Engine Command Center", note: "Advanced engine controls" },
-      { label: "Scheduler", page: "Scheduler", note: "Automation schedule" },
+      { label: "AI Control Room", page: "Engine Command Center", note: "Advanced AI controls" },
+      { label: "Automation Calendar", page: "Scheduler", note: "Automation schedule" },
       { label: "Learning", page: "Learning", note: "Recommendation feedback" }
     ] },
     { title: "Launch & Safety", tools: [
       { label: "Controlled Live Actions", page: "Live Execution", note: "Gated execution only" },
       { label: "Launch Readiness", page: "Launch Gate", note: "Live readiness gate" },
-      { label: "Launch Checklist", page: "Launch Checklist", note: "Readiness checklist" },
+      { label: "Launch Tasks", page: "Launch Checklist", note: "Readiness tasks" },
       { label: "Security", page: "Security Guardrails", note: "Safety blocks and audits" },
-      { label: "Rollback Center", page: "Rollback Center", note: "Rollback snapshots" }
+      { label: "Recovery Center", page: "Rollback Center", note: "Recovery snapshots" }
     ] },
     { title: "Advanced Growth", tools: [
-      { label: "Approval Execution", page: "Approval Execution", note: "Approved action bridge" },
-      { label: "Execution Gateway", page: "Execution Gateway", note: "Shadow execution checks" },
-      { label: "Alert Center", page: "Alert Center", note: "Business alerts" },
+      { label: "Action Preview", page: "Approval Execution", note: "Approved action preview" },
+      { label: "Action Safety", page: "Execution Gateway", note: "Shadow action checks" },
+      { label: "Business Alerts", page: "Alert Center", note: "Business alerts" },
       { label: "Experiments", page: "Experiments", note: "Growth experiments" },
-      { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
-      { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
-      { label: "PPC Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
+      { label: "Product Readiness", page: "Product Passport", note: "Product truth and cost queue" },
+      { label: "Profit Calculator", page: "Product Economics", note: "Profit calculator" },
+      { label: "Ads Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
       { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
       { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
       { label: "Advanced Approval Center", page: "Approval Center", note: "Full approval workflow" }
@@ -1755,7 +1836,7 @@ function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
 
   return (
     <div className="page founder-page">
-      <PageHeader title="More Tools" subtitle="Settings, system checks, launch readiness, and advanced automation tools." />
+      <PageHeader title="Advanced Admin" subtitle="Internal controls and operating checks for administrators." />
       <div className="warning-card founder-safety-banner">
         <p>Advanced tools are for system checking, launch readiness, and debugging. Daily users usually do not need them.</p>
       </div>
@@ -1835,6 +1916,17 @@ function todayCommandNumber(data: AnyRecord, keys: string[]): number {
     if (value !== undefined && value !== null && value !== "") return readNumber(value);
   }
   return 0;
+}
+
+function readNumberSeries(source: unknown, keys: string[]): number[] {
+  const value = readFirst(source, keys);
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((item) => {
+      if (typeof item === "number" || typeof item === "string") return Number(item);
+      return Number(readFirst(item, ["value", "sales", "adSpend", "spend", "amount", "total"]));
+    })
+    .filter((item) => Number.isFinite(item) && item >= 0);
 }
 
 function SafetyBanner({ text }: { text: string }) {
