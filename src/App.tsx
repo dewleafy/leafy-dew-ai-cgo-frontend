@@ -168,6 +168,7 @@ function formatShortId(value: unknown): string {
   return `${id.slice(0, 8)}...${id.slice(-6)}`;
 }
 
+]+)/gi,
       "$1[redacted]"
     )
     .replace(/\b(access_token|refresh_token|api_key|client_secret|secret_key|auth_token)=([^&\s]+)/gi, "$1=[redacted]")
@@ -257,26 +258,6 @@ function TextInput({
     <label className="field">
       <span>{label}</span>
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
-  );
-}
-
-  return (
-    <label className="field readonly-field">
-      <span>{label}</span>
-      <div>{value}</div>
-    </label>
-  );
-}
-
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field field-wide">
-      <span>{label}</span>
-      <textarea value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -917,6 +898,7 @@ function App() {
     setActivePage(page);
   }
 
+  
   const activeFounderTab: FounderTab = activePage === "Product Detail"
     ? "Products"
     : founderTabs.includes(activePage as FounderTab)
@@ -962,7 +944,7 @@ function App() {
           {activePage === "Today" && <TodayDashboard navigate={navigate} />}
           {activePage === "Products" && <ProductsPage navigate={navigate} />}
           {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
-          {activePage === "Approvals" && <FounderApprovalsPage />}
+          {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
           {activePage === "Growth" && <GrowthPage navigate={navigate} />}
           {activePage === "Brand" && <BrandPage navigate={navigate} />}
           {activePage === "Sales & Ads" && <SalesAdsPage />}
@@ -1024,17 +1006,6 @@ function PageHeader({ title, subtitle, badge }: { title: string; subtitle?: stri
       <h1>{title}</h1>
       {subtitle ? <p>{subtitle}</p> : null}
       {badge ? <Badge tone="good">{badge}</Badge> : null}
-    </div>
-  );
-}
-
-  return (
-    <div className="page-header">
-      <div>
-        <h1>{title}</h1>
-        {subtitle ? <p>{subtitle}</p> : null}
-      </div>
-      {action}
     </div>
   );
 }
