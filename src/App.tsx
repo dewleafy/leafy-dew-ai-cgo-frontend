@@ -1113,16 +1113,15 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const passport = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
-  const actions = useApi<ApprovalReadyAction[]>(() => getJson(`/api/approvals/ready?sellerId=${SELLER_ID}`));
 
   const products = mergeFounderProducts(passport.data, economics.data);
   const needsCost = products.filter(productNeedsCost).length;
   const lowProfit = products.filter(productLowProfit).length;
-  const pendingApprovals = actionLedgerRowsOf(approvals.data).filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(row.actionStatus)).length;
-  const readyActions = actionLedgerRowsOf(approvals.data).filter((row) => row.actionStatus === "READY").length;
+  const pendingApprovals = actionLedgerRowsOf(approvals.data).filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(String(row.actionStatus))).length;
+  const readyActions = actionLedgerRowsOf(approvals.data).filter((row) => String(row.actionStatus) === "READY").length;
 
   const topProducts = products.slice(0, 4);
-  const topActions = actionLedgerRowsOf(approvals.data).filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(row.actionStatus)).slice(0, 4);
+  const topActions = actionLedgerRowsOf(approvals.data).filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(String(row.actionStatus))).slice(0, 4);
 
   const todaySummary = recordOf(today.data);
   const todayStatus = cleanFounderText(todaySummary.status, "Not available yet");
@@ -1168,14 +1167,14 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
             {topActions.map((action) => (
               <div className="action-item" key={String(action.actionId)}>
                 <div className="action-item-top">
-                  <strong>{action.actionTitle}</strong>
+                  <strong>{formatEmpty(action.actionTitle)}</strong>
                   <StatusBadge value={action.actionStatus} />
                 </div>
                 <div className="action-item-meta">
-                  <span>{action.actionType}</span>
+                  <span>{formatEmpty(action.actionType)}</span>
                   <span>{formatShortId(action.actionId)}</span>
                 </div>
-                <p>{action.actionDescription}</p>
+                <p>{formatEmpty(action.actionDescription)}</p>
               </div>
             ))}
           </div>
@@ -1217,14 +1216,14 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
             {todayItems.map((item) => (
               <div className="action-item" key={String(item.actionId)}>
                 <div className="action-item-top">
-                  <strong>{item.actionTitle}</strong>
+                  <strong>{formatEmpty(item.actionTitle)}</strong>
                   <StatusBadge value={item.actionStatus} />
                 </div>
                 <div className="action-item-meta">
-                  <span>{item.actionType}</span>
+                  <span>{formatEmpty(item.actionType)}</span>
                   <span>{formatShortId(item.actionId)}</span>
                 </div>
-                <p>{item.actionDescription}</p>
+                <p>{formatEmpty(item.actionDescription)}</p>
               </div>
             ))}
           </div>
@@ -1233,7 +1232,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
     </div>
   );
 }
-
+    
 function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("ALL");
@@ -1363,7 +1362,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
               <MetricRow label="Brand" value={detailProduct.brand} />
               <MetricRow label="Category" value={detailProduct.category} />
               <MetricRow label="Status" value={<FounderBadge value={detailProduct.status} />} />
-              <MetricRow label="Listing Score" value={detailProduct.listingScore ?? "—"} />
+              <MetricRow label="Listing Score" value={formatEmpty(detailProduct.listingScore)} />
             </div>
           </div>
 
@@ -1573,13 +1572,12 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
-function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
+function FounderApprovalsPage() {
   const approvals = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
-  const actions = useApi<ApprovalReadyAction[]>(() => getJson(`/api/approvals/ready?sellerId=${SELLER_ID}`));
   const rows = actionLedgerRowsOf(approvals.data);
-  const pending = rows.filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(row.actionStatus));
-  const approved = rows.filter((row) => row.actionStatus === "APPROVED");
-  const executed = rows.filter((row) => row.actionStatus === "EXECUTED");
+  const pending = rows.filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(String(row.actionStatus)));
+  const approved = rows.filter((row) => String(row.actionStatus) === "APPROVED");
+  const executed = rows.filter((row) => String(row.actionStatus) === "EXECUTED");
 
   return (
     <div className="page founder-page">
@@ -1601,14 +1599,14 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
             {pending.map((action) => (
               <div className="action-item" key={String(action.actionId)}>
                 <div className="action-item-top">
-                  <strong>{action.actionTitle}</strong>
+                  <strong>{formatEmpty(action.actionTitle)}</strong>
                   <StatusBadge value={action.actionStatus} />
                 </div>
                 <div className="action-item-meta">
-                  <span>{action.actionType}</span>
+                  <span>{formatEmpty(action.actionType)}</span>
                   <span>{formatShortId(action.actionId)}</span>
                 </div>
-                <p>{action.actionDescription}</p>
+                <p>{formatEmpty(action.actionDescription)}</p>
                 <div className="action-item-actions">
                   <button type="button" className="btn-primary">Approve</button>
                   <button type="button" className="btn-secondary">Reject</button>
@@ -1629,14 +1627,14 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
             {approved.map((action) => (
               <div className="action-item" key={String(action.actionId)}>
                 <div className="action-item-top">
-                  <strong>{action.actionTitle}</strong>
+                  <strong>{formatEmpty(action.actionTitle)}</strong>
                   <StatusBadge value={action.actionStatus} />
                 </div>
                 <div className="action-item-meta">
-                  <span>{action.actionType}</span>
+                  <span>{formatEmpty(action.actionType)}</span>
                   <span>{formatShortId(action.actionId)}</span>
                 </div>
-                <p>{action.actionDescription}</p>
+                <p>{formatEmpty(action.actionDescription)}</p>
               </div>
             ))}
           </div>
@@ -1698,7 +1696,7 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
-function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
+function SalesAdsPage() {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const products = mergeFounderProducts(passports.data, economics.data);
@@ -1727,7 +1725,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
     </div>
   );
 }
-
+    
 function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
   return (
     <div className="page founder-page">
@@ -1867,8 +1865,8 @@ function DailyAiCgoPage() {
 
 function ProductPassportPage() {
   const [section, setSection] = useState<ProductPassportSection>("READINESS");
-  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const rows = rowsOf<ProductPassport>(passports.data);
+  const passports = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const rows = rowsOf<AnyRecord>(passports.data);
 
   return (
     <div className="page">
@@ -1904,8 +1902,8 @@ function ProductPassportPage() {
 }
 
 function ProductEconomicsPage() {
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const rows = rowsOf<ProductEconomics>(economics.data);
+  const economics = useApi<ApiRows<AnyRecord>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const rows = rowsOf<AnyRecord>(economics.data);
 
   return (
     <div className="page">
