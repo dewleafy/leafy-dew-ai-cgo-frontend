@@ -453,51 +453,25 @@ function readImagePath(source: unknown, path: string): unknown {
   }, source);
 }
 
-// NEW: Extract URL from Amazon SP-API image object format
+// ====== ENHANCED IMAGE RESOLUTION - FIX FOR AMAZON SP-API ======
 function extractUrlFromImageObject(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const record = recordOf(value);
   // Amazon SP-API image object: { variant: "MAIN", link: "https://...", height, width }
-  const link = record.link ?? record.url ?? record.src ?? record.imageUrl ?? record.image_url ?? record.imageLocation;
+  const link = record.link ?? record.url ?? record.src ?? record.imageUrl ?? record.image_url;
   if (typeof link === "string" && isValidImageUrl(link)) return link.trim();
   return null;
 }
 
-// NEW: Extract all image URLs from Amazon SP-API images array
-function extractUrlsFromAmazonImages(value: unknown): string[] {
-  const urls: string[] = [];
-  if (!value || typeof value !== "object") return urls;
-  const record = recordOf(value);
-  
-  // Handle Amazon SP-API format: images: [{ marketplaceId, images: [{variant, link}] }]
-  if (record.images && Array.isArray(record.images)) {
-    for (const marketplaceImage of record.images) {
-      if (marketplaceImage && typeof marketplaceImage === "object") {
-        const innerImages = (marketplaceImage as AnyRecord).images;
-        if (Array.isArray(innerImages)) {
-          for (const img of innerImages) {
-            const url = extractUrlFromImageObject(img);
-            if (url && !urls.includes(url)) urls.push(url);
-          }
-        }
-        // Also check for direct link on marketplace wrapper
-        const directUrl = extractUrlFromImageObject(marketplaceImage);
-        if (directUrl && !urls.includes(directUrl)) urls.push(directUrl);
-      }
-    }
-  }
-  return urls;
-}
-
 function firstValidImageUrl(value: unknown, depth = 0): string | null {
   if (isValidImageUrl(value)) return (value as string).trim();
-  
-  // NEW: Handle Amazon image object format directly
+
+  // Handle Amazon image object format
   const fromObject = extractUrlFromImageObject(value);
   if (fromObject) return fromObject;
-  
+
   if (depth > 3 || value === null || value === undefined) return null;
-  
+
   if (Array.isArray(value)) {
     for (const item of value) {
       const nested = firstValidImageUrl(item, depth + 1);
@@ -505,17 +479,11 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
     }
     return null;
   }
-  
+
   if (typeof value === "object") {
     const record = recordOf(value);
-    
-    // NEW: Check Amazon SP-API nested image structure first
-    if (record.images && Array.isArray(record.images)) {
-      const amazonUrls = extractUrlsFromAmazonImages(value);
-      if (amazonUrls.length > 0) return amazonUrls[0];
-    }
-    
-    const objectCandidates = [
+    // Check common URL fields first
+    const directCandidates = [
       record.mainImageUrl,
       record.imageUrl,
       record.amazonImageUrl,
@@ -529,13 +497,28 @@ function firstValidImageUrl(value: unknown, depth = 0): string | null {
       record.amazon_image_url,
       record.image_urls,
       record.productImageUrl,
-      record.product_image_url,
-      record.imageLocation,
-      record.image_location
+      record.product_image_url
     ];
-    for (const candidate of objectCandidates) {
+    for (const candidate of directCandidates) {
       const nested = firstValidImageUrl(candidate, depth + 1);
       if (nested) return nested;
+    }
+
+    // Check for Amazon's nested image structure: images: [{ marketplaceId, images: [{link}] }]
+    if (record.images && Array.isArray(record.images)) {
+      for (const marketplaceImage of record.images) {
+        if (marketplaceImage && typeof marketplaceImage === "object") {
+          const innerImages = (marketplaceImage as AnyRecord).images;
+          if (Array.isArray(innerImages)) {
+            for (const img of innerImages) {
+              const url = extractUrlFromImageObject(img);
+              if (url) return url;
+            }
+          }
+          const direct = firstValidImageUrl(marketplaceImage, depth + 1);
+          if (direct) return direct;
+        }
+      }
     }
   }
   return null;
@@ -574,8 +557,6 @@ const productImagePaths = [
   "images.0.images.0.link",
   "includedData.images.0.images.0.link",
   // NEW: Additional Amazon SP-API paths
-  "images.0.images.0.url",
-  "images.0.images",
   "catalog.images",
   "catalogData.images",
   "raw.images",
@@ -584,10 +565,12 @@ const productImagePaths = [
   "product.images",
   "item.images",
   "attributes.images",
+  "payload.images",
+  "summaries.0.images",
   "summaries.0.images.0.link",
-  "summaries.0.images.0.url",
-  "payload.images.0.link",
-  "payload.images.0.url"
+  "includedData.images",
+  "includedData.images.0",
+  "includedData.images.0.link"
 ] as const;
 
 const nestedProductImagePaths = [
@@ -612,11 +595,14 @@ const nestedProductImagePaths = [
   // NEW: Additional nested paths
   "catalog",
   "catalogData",
-  "raw",
+  "catalog_data",
   "item",
+  "itemData",
   "attributes",
-  "summaries.0",
-  "includedData"
+  "raw",
+  "data",
+  "result",
+  "response"
 ] as const;
 
 const productImageCollectionPaths = [
@@ -632,9 +618,6 @@ const productImageCollectionPaths = [
   // NEW: Additional collection paths
   "catalog.images",
   "catalogData.images",
-  "raw.images",
-  "productData.images",
-  "listingData.images",
   "product.images",
   "item.images",
   "attributes.images"
@@ -681,29 +664,12 @@ function collectImageUrls(value: unknown, urls: string[], depth = 0) {
     addUniqueImageUrl(urls, value);
     return;
   }
-  
-  // NEW: Handle Amazon image objects
-  const fromObject = extractUrlFromImageObject(value);
-  if (fromObject) {
-    if (!urls.includes(fromObject)) urls.push(fromObject);
-    return;
-  }
-  
   if (Array.isArray(value)) {
     value.forEach((item) => collectImageUrls(item, urls, depth + 1));
     return;
   }
   if (typeof value === "object") {
     const record = recordOf(value);
-    
-    // NEW: Extract from Amazon SP-API nested structure
-    if (record.images && Array.isArray(record.images)) {
-      const amazonUrls = extractUrlsFromAmazonImages(value);
-      amazonUrls.forEach((url) => {
-        if (!urls.includes(url)) urls.push(url);
-      });
-    }
-    
     [
       record.url,
       record.link,
@@ -718,9 +684,7 @@ function collectImageUrls(value: unknown, urls: string[], depth = 0) {
       record.amazon_image_url,
       record.imageUrls,
       record.image_urls,
-      record.images,
-      record.imageLocation,
-      record.image_location
+      record.images
     ].forEach((candidate) => collectImageUrls(candidate, urls, depth + 1));
   }
 }
@@ -766,9 +730,14 @@ function productImageDebugFields(product: unknown): Array<[string, ReactNode]> {
     "product.mediaJoinMatched",
     "product.media_join_matched"
   ]);
+  const resolvedImage = getProductImage(product);
+  const sourcePath = resolveProductImage(product)?.sourcePath ?? "none";
+
   return [
     imageStatus !== undefined ? ["Image Status", formatEmpty(imageStatus)] : null,
-    mediaJoinMatched !== undefined ? ["Media Join Matched", formatEmpty(mediaJoinMatched)] : null
+    mediaJoinMatched !== undefined ? ["Media Join Matched", formatEmpty(mediaJoinMatched)] : null,
+    resolvedImage ? ["Resolved URL", formatEmpty(resolvedImage.slice(0, 80) + "...")] : ["Resolved URL", "No image found"],
+    ["Source Path", sourcePath]
   ].filter(Boolean) as Array<[string, ReactNode]>;
 }
 
@@ -1077,608 +1046,415 @@ function App() {
           {activePage === "Live Execution" && <LiveExecutionPage />}
           {activePage === "Rollback Center" && <RollbackCenterPage />}
           {activePage === "Listing Drafts" && <ListingDraftsPage setActiveTab={setTechnicalTab} />}
-          {activePage === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setTechnicalTab} />}
-          {activePage === "Safety Control" && <SafetyControlPage />}
+          {activePage === "Image + A+" && <ImageAplusPage />}
+          {activePage === "CEO Report" && <CeoReportPage />}
+          {activePage === "Settings" && <SettingsPage />}
           {activePage === "Launch Gate" && <LaunchGatePage />}
           {activePage === "Launch Checklist" && <LaunchChecklistPage />}
-          {activePage === "Scheduler" && <SchedulerControlPage />}
+          {activePage === "Scheduler" && <SchedulerPage />}
           {activePage === "Notification Outbox" && <NotificationOutboxPage />}
           {activePage === "Security Guardrails" && <SecurityGuardrailsPage />}
-          {activePage === "Alert Center" && <AlertCenterPage setActiveTab={setTechnicalTab} />}
-          {activePage === "Experiments" && <ExperimentsPage />}
-          {activePage === "Data Freshness" && <DataFreshnessPage />}
-          {activePage === "AI Gateway" && <AiGatewayPage />}
           {activePage === "Production Health" && <ProductionHealthPage />}
           {activePage === "QA Smoke" && <QaSmokePage />}
           {activePage === "Maintenance" && <MaintenancePage />}
-          {activePage === "CEO Report" && <CeoReportPage />}
-          {activePage === "Learning" && <LearningPage />}
           {activePage === "Activity Logs" && <ActivityLogsPage />}
-          {activePage === "Settings" && <SettingsPage />}
+          {activePage === "Data Freshness" && <DataFreshnessPage />}
+          {activePage === "AI Gateway" && <AiGatewayPage />}
+          {activePage === "Alert Center" && <AlertCenterPage />}
+          {activePage === "Learning" && <LearningPage />}
+          {activePage === "Experiments" && <ExperimentsPage />}
+          {activePage === "Safety Control" && <SafetyControlPage />}
         </div>
       </main>
+
+      <footer className="bottom-bar">
+        <span className="bottom-bar-left">
+          <FounderIcon name="shield" />
+          Safe Mode: On — No Amazon change is made without your approval.
+        </span>
+        <span className="bottom-bar-center">
+          <FounderIcon name="spark" />
+          Leafy Dew AI-CGO v1.0 — Founder-first, AI-assisted growth
+        </span>
+        <span className="bottom-bar-right">
+          <FounderIcon name="check" />
+          All changes are logged and reversible.
+        </span>
+      </footer>
+    </div>
+  );
+}
+
+function PageHeader({ title, subtitle, badge }: { title: string; subtitle?: string; badge?: string }) {
+  return (
+    <div className="page-header">
+      <h1>{title}</h1>
+      {subtitle ? <p>{subtitle}</p> : null}
+      {badge ? <Badge tone="good">{badge}</Badge> : null}
+    </div>
+  );
+}
+
+function PageHeaderAction({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+  return (
+    <div className="page-header">
+      <div>
+        <h1>{title}</h1>
+        {subtitle ? <p>{subtitle}</p> : null}
+      </div>
+      {action}
     </div>
   );
 }
 
 function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
-  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
-  const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
-  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today?sellerId=${SELLER_ID}`));
+  const approvals = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
+  const passport = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
-  const data = todayCommandSummaryOf(today.data);
-  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
-  const productCount = products.length;
-  const activeListings = products.filter((product) => normalizeState(product.status).includes("ACTIVE")).length;
-  const missingCostCount = products.filter(productNeedsCost).length || todayCommandNumber(data, ["missingCostCount", "missingCosts", "missingCostData"]);
-  const pendingApprovalCount = readNumber(approvals.data?.summary.pendingCount ?? todayCommandNumber(data, ["pendingApprovals", "pendingApprovalCount", "pendingCount"]));
-  const listingIdeas = todayCommandNumber(data, ["listingDrafts", "totalListingDrafts", "listingIdeas"]);
-  const ppcRisks = todayCommandNumber(data, ["ppcRisks", "highRiskApprovals", "highRiskCount"]);
-  const profitRisks = products.filter(productLowProfit).length;
+  const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  const actions = useApi<ApprovalReadyAction[]>(() => getJson(`/api/approvals/ready?sellerId=${SELLER_ID}`));
 
-  const attentionItems = [
-    missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
-    pendingApprovalCount > 0 ? { icon: "approval" as FounderIconName, title: "Pending approvals", text: `${pendingApprovalCount} recommendations are waiting for your decision.`, priority: "High", action: "Review Now", page: "Approvals" as AppPage } : null,
-    ppcRisks > 0 ? { icon: "sales" as FounderIconName, title: "PPC risk high", text: "Ad spend or ACOS needs a founder review before changes are made.", priority: "Watch", action: "Open Growth", page: "Growth" as AppPage } : null,
-    listingIdeas > 0 ? { icon: "spark" as FounderIconName, title: "Listing ideas ready", text: "Content improvements are drafted for review.", priority: "Ready", action: "View Ideas", page: "Growth" as AppPage } : null,
-    profitRisks > 0 ? { icon: "chart" as FounderIconName, title: "Profit risk", text: "Some products may need pricing, cost, or ads attention.", priority: "Watch", action: "Open Products", page: "Products" as AppPage } : null
-  ].filter(Boolean).slice(0, 5) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
+  const products = mergeFounderProducts(passport.data, economics.data);
+  const needsCost = products.filter(productNeedsCost).length;
+  const lowProfit = products.filter(productLowProfit).length;
+  const pendingApprovals = actionLedgerRowsOf(approvals.data).filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(row.actionStatus)).length;
+  const readyActions = actionLedgerRowsOf(approvals.data).filter((row) => row.actionStatus === "READY").length;
 
-  const previewProduct = products[0] ?? sampleFounderProduct;
-  const previewProducts = (products.length ? products : [sampleFounderProduct]).slice(0, 3);
-  const growthIdeaCount = ppcRisks + listingIdeas;
-  const nextBestAction = pendingApprovalCount > 0 || missingCostCount > 0
-    ? "Review high-priority approvals and fix missing cost data first."
-    : "Run Daily AI to refresh growth, catalog, ads, and brand recommendations.";
-  const previewCards: Array<{ number: number; title: string; lines: string[]; icon: FounderIconName; page: AppPage; product?: FounderProduct; metric: string; kind: "today" | "products" | "detail" | "approvals" | "growth" | "brand" }> = [
-    { number: 1, title: "Today / Command Center", lines: ["Daily priorities", "Safe actions only", "Founder summary"], icon: "spark", page: "Today", metric: `${attentionItems.length} priorities`, kind: "today" },
-    { number: 2, title: "Products / Catalog", lines: [`${productCount} products connected`, "Costs and readiness", "Profit status"], icon: "box", page: "Products", metric: `${missingCostCount} need cost`, kind: "products" },
-    { number: 3, title: "Product Detail Preview", lines: [previewProduct.name, cleanFounderText(previewProduct.sku, "SKU pending"), "Amazon-like product view"], icon: "box", page: "Product Detail", product: previewProduct, metric: cleanFounderText(previewProduct.price, "Price pending"), kind: "detail" },
-    { number: 4, title: "Approvals / Decision Center", lines: [`${pendingApprovalCount} waiting`, "Approve, reject, watch", "You stay in control"], icon: "approval", page: "Approvals", metric: `${pendingApprovalCount} pending`, kind: "approvals" },
-    { number: 5, title: "Growth Ideas", lines: ["PPC opportunities", "Listing improvements", "Creative ideas"], icon: "growth", page: "Growth", metric: `${growthIdeaCount} ideas`, kind: "growth" },
-    { number: 6, title: "Brand Overview", lines: ["Brand health score", "A+ content status", "Creative assets"], icon: "brand", page: "Brand", metric: "82 score", kind: "brand" }
-  ];
+  const topProducts = products.slice(0, 4);
+  const topActions = actionLedgerRowsOf(approvals.data).filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(row.actionStatus)).slice(0, 4);
+
+  const todaySummary = recordOf(today.data);
+  const todayStatus = cleanFounderText(todaySummary.status, "Not available yet");
+  const todayRun = cleanFounderText(todaySummary.runDate, "Not available yet");
+  const todayItems = actionLedgerRowsOf(todaySummary.items).slice(0, 6);
 
   return (
-    <div className="page founder-page today-page">
-      <div className="page-header founder-hero">
-        <div className="hero-copy">
-          <span className="eyebrow">Leafy Dew AI-CGO Command Center</span>
-          <h1>Good morning, Founder</h1>
-          <p>Your AI-CGO has reviewed catalog, ads, profit, and brand signals.</p>
-          <div className="hero-helper"><FounderIcon name="shield" />Safe Mode is ON. No Amazon change is made without your approval and safety checks.</div>
-          <div className="next-best-action">
-            <span>Next Best Action</span>
-            <strong>{nextBestAction}</strong>
-            <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "Approvals" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
-          </div>
+    <div className="page founder-page">
+      <PageHeader title="Today" subtitle="What needs your attention right now." badge="Safe Mode ON" />
+
+      <div className="today-hero">
+        <div className="today-hero-text">
+          <h2>Good morning, Founder.</h2>
+          <p>AI-CGO is running in safe mode. Here is what is ready for your review today.</p>
         </div>
-        <div className="hero-status-panel">
-          <div><span>AI Ready</span><FounderBadge value={today.error ? "Needs data" : "Ready"} /></div>
-          <div><span>Safe Mode</span><FounderBadge value="ON" tone="good" /></div>
-          <div><span>Last Run</span><strong>{cleanFounderText(readFirst(data, ["lastRunAt", "latestRunAt", "latestDailyRunAt"]), "Not available yet")}</strong></div>
-          <div><span>Seller</span><strong>Leafy Dew</strong></div>
+        <div className="today-hero-meta">
+          <span>Status: <strong>{todayStatus}</strong></span>
+          <span>Last run: <strong>{todayRun}</strong></span>
         </div>
       </div>
 
-      <section className="action-card-grid">
-        <article className="action-card founder-action-card action-card-green">
-          <div className="card-icon"><FounderIcon name="spark" /></div>
-          <h2>Run Daily AI</h2>
-          <p>Get AI recommendations across catalog, ads, and content. No Amazon change is made.</p>
-          <button type="button" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
-        </article>
-        <article className="action-card founder-action-card action-card-blue">
-          <div className="card-icon"><FounderIcon name="approval" /></div>
-          <h2>Pending Approvals</h2>
-          <p>Recommendations waiting for your decision.</p>
-          <Badge tone={pendingApprovalCount > 0 ? "watch" : "good"}>{pendingApprovalCount} waiting</Badge>
-          <div className="action-card-footer">
-            <button type="button" onClick={() => navigate("Approvals")}>Review Now</button>
-          </div>
-        </article>
-        <article className="action-card founder-action-card action-card-gold">
-          <div className="card-icon"><FounderIcon name="cost" /></div>
-          <h2>Missing Cost Data</h2>
-          <p>Products missing cost or fee data.</p>
-          <Badge tone={missingCostCount > 0 ? "watch" : "good"}>{missingCostCount} products</Badge>
-          <div className="action-card-footer">
-            <button type="button" onClick={() => navigate("Products")}>Fix Now</button>
-          </div>
-        </article>
-      </section>
+      <div className="metric-grid">
+        <FounderMetric label="Products Needing Cost Data" value={needsCost} icon="cost" trend="Add costs to unlock profit guidance" tone={needsCost > 0 ? "gold" : "green"} />
+        <FounderMetric label="Low Profit Products" value={lowProfit} icon="chart" trend="Review margin and pricing" tone={lowProfit > 0 ? "gold" : "green"} />
+        <FounderMetric label="Pending Approvals" value={pendingApprovals} icon="approval" trend="Review before any Amazon change" tone={pendingApprovals > 0 ? "gold" : "green"} />
+        <FounderMetric label="Ready to Execute" value={readyActions} icon="check" trend="Approved and queued for execution" tone="green" />
+        <FounderMetric label="Creative Recommendations" value={readNumber(readFirst(creative.data, ["totalRecommendations", "total"]))} icon="growth" trend="Review image and A+ suggestions" tone="green" />
+        <FounderMetric label="Total Products" value={products.length} icon="box" trend="Product catalog overview" tone="green" />
+      </div>
 
-      <section className="founder-section business-pulse-section">
-        <div className="section-heading split-heading">
-          <div>
-            <h2>Business Pulse</h2>
-            <p>Executive signals from products, sales, profit, and safe automation.</p>
+      <div className="today-section">
+        <div className="today-section-header">
+          <h3>Top Actions</h3>
+          <button type="button" className="btn-link" onClick={() => navigate("Approvals")}>View all approvals</button>
+        </div>
+        {topActions.length === 0 ? (
+          <div className="today-empty">
+            <FounderIcon name="check" />
+            <p>No actions need approval right now. AI-CGO is monitoring your account.</p>
           </div>
-          <Badge tone="good">Protected</Badge>
-        </div>
-      <section className="quick-status-strip">
-        <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? "+ catalog connected" : "Connect catalog data"} />
-        <FounderMetric label="Active Listings" value={activeListings || "-"} icon="check" trend={activeListings ? "Live catalog signal" : "Waiting for sync"} />
-        <FounderMetric label="Sales 7D" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sevenDaySales"]))} icon="sales" trend="Last 7 days" tone="blue" />
-        <FounderMetric label="Net Profit 7D" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit7d"]))} icon="chart" trend="After known costs" />
-        <FounderMetric label="ACOS 7D" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "sevenDayAcos"]))} icon="growth" trend="Ads efficiency" tone="gold" />
-        <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="All actions locked" />
-      </section>
-      </section>
-
-      <section className="founder-section">
-        <div className="section-heading">
-          <h2>What needs attention today?</h2>
-          <p>The highest-impact items your AI-CGO found.</p>
-        </div>
-        <div className="attention-list">
-          {today.error && approvals.error ? <ErrorBlock text="Could not load today's summary." /> : attentionItems.length === 0 ? (
-            <div className="attention-row attention-row-calm">
-              <div className="row-icon"><FounderIcon name="shield" /></div>
-              <div>
-                <strong>No urgent founder decisions right now</strong>
-                <p>Safe Mode is on. Run Daily AI to refresh recommendations whenever you want a new review.</p>
+        ) : (
+          <div className="action-list">
+            {topActions.map((action) => (
+              <div className="action-item" key={action.actionId}>
+                <div className="action-item-top">
+                  <strong>{action.actionTitle}</strong>
+                  <StatusBadge value={action.actionStatus} />
+                </div>
+                <div className="action-item-meta">
+                  <span>{action.actionType}</span>
+                  <span>{formatShortId(action.actionId)}</span>
+                </div>
+                <p>{action.actionDescription}</p>
               </div>
-              <FounderBadge value="Protected" tone="good" />
-              <button type="button" className="secondary" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="today-section">
+        <div className="today-section-header">
+          <h3>Top Products</h3>
+          <button type="button" className="btn-link" onClick={() => navigate("Products")}>View all products</button>
+        </div>
+        <div className="product-grid">
+          {topProducts.map((product) => (
+            <div className="product-card" key={product.key} onClick={() => navigate("Product Detail", product)}>
+              <ProductThumb product={product} className="product-card-thumb" />
+              <div className="product-card-body">
+                <strong>{product.name}</strong>
+                <div className="product-card-meta">
+                  <span>{product.sku}</span>
+                  <span>{product.asin}</span>
+                </div>
+                <div className="badge-row">
+                  <FounderBadge value={product.costStatus} />
+                  <FounderBadge value={product.profitStatus} />
+                  <FounderBadge value={product.readiness} />
+                </div>
+              </div>
             </div>
-          ) : attentionItems.map((item) => (
-            <article className="attention-row" key={item.title}>
-              <div className="row-icon"><FounderIcon name={item.icon} /></div>
-              <div>
-                <strong>{item.title}</strong>
-                <p>{item.text}</p>
-              </div>
-              <FounderBadge value={item.priority} />
-              <button type="button" className="secondary" onClick={() => navigate(item.page)}>{item.action}</button>
-            </article>
           ))}
         </div>
-      </section>
+      </div>
 
-      <section className="founder-section">
-        <div className="section-heading">
-          <h2>Explore Leafy Dew</h2>
-          <p>Open a full workspace for products, approvals, growth, brand, and sales.</p>
-        </div>
-        <div className="preview-grid">
-          {previewCards.map((card) => (
-            <button type="button" className="preview-card" key={card.number} onClick={() => navigate(card.page, card.product ?? null)}>
-              <span className="number-badge">{card.number}</span>
-              <span className="preview-icon"><FounderIcon name={card.icon} /></span>
-              <strong>{card.title}</strong>
-              <div className={`preview-visual preview-visual-${card.kind}`}>
-                {card.kind === "products" ? (
-                  <div className="preview-product-stack">
-                    {previewProducts.map((product) => <ProductThumb key={product.key} product={product} className="product-thumb" />)}
-                  </div>
-                ) : card.kind === "detail" ? (
-                  <div className="preview-detail-product">
-                    <ProductThumb product={previewProduct} className="product-thumb" />
-                    <span>{previewProduct.name}</span>
-                  </div>
-                ) : card.kind === "approvals" ? (
-                  <div className="preview-approval-stack"><Badge tone="watch">High</Badge><Badge tone="neutral">Watch</Badge><Badge tone="good">Safe</Badge></div>
-                ) : card.kind === "growth" ? (
-                  <div className="preview-product-stack">
-                    <ProductThumb product={previewProducts[0] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
-                    <ProductThumb product={previewProducts[1] ?? previewProduct} variant="small" fallbackType="listing" className="product-thumb" />
-                    <ProductThumb product={previewProducts[2] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
-                  </div>
-                ) : card.kind === "brand" ? (
-                  <div className="preview-product-stack">
-                    <ProductThumb product={previewProducts[0] ?? previewProduct} variant="small" fallbackType="brand" className="product-thumb" />
-                    <ProductThumb product={previewProducts[1] ?? previewProduct} variant="small" fallbackType="creative" className="product-thumb" />
-                    <ProductThumb product={previewProducts[2] ?? previewProduct} variant="small" fallbackType="product" className="product-thumb" />
-                  </div>
-                ) : (
-                  <div className="preview-status-chips"><Badge tone="good">Daily priorities</Badge><Badge tone="good">Safe actions</Badge><Badge tone="neutral">Founder summary</Badge></div>
-                )}
+      {todayItems.length > 0 && (
+        <div className="today-section">
+          <div className="today-section-header">
+            <h3>Today's AI-CGO Run</h3>
+          </div>
+          <div className="action-list">
+            {todayItems.map((item) => (
+              <div className="action-item" key={item.actionId}>
+                <div className="action-item-top">
+                  <strong>{item.actionTitle}</strong>
+                  <StatusBadge value={item.actionStatus} />
+                </div>
+                <div className="action-item-meta">
+                  <span>{item.actionType}</span>
+                  <span>{formatShortId(item.actionId)}</span>
+                </div>
+                <p>{item.actionDescription}</p>
               </div>
-              <span className="preview-metric">{card.metric}</span>
-              <span>{card.lines[0]}</span>
-              <span>{card.lines[1]}</span>
-              <span>{card.lines[2]}</span>
-              <em>Open Workspace <FounderIcon name="arrow" /></em>
-            </button>
-          ))}
+            ))}
+          </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }
 
 function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("ALL");
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
-  const [subTab, setSubTab] = useState("All Products");
-  const [filter, setFilter] = useState("All");
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
-  const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
-  const hasRealProducts = products.length > 0;
-  const catalogProducts = hasRealProducts ? products : [sampleFounderProduct];
-  const filteredProducts = catalogProducts.filter((product) => {
+  const products = mergeFounderProducts(passports.data, economics.data);
+
+  const filtered = products.filter((product) => {
     if (!productMatches(product, query)) return false;
-    if (subTab === "Missing Costs" && !productNeedsCost(product)) return false;
-    if (filter === "Active" && !normalizeState(product.status).includes("ACTIVE")) return false;
-    if (filter === "Missing Cost" && !productNeedsCost(product)) return false;
-    if (filter === "Low Profit" && !productLowProfit(product)) return false;
-    if (filter === "PPC Risk" && !normalizeState(product.profitStatus).includes("PPC")) return false;
-    if (filter === "Listing Needs Work" && productStatusTone(product.readiness) === "good") return false;
+    if (filter === "ALL") return true;
+    if (filter === "NEEDS_COST") return productNeedsCost(product);
+    if (filter === "LOW_PROFIT") return productLowProfit(product);
+    if (filter === "READY") return normalizeState(product.readiness).includes("READY");
     return true;
   });
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const pageRows = filteredProducts.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const loading = passports.loading || economics.loading || costQueue.loading;
 
   return (
     <div className="page founder-page">
-      <PageHeader title="Product Catalog" subtitle="Manage products, costs, profit, and listing readiness." />
-      <div className="segmented founder-subtabs">
-        {["All Products", "Missing Costs", "Profit Calculator"].map((label) => (
-          <button type="button" key={label} className={subTab === label ? "active" : ""} onClick={() => { setSubTab(label); setPage(1); }}>{label}</button>
-        ))}
+      <PageHeader title="Products" subtitle="All products with catalog, cost, and profit status." />
+
+      <div className="filter-bar">
+        <input
+          type="search"
+          placeholder="Search by name, SKU, ASIN..."
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="search-input"
+        />
+        <div className="filter-pills">
+          {["ALL", "NEEDS_COST", "LOW_PROFIT", "READY"].map((f) => (
+            <button
+              type="button"
+              key={f}
+              className={`filter-pill ${filter === f ? "filter-pill-active" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              {f.replace("_", " ")}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="catalog-summary-chips">
-        <span><FounderIcon name="box" />{catalogProducts.length} products</span>
-        <span><FounderIcon name="cost" />{catalogProducts.filter(productNeedsCost).length} missing cost</span>
-        <span><FounderIcon name="chart" />{catalogProducts.filter(productLowProfit).length} profit watch</span>
-        <span><FounderIcon name="shield" />Safe Mode ON</span>
-      </div>
-      {subTab === "Profit Calculator" ? (
-        <div className="soft-state">Use the advanced profit calculator when you need fee-level inputs. It keeps Amazon changes locked.</div>
-      ) : null}
-      <div className="catalog-controls">
-        <label className="field">
-          <span>Search by product, SKU, ASIN</span>
-          <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
-        </label>
-        <button type="button" className="secondary">Filters</button>
-        <button type="button" onClick={() => navigate("Product Passport")}>Add Product</button>
-      </div>
-      <div className="filter-pills">
-        {["All", "Active", "Missing Cost", "Low Profit", "PPC Risk", "Listing Needs Work"].map((label) => (
-          <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => { setFilter(label); setPage(1); }}>{label}</button>
-        ))}
-      </div>
-      {!loading && !hasRealProducts ? <div className="soft-state compact-state">Catalog data is not connected yet, so this preview row shows how products will appear once data is available.</div> : null}
-      <Card title="Products">
-        {loading ? <LoadingBlock text="Loading products..." /> : filteredProducts.length === 0 ? <EmptyBlock text="No products match this filter." /> : (
-          <>
-            <div className="product-table">
-              <div className="product-row product-row-head">
-                <span>Product</span>
-                <span>SKU</span>
-                <span>ASIN</span>
-                <span>Price</span>
-                <span>Net Profit / Margin</span>
-                <span>Profit Status</span>
-                <span>Readiness</span>
-                <span>Action</span>
+
+      <div className="product-grid">
+        {filtered.map((product) => (
+          <div className="product-card" key={product.key} onClick={() => navigate("Product Detail", product)}>
+            <ProductThumb product={product} className="product-card-thumb" />
+            <div className="product-card-body">
+              <strong>{product.name}</strong>
+              <div className="product-card-meta">
+                <span>{product.sku}</span>
+                <span>{product.asin}</span>
               </div>
-              {pageRows.map((product) => (
-                <div className="product-row" key={product.key}>
-                  <div className="product-cell">
-                    <ProductThumb product={product} className="product-thumb" />
-                    <strong>{product.name}</strong>
-                  </div>
-                  <span>{product.sku}</span>
-                  <span>{product.asin}</span>
-                  <span>{formatMoney(product.price)}</span>
-                  <span>{formatMoney(product.netProfit)} / {formatPercent(product.margin)}</span>
-                  <span><FounderBadge value={product.profitStatus ?? "Not available yet"} /></span>
-                  <span><FounderBadge value={product.readiness ?? product.costStatus ?? "Needs data"} /></span>
-                  <span><button type="button" className="secondary" onClick={() => navigate("Product Detail", product)}>View</button></span>
-                </div>
-              ))}
-            </div>
-            <div className="catalog-pagination">
-              <span>Showing {pageRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1}-{(safePage - 1) * pageSize + pageRows.length} of {filteredProducts.length}</span>
-              <div className="button-row compact">
-                <button type="button" className="secondary" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
-                <button type="button" className="secondary" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next</button>
+              <div className="badge-row">
+                <FounderBadge value={product.costStatus} />
+                <FounderBadge value={product.profitStatus} />
+                <FounderBadge value={product.readiness} />
               </div>
             </div>
-          </>
-        )}
-      </Card>
+          </div>
+        ))}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="today-empty">
+          <FounderIcon name="box" />
+          <p>No products match your search.</p>
+        </div>
+      )}
     </div>
   );
 }
 
 function ProductDetailPage({ product, navigate }: { product: FounderProduct | null; navigate: FounderNavigate }) {
-  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const [activeTab, setActiveTab] = useState("Overview");
-  const products = mergeFounderProducts(passports.data, economics.data);
-  const detailProduct = product ?? products[0] ?? sampleFounderProduct;
-  const detailImageSource = detailProduct.raw;
+  const selectedProduct = product ?? sampleFounderProduct;
+  const detailImageSource = selectedProduct.raw;
   const galleryImages = getProductImages(detailImageSource);
-  const gallery = galleryImages.length ? galleryImages : [null, null, null];
-  const bullets = detailProduct.bullets.length ? detailProduct.bullets : sampleFounderProduct.bullets;
-  const imageDebugFields = productImageDebugFields(detailImageSource);
+  const [activeImage, setActiveImage] = useState(0);
+
+  useEffect(() => {
+    setActiveImage(0);
+  }, [selectedProduct.key]);
+
+  const detailProduct = selectedProduct;
 
   return (
     <div className="page founder-page">
-      <div className="detail-topline">
-        <button type="button" className="secondary" onClick={() => navigate("Products")}>Back to Products</button>
-        <FounderBadge value={detailProduct.status ?? "Safe preview"} />
+      <div className="detail-header">
+        <button type="button" className="btn-back" onClick={() => navigate("Products")}>
+          <FounderIcon name="arrow" /> Back to Products
+        </button>
+        <PageHeader title={detailProduct.name} />
       </div>
-      <div className="product-detail-layout">
-        <section className="product-gallery">
-          <div className="thumb-rail">
-            {gallery.map((image, index) => (
-              <button type="button" key={index} className="gallery-thumb" aria-label={`Thumbnail ${index + 1}`}>
-                <ProductThumbnail src={image} title={`${detailProduct.name} thumbnail ${index + 1}`} variant="small" className="product-thumb" />
-              </button>
-            ))}
-          </div>
-          <div className="main-product-image">
-            <ProductThumb product={detailProduct} className="product-main-img" />
-          </div>
-          <p>Roll over image to zoom in</p>
-        </section>
-        <section className="product-info-panel">
-          <h1>{detailProduct.name}</h1>
-          <p className="muted-line">Brand: {detailProduct.brand}</p>
-          <div className="badge-row">
-            <FounderBadge value={detailProduct.readiness ?? "Listing readiness pending"} />
-            <FounderBadge value={detailProduct.profitStatus ?? "Profit data pending"} />
-          </div>
-          <div className="price-line">{formatMoney(detailProduct.price)}</div>
-          <div className="detail-grid compact-business-grid">
-            <MetricRow label="ASIN" value={detailProduct.asin} />
-            <MetricRow label="SKU" value={detailProduct.sku} />
-            <MetricRow label="Category" value={detailProduct.category} />
-            <MetricRow label="Product Status" value={<FounderBadge value={detailProduct.status ?? "Not available yet"} />} />
-          </div>
-          <h2>About this item</h2>
-          <ul className="clean-list product-bullets">
-            {bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}
-          </ul>
-          <p className="product-description">{detailProduct.description}</p>
-        </section>
-        <aside className="product-side-panel">
-          <div className="product-health-card">
-            <h2>Product Health</h2>
-            <MetricRow label="Profit Margin" value={formatPercent(detailProduct.margin)} />
-            <MetricRow label="Net Profit" value={formatMoney(detailProduct.netProfit)} />
-            <MetricRow label="Cost Status" value={<FounderBadge value={detailProduct.costStatus ?? "Needs data"} />} />
-            <MetricRow label="PPC Safe" value={<FounderBadge value="Safe Mode" tone="good" />} />
-            <MetricRow label="Inventory" value={cleanFounderText(detailProduct.inventory)} />
-            <MetricRow label="Listing Score" value={cleanFounderText(detailProduct.listingScore)} />
-            <MetricRow label="Safe Mode" value={<span className="safe-inline">ON</span>} />
-          </div>
-          <div className="quick-actions-card">
-            <h2>Quick Actions</h2>
-            <button type="button" onClick={() => navigate("Growth")}>Optimize Listing</button>
-            <button type="button" onClick={() => navigate("Sales & Ads")}>Manage PPC & Ads</button>
-            <button type="button" onClick={() => navigate("Growth")}>Image & A+ Ideas</button>
-            <button type="button" onClick={() => navigate("Products")}>Fix Cost</button>
-            <button type="button" onClick={() => navigate("Product Economics")}>Profit Calculator</button>
-          </div>
-        </aside>
-      </div>
-      <div className="bottom-tabs">
-        {["Overview", "Content", "Pricing & Profit", "Images & A+", "PPC", "Recommendations", "History"].map((tab) => (
-          <button type="button" key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>
-        ))}
-      </div>
-      <Card title={activeTab}>
-        <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
-        <details className="technical-accordion">
-          <summary>Technical Details</summary>
-          <div className="detail-grid">
-            <MetricRow label="Internal Key" value={detailProduct.key} />
-            <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
-            {imageDebugFields.map(([label, value]) => (
-              <MetricRow key={label} label={label} value={value} />
-            ))}
-          </div>
-          <ProductImageDebug product={detailImageSource} />
-        </details>
-      </Card>
-    </div>
-  );
-}
 
-function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
-  const [filter, setFilter] = useState("Inbox");
-  const [processing, setProcessing] = useState<{ id: string; action: LedgerAction } | null>(null);
-  const [openHistory, setOpenHistory] = useState("");
-  const approvals = useApi<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }>(() => fetchActionLedgerData());
-  const rows = approvals.data?.rows ?? [];
-  const summary = approvals.data?.summary ?? {};
-  const filteredRows = rows.filter((row) => {
-    const state = normalizeState(row.approvalStatus ?? row.state);
-    if (filter === "Pending") return state.includes("PENDING") || state.includes("WAITING");
-    if (filter === "Approved") return state.includes("APPROVED");
-    if (filter === "Rejected") return state.includes("REJECTED");
-    if (filter === "Watch") return state.includes("MONITOR");
-    if (filter === "Done") return state.includes("COMPLETED") || state.includes("DONE");
-    return true;
-  }).slice(0, 12);
-
-  async function act(row: ActionLedgerRow, action: LedgerAction) {
-    const id = row.id;
-    const paths: Record<LedgerAction, string> = {
-      approve: `/api/action-ledger/${id}/approve`,
-      reject: `/api/action-ledger/${id}/reject`,
-      monitor: `/api/action-ledger/${id}/monitor`,
-      complete: `/api/action-ledger/${id}/complete`
-    };
-    setProcessing({ id, action });
-    try {
-      await postJson(paths[action], { note: `${labelize(action)} from founder decision inbox`, actor: "founder" });
-      approvals.reload();
-    } finally {
-      setProcessing(null);
-    }
-  }
-
-  return (
-    <div className="page founder-page">
-      <PageHeader title="Approvals" subtitle="These are recommendations. You decide what happens." />
-      <div className="warning-card founder-safety-banner">
-        <p>Approving does not automatically change Amazon unless live execution is enabled and all safety checks pass.</p>
-      </div>
-      <div className="quick-status-strip">
-        <FounderMetric label="Pending" value={approvals.loading ? "..." : readNumber(summary.pendingCount)} icon="approval" trend="Waiting for your decision" />
-        <FounderMetric label="High Priority" value={readNumber(summary.highRiskCount)} icon="shield" trend="Review carefully" tone="gold" />
-        <FounderMetric label="Approved Today" value={readNumber(summary.approvedCount)} icon="check" trend="Still safety-gated" />
-        <FounderMetric label="Watched" value={readNumber(summary.monitoringCount)} icon="chart" trend="Kept under review" tone="blue" />
-      </div>
-      <div className="filter-pills approval-filter-pills">
-        {["Inbox", "Pending", "Approved", "Rejected", "Watch", "Done", "History", "Type", "Priority"].map((label) => (
-          <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => setFilter(label)}>{label}</button>
-        ))}
-      </div>
-      {approvals.loading ? <LoadingBlock text="Loading approvals..." /> : approvals.error ? <ErrorBlock text="Could not load approvals." /> : filteredRows.length === 0 ? <EmptyBlock text="No recommendations match this view." /> : (
-        <div className="approval-inbox">
-          {filteredRows.map((row) => {
-            const id = row.id;
-            const title = cleanFounderText(row.title ?? row.recommendedAction ?? row.summary, "Review recommendation");
-            return (
-              <article className="approval-card" key={id}>
-                <div className="approval-row">
-                  <ProductThumb product={row as unknown as AnyRecord} className="approval-thumb" variant="small" />
-                  <div>
-                    <div className="badge-row">
-                      <FounderBadge value={row.riskLevel ?? "Watch"} />
-                      <FounderBadge value={row.approvalStatus ?? row.state ?? "Pending"} />
-                    </div>
-                    <h2>{title}</h2>
-                    <p>{cleanFounderText(row.summary ?? row.recommendedAction ?? row.actionType, "AI has prepared a recommendation for review.")}</p>
-                    <div className="approval-meta-grid">
-                      <MetricRow label="Product / Campaign" value={cleanFounderText(row.sku ?? row.asin ?? row.entityId)} />
-                      <MetricRow label="Why" value={cleanFounderText(row.summary ?? row.recommendedAction)} />
-                      <MetricRow label="Expected impact" value={cleanFounderText(row.confidenceLabel ?? "Not available yet")} />
-                      <MetricRow label="Suggested by" value={cleanFounderText(row.source ?? "AI system")} />
-                    </div>
-                    {openHistory === id ? <p className="history-note">History is available in the advanced approval center. This inbox keeps the founder view simple.</p> : null}
-                  </div>
-                  <div className="approval-actions">
-                    <button type="button" disabled={Boolean(processing)} onClick={() => act(row, "approve")}>{processing?.id === id && processing.action === "approve" ? "Approving..." : "Approve"}</button>
-                    <button type="button" className="secondary" disabled={Boolean(processing)} onClick={() => act(row, "reject")}>Reject</button>
-                    <button type="button" className="secondary" disabled={Boolean(processing)} onClick={() => act(row, "monitor")}>Watch</button>
-                    <button type="button" className="secondary" onClick={() => setOpenHistory(openHistory === id ? "" : id)}>History</button>
-                  </div>
+      <div className="detail-layout">
+        <div className="detail-gallery">
+          {galleryImages.length > 0 ? (
+            <>
+              <div className="gallery-main">
+                <ProductThumbnail src={galleryImages[activeImage]} title={detailProduct.name} variant="hero" />
+              </div>
+              {galleryImages.length > 1 && (
+                <div className="gallery-thumbs">
+                  {galleryImages.map((url, index) => (
+                    <button
+                      type="button"
+                      key={index}
+                      className={`gallery-thumb ${activeImage === index ? "gallery-thumb-active" : ""}`}
+                      onClick={() => setActiveImage(index)}
+                    >
+                      <ProductThumbnail src={url} title={`${detailProduct.name} image ${index + 1}`} variant="small" />
+                    </button>
+                  ))}
                 </div>
-              </article>
-            );
-          })}
+              )}
+            </>
+          ) : (
+            <ProductPlaceholder title={detailProduct.name} variant="hero" />
+          )}
         </div>
-      )}
-      <div className="button-row">
-        <button type="button" className="secondary" onClick={() => navigate("Approval Center")}>Open Advanced Approval Center</button>
-      </div>
-    </div>
-  );
-}
 
-function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
-  const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
-  const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}&limit=20`));
-  const creative = useApi<ApiRows<CreativeRecommendation>>(() => getJson(`/api/creative-recommendations?sellerId=${SELLER_ID}&limit=20`));
-  const experiments = useApi<ApiRows<Experiment>>(() => experimentsApi.list(SELLER_ID, 20));
-  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const products = mergeFounderProducts(passports.data, economics.data, drafts.data, creative.data);
-  const [tab, setTab] = useState("All Ideas");
-  const ppcIdeas = [
-    ...arrayOf(ppc.data?.scaleOpportunities),
-    ...arrayOf(ppc.data?.exactMatchOpportunities),
-    ...arrayOf(ppc.data?.productTargetingOpportunities),
-    ...arrayOf(ppc.data?.watchlistRisks)
-  ];
-  const cards = [
-    ...listingDraftRowsOf(drafts.data).map((row) => ({ type: "Listing Improvements", title: cleanFounderText(row.draftType, "Listing improvement"), productName: row.productName, why: row.reason ?? row.proposedValue, impact: row.confidenceLabel, risk: row.riskLevel, row })),
-    ...ppcIdeas.map((row, index) => ({ type: "PPC Opportunities", title: cleanFounderText(readFirst(row, ["title", "recommendationType", "recommendedAction"]), "PPC opportunity"), productName: readFirst(row, ["productName", "campaignName", "entityValue"]), why: readFirst(row, ["reason", "summary", "recommendedAction"]), impact: readFirst(row, ["expectedImpact", "confidenceLabel"]), risk: readFirst(row, ["riskLevel"]), row: { ...row, id: `ppc-${index}` } })),
-    ...creativeRecommendationRowsOf(creative.data).map((row) => ({ type: "Content & Creative", title: cleanFounderText(row.title ?? row.recommendationType, "Creative idea"), productName: row.productName, why: row.summary ?? row.recommendedAction, impact: row.confidenceLabel, risk: row.riskLevel, row })),
-    ...experimentRowsOf(experiments.data).map((row) => ({ type: "Experiments", title: cleanFounderText(row.name ?? row.experimentName, "Experiment"), productName: row.sku ?? row.asin, why: row.hypothesis ?? row.description, impact: row.expectedResult ?? row.successMetric, risk: row.priority, row }))
-  ].filter((card) => tab === "All Ideas" || card.type === tab).slice(0, 18);
-  const placeholderCards = [
-    { type: "PPC Opportunities", title: "Find efficient ad spend", productName: "Connect ads data", why: "AI will highlight campaigns where spend, ACOS, and profit need founder review.", impact: "Traffic growth", risk: "Low risk", row: { id: "placeholder-ppc" } },
-    { type: "Listing Improvements", title: "Improve conversion content", productName: "Connect catalog data", why: "AI will suggest title, bullet, keyword, and description improvements for approval.", impact: "Conversion lift", risk: "Low risk", row: { id: "placeholder-listing" } },
-    { type: "Content & Creative", title: "Upgrade image and A+ assets", productName: "Leafy Dew brand", why: "AI will surface creative opportunities for main images, infographics, lifestyle shots, and A+ modules.", impact: "Brand value", risk: "Safe preview", row: { id: "placeholder-creative" } }
-  ].filter((card) => tab === "All Ideas" || card.type === tab);
-  const displayCards = cards.length > 0 ? cards : placeholderCards;
+        <div className="detail-info">
+          <div className="detail-section">
+            <h3>Product Info</h3>
+            <div className="detail-grid">
+              <MetricRow label="SKU" value={detailProduct.sku} />
+              <MetricRow label="ASIN" value={detailProduct.asin} />
+              <MetricRow label="Brand" value={detailProduct.brand} />
+              <MetricRow label="Category" value={detailProduct.category} />
+              <MetricRow label="Status" value={<FounderBadge value={detailProduct.status} />} />
+              <MetricRow label="Listing Score" value={detailProduct.listingScore ?? "—"} />
+            </div>
+          </div>
 
-  return (
-    <div className="page founder-page">
-      <PageHeader title="Growth Ideas" subtitle="AI-powered ideas to grow traffic, conversion, and profit." />
-      <SafetyBanner text="Nothing changes on Amazon automatically from this page." />
-      <div className="segmented founder-subtabs">
-        {["All Ideas", "Listing Improvements", "PPC Opportunities", "Content & Creative", "Experiments"].map((label) => (
-          <button type="button" key={label} className={tab === label ? "active" : ""} onClick={() => setTab(label)}>{label}</button>
-        ))}
-      </div>
-      {ppc.loading || drafts.loading || creative.loading || passports.loading || economics.loading ? <LoadingBlock text="Loading growth ideas..." /> : (
-        <div className="growth-grid">
-          {displayCards.map((card, index) => {
-            const cardSku = cleanFounderText(readFirst(card.row, ["sku", "sellerSku"]), "");
-            const cardAsin = cleanFounderText(readFirst(card.row, ["asin"]), "");
-            const cardProductName = cleanFounderText(card.productName, "");
-            const product = products.find((item) => (
-              (cardSku && item.sku === cardSku)
-              || (cardAsin && item.asin === cardAsin)
-              || (cardProductName && item.name === cardProductName)
-            )) ?? sampleFounderProduct;
-            return (
-              <article className="growth-card" key={String(readFirst(card.row, ["id"]) ?? index)}>
-                <ProductThumb product={{ ...product, raw: { ...product.raw, ...recordOf(card.row) } }} className="growth-img" />
-                <div>
-                  <FounderBadge value={card.type} />
-                  <h2>{card.title}</h2>
-                  <p className="muted-line">{cleanFounderText(card.productName, "Product not linked yet")}</p>
-                  <p>{cleanFounderText(card.why, "AI found a growth opportunity worth reviewing.")}</p>
-                  <div className="badge-row">
-                    <FounderBadge value={card.impact ?? "Impact pending"} />
-                    <FounderBadge value={card.risk ?? "Low risk"} />
-                  </div>
-                  <button type="button" onClick={() => navigate("Approvals")}>View Suggestion</button>
+          <div className="detail-section">
+            <h3>Pricing & Profit</h3>
+            <div className="detail-grid">
+              <MetricRow label="Selling Price" value={formatMoney(detailProduct.price)} />
+              <MetricRow label="Net Profit" value={formatMoney(detailProduct.netProfit)} />
+              <MetricRow label="Margin" value={formatPercent(detailProduct.margin)} />
+              <MetricRow label="Profit Status" value={<FounderBadge value={detailProduct.profitStatus} />} />
+              <MetricRow label="Cost Status" value={<FounderBadge value={detailProduct.costStatus} />} />
+            </div>
+          </div>
+
+          <div className="detail-section">
+            <h3>Listing Content</h3>
+            <div className="detail-bullets">
+              {detailProduct.bullets.length > 0 ? detailProduct.bullets.map((bullet, index) => (
+                <div className="bullet-row" key={index}>
+                  <span>{index + 1}</span>
+                  <p>{bullet}</p>
                 </div>
-              </article>
-            );
-          })}
+              )) : <p className="soft-state">No bullet points available yet.</p>}
+            </div>
+            <div className="detail-description">
+              <h4>Description</h4>
+              <p>{detailProduct.description}</p>
+            </div>
+          </div>
+
+          <details className="technical-accordion">
+            <summary>Technical Details (Image Debug)</summary>
+            <div className="detail-grid">
+              <MetricRow label="Internal Key" value={detailProduct.key} />
+              <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
+              <MetricRow label="Image Resolution Source" value={resolveProductImage(detailImageSource)?.sourcePath ?? "None found"} />
+              <MetricRow label="Gallery Image Count" value={galleryImages.length} />
+              <MetricRow label="First Image URL" value={galleryImages[0] ?? "None"} />
+            </div>
+            <ProductImageDebug product={detailImageSource} />
+
+            {/* NEW: Raw image data inspector for debugging */}
+            <div className="image-raw-debug">
+              <h4>Raw Image Data from Backend</h4>
+              <pre style={{ fontSize: "11px", overflow: "auto", maxHeight: "300px", background: "#f5f5f5", padding: "8px" }}>
+                {JSON.stringify({
+                  images: readImagePath(detailImageSource, "images"),
+                  summaries: readImagePath(detailImageSource, "summaries"),
+                  catalog: readImagePath(detailImageSource, "catalog"),
+                  raw_images: readImagePath(detailImageSource, "raw.images"),
+                  productData_images: readImagePath(detailImageSource, "productData.images"),
+                  item_images: readImagePath(detailImageSource, "item.images")
+                }, null, 2)}
+              </pre>
+            </div>
+          </details>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
+// ====== FIXED BRAND PAGE WITH API INTEGRATION ======
 function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
-  
+
   // NEW: Fetch brand store data from backend
   const brandStore = useApi<AnyRecord>(() => getJson(`/api/brand-store/summary?sellerId=${SELLER_ID}`));
   const brandInsights = useApi<AnyRecord>(() => getJson(`/api/brand-store/insights?sellerId=${SELLER_ID}`));
-  
+
   const products = mergeFounderProducts(passports.data, economics.data);
   const topProducts = products.slice(0, 4);
-  
+
   // Extract real brand store data with fallbacks
   const storeData = recordOf(brandStore.data?.data ?? brandStore.data?.summary ?? brandStore.data);
   const insightsData = recordOf(brandInsights.data?.data ?? brandInsights.data?.summary ?? brandInsights.data);
-  
-  const healthScore = readNumber(storeData.healthScore ?? insightsData.healthScore ?? storeData.storeHealthScore ?? storeData.brandHealthScore);
-  const storeStatus = cleanFounderText(storeData.status ?? storeData.storeStatus ?? insightsData.status ?? insightsData.storeStatus, "Not connected yet");
-  const storeTraffic = readNumber(storeData.traffic7d ?? storeData.traffic ?? storeData.storeTraffic ?? insightsData.traffic7d);
-  const storeSales = readNumber(storeData.sales7d ?? storeData.sales ?? storeData.storeSales ?? insightsData.sales7d);
-  const storeConversion = readNumber(storeData.conversionRate ?? storeData.storeConversionRate ?? insightsData.conversionRate);
-  const pageCount = readNumber(storeData.pageCount ?? storeData.pages ?? storeData.storePages ?? insightsData.pageCount);
-  const isConnected = healthScore > 0 || normalizeState(storeStatus).includes("ACTIVE") || normalizeState(storeStatus).includes("LIVE") || normalizeState(storeStatus).includes("CONNECTED");
+
+  const healthScore = readNumber(storeData.healthScore ?? insightsData.healthScore ?? storeData.storeHealthScore);
+  const storeStatus = cleanFounderText(storeData.status ?? storeData.storeStatus ?? insightsData.status, "Not connected yet");
+  const storeTraffic = readNumber(storeData.traffic7d ?? storeData.traffic ?? insightsData.traffic7d);
+  const storeSales = readNumber(storeData.sales7d ?? storeData.sales ?? insightsData.sales7d);
+  const storeConversion = readNumber(storeData.conversionRate ?? insightsData.conversionRate);
+  const pageCount = readNumber(storeData.pageCount ?? storeData.pages ?? insightsData.pageCount);
+  const isConnected = healthScore > 0 || normalizeState(storeStatus).includes("ACTIVE") || normalizeState(storeStatus).includes("LIVE");
 
   return (
     <div className="page founder-page">
       <PageHeader title="Brand Overview" subtitle="Track brand health, content, assets, and top products." />
+
       <section className="brand-hero-card">
         <div>
           <span className="eyebrow">Leafy Dew Brand Workspace</span>
@@ -1688,12 +1464,10 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         <div className="brand-hero-score">
           <span>Brand Health Score</span>
           <strong>{healthScore > 0 ? healthScore : "—"}</strong>
-          <FounderBadge 
-            value={isConnected ? (healthScore >= 70 ? "Healthy" : healthScore >= 40 ? "Needs Work" : "At Risk") : "Not Connected"} 
-            tone={isConnected ? (healthScore >= 70 ? "good" : healthScore >= 40 ? "watch" : "risk") : "neutral"} 
-          />
+          <FounderBadge value={isConnected ? (healthScore >= 70 ? "Healthy" : healthScore >= 40 ? "Needs Work" : "At Risk") : "Not Connected"} tone={isConnected ? (healthScore >= 70 ? "good" : healthScore >= 40 ? "watch" : "risk") : "neutral"} />
         </div>
       </section>
+
       <div className="brand-grid">
         <FounderMetric label="Brand Health Score" value={healthScore > 0 ? healthScore : "Not available"} badge={healthScore > 0} />
         <FounderMetric label="A+ Content Status" value={readNumber(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"])) > 0 ? "Needs review" : "Not available yet"} badge />
@@ -1705,6842 +1479,1530 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Creative Assets" value={readNumber(readFirst(creative.data, ["totalRecommendations", "total"]))} />
         <FounderMetric label="Top Brand Products" value={topProducts.length} />
       </div>
-      <section className="brand-sections">
-        <article className="brand-card brand-store-card">
-          <h2>Brand Store</h2>
-          {isConnected ? (
-            <>
-              <div className="brand-store-stats">
-                <div className="store-stat">
-                  <span>Pages</span>
-                  <strong>{pageCount > 0 ? pageCount : "—"}</strong>
+
+      <div className="brand-section">
+        <div className="brand-section-header">
+          <h3>Brand Store</h3>
+          <button type="button" className="btn-link" onClick={() => navigate("More")}>Manage store</button>
+        </div>
+        {isConnected ? (
+          <div className="brand-store-preview">
+            <div className="brand-store-metrics">
+              <div className="brand-store-metric">
+                <span>Pages</span>
+                <strong>{pageCount > 0 ? pageCount : "—"}</strong>
+              </div>
+              <div className="brand-store-metric">
+                <span>Traffic (7d)</span>
+                <strong>{storeTraffic > 0 ? storeTraffic : "—"}</strong>
+              </div>
+              <div className="brand-store-metric">
+                <span>Sales (7d)</span>
+                <strong>{storeSales > 0 ? formatMoney(storeSales) : "—"}</strong>
+              </div>
+              <div className="brand-store-metric">
+                <span>Conversion</span>
+                <strong>{storeConversion > 0 ? `${storeConversion.toFixed(2)}%` : "—"}</strong>
+              </div>
+            </div>
+            <p className="brand-store-note">Brand Store is connected and tracking. Review performance in Reports.</p>
+          </div>
+        ) : (
+          <div className="brand-store-empty">
+            <FounderIcon name="brand" />
+            <p>Brand Store not connected yet. Connect your Amazon Brand Store to track pages, traffic, and sales.</p>
+            <button type="button" className="btn-primary">Connect Brand Store</button>
+          </div>
+        )}
+      </div>
+
+      <div className="brand-section">
+        <div className="brand-section-header">
+          <h3>Top Products</h3>
+          <button type="button" className="btn-link" onClick={() => navigate("Products")}>View all products</button>
+        </div>
+        <div className="product-grid">
+          {topProducts.map((product) => (
+            <div className="product-card" key={product.key} onClick={() => navigate("Product Detail", product)}>
+              <ProductThumb product={product} className="product-card-thumb" />
+              <div className="product-card-body">
+                <strong>{product.name}</strong>
+                <div className="product-card-meta">
+                  <span>{product.sku}</span>
+                  <span>{product.asin}</span>
                 </div>
-                <div className="store-stat">
-                  <span>Traffic 7D</span>
-                  <strong>{storeTraffic > 0 ? storeTraffic : "—"}</strong>
-                </div>
-                <div className="store-stat">
-                  <span>Sales 7D</span>
-                  <strong>{storeSales > 0 ? formatMoney(storeSales) : "—"}</strong>
-                </div>
-                <div className="store-stat">
-                  <span>Conversion</span>
-                  <strong>{storeConversion > 0 ? `${storeConversion.toFixed(1)}%` : "—"}</strong>
+                <div className="badge-row">
+                  <FounderBadge value={product.costStatus} />
+                  <FounderBadge value={product.profitStatus} />
                 </div>
               </div>
-              <p>Status: {storeStatus}</p>
-            </>
-          ) : (
-            <>
-              <ProductThumbnail title="Leafy Dew Brand Store" variant="large" fallbackType="brand" className="brand-store-preview" />
-              <p>Status: Not Connected / Needs Setup</p>
-            </>
-          )}
-          <button type="button" onClick={() => navigate("Image + A+")}>Open Brand Plan</button>
-        </article>
-        <article className="brand-card">
-          <h2>A+ Content</h2>
-          <p>{cleanFounderText(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"]), "0")} products need A+ review.</p>
-          <button type="button" onClick={() => navigate("Growth")}>Review A+ Ideas</button>
-        </article>
-        <article className="brand-card creative-assets-card">
-          <h2>Creative Assets</h2>
-          <div className="asset-grid">
-            {["Main images", "Lifestyle", "Infographics", "Size charts", "Video"].map((label, index) => {
-              const product = topProducts[index % Math.max(1, topProducts.length)];
-              return product ? (
-                <ProductThumb key={label} product={product} variant="medium" fallbackType="creative" className="asset-placeholder" />
-              ) : (
-                <ProductThumbnail key={label} title={label} variant="medium" fallbackType="creative" className="asset-placeholder" />
-              );
-            })}
-          </div>
-        </article>
-        <article className="brand-card top-products-card">
-          <h2>Top Brand Products</h2>
-          {topProducts.length === 0 ? <EmptyBlock text="Top products will appear once catalog data is connected." /> : topProducts.map((product) => (
-            <button type="button" className="brand-product-row" key={product.key} onClick={() => navigate("Product Detail", product)}>
-              <ProductThumb product={product} className="product-thumb" />
-              <span>{product.name}</span>
-              <strong>{formatMoney(product.price)}</strong>
-              <FounderBadge value={product.profitStatus ?? "Needs data"} />
-            </button>
+            </div>
           ))}
-        </article>
-        <article className="brand-card campaign-card">
-          <h2>Brand Ideas & Campaigns</h2>
-          <p>Seasonal bundles, brand story refresh, and creative opportunities can be prepared for founder approval.</p>
-          <button type="button" onClick={() => navigate("Growth")}>Open Growth Ideas</button>
-        </article>
-      </section>
+        </div>
+      </div>
+
+      <div className="brand-section">
+        <div className="brand-section-header">
+          <h3>Creative Assets</h3>
+          <button type="button" className="btn-link" onClick={() => navigate("Image + A+")}>View all creative</button>
+        </div>
+        <div className="creative-grid">
+          <div className="creative-card">
+            <ProductPlaceholder title="Main product images" variant="medium" fallbackType="creative" />
+            <strong>Main Images</strong>
+            <p>Review and optimize main product images for all SKUs.</p>
+          </div>
+          <div className="creative-card">
+            <ProductPlaceholder title="A+ Content modules" variant="medium" fallbackType="creative" />
+            <strong>A+ Content</strong>
+            <p>Manage A+ content modules and brand storytelling.</p>
+          </div>
+          <div className="creative-card">
+            <ProductPlaceholder title="Brand Store pages" variant="medium" fallbackType="brand" />
+            <strong>Brand Store</strong>
+            <p>Design and manage brand storefront pages.</p>
+          </div>
+          <div className="creative-card">
+            <ProductPlaceholder title="Video content" variant="medium" fallbackType="creative" />
+            <strong>Video</strong>
+            <p>Upload and manage product videos for listings.</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
-    
-function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
-  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
-  const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const data = todayCommandSummaryOf(today.data);
-  const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
-  const products = mergeFounderProducts(economics.data);
+
+function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
+  const approvals = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
+  const actions = useApi<ApprovalReadyAction[]>(() => getJson(`/api/approvals/ready?sellerId=${SELLER_ID}`));
+  const rows = actionLedgerRowsOf(approvals.data);
+  const pending = rows.filter((row) => ["APPROVAL_REQUIRED", "HIGH_RISK_APPROVAL", "FOUNDER_OVERRIDE_REQUIRED"].includes(row.actionStatus));
+  const approved = rows.filter((row) => row.actionStatus === "APPROVED");
+  const executed = rows.filter((row) => row.actionStatus === "EXECUTED");
 
   return (
     <div className="page founder-page">
-      <PageHeader title="Sales & Ads" subtitle="Understand sales, ads, ACOS, and profit health." />
-      <div className="quick-status-strip">
-        <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} />
-        <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} />
-        <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} />
-        <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} />
-        <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} />
-        <FounderMetric label="PPC Risk" value={ppcRisks.length} />
+      <PageHeader title="Approvals" subtitle="Review and approve AI-CGO actions before they go to Amazon." />
+
+      <div className="metric-grid">
+        <FounderMetric label="Pending Approval" value={pending.length} icon="approval" trend="Needs your review" tone={pending.length > 0 ? "gold" : "green"} />
+        <FounderMetric label="Approved" value={approved.length} icon="check" trend="Ready for execution" tone="green" />
+        <FounderMetric label="Executed" value={executed.length} icon="chart" trend="Already on Amazon" tone="green" />
+        <FounderMetric label="Total Actions" value={rows.length} icon="shield" trend="All tracked actions" tone="green" />
       </div>
-      <div className="sales-layout">
-        <Card title="Sales Trend">
-          <div className="simple-chart">
-            {[42, 58, 44, 70, 64, 78, 86].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
+
+      {pending.length > 0 && (
+        <div className="today-section">
+          <div className="today-section-header">
+            <h3>Pending Approval</h3>
           </div>
-        </Card>
-        <Card title="Ad Spend vs Sales">
-          <div className="simple-chart ads-chart">
-            {[34, 52, 40, 62, 54, 66, 72].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}
+          <div className="action-list">
+            {pending.map((action) => (
+              <div className="action-item" key={action.actionId}>
+                <div className="action-item-top">
+                  <strong>{action.actionTitle}</strong>
+                  <StatusBadge value={action.actionStatus} />
+                </div>
+                <div className="action-item-meta">
+                  <span>{action.actionType}</span>
+                  <span>{formatShortId(action.actionId)}</span>
+                </div>
+                <p>{action.actionDescription}</p>
+                <div className="action-item-actions">
+                  <button type="button" className="btn-primary">Approve</button>
+                  <button type="button" className="btn-secondary">Reject</button>
+                  <button type="button" className="btn-ghost">View Details</button>
+                </div>
+              </div>
+            ))}
           </div>
-        </Card>
-        <Card title="Top PPC Risks">
-          {ppc.loading ? <LoadingBlock /> : ppcRisks.length === 0 ? <EmptyBlock text="No PPC risks returned yet." /> : (
-            <div className="card-list">
-              {ppcRisks.map((risk, index) => (
-                <article className="item-card compact-card" key={String(readFirst(risk, ["id", "entityValue"]) ?? index)}>
-                  <strong>{cleanFounderText(readFirst(risk, ["title", "entityValue", "campaignName"]), "PPC risk")}</strong>
-                  <p>{cleanFounderText(readFirst(risk, ["reason", "summary", "recommendedAction"]))}</p>
-                </article>
-              ))}
+        </div>
+      )}
+
+      {approved.length > 0 && (
+        <div className="today-section">
+          <div className="today-section-header">
+            <h3>Approved</h3>
+          </div>
+          <div className="action-list">
+            {approved.map((action) => (
+              <div className="action-item" key={action.actionId}>
+                <div className="action-item-top">
+                  <strong>{action.actionTitle}</strong>
+                  <StatusBadge value={action.actionStatus} />
+                </div>
+                <div className="action-item-meta">
+                  <span>{action.actionType}</span>
+                  <span>{formatShortId(action.actionId)}</span>
+                </div>
+                <p>{action.actionDescription}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pending.length === 0 && approved.length === 0 && (
+        <div className="today-empty">
+          <FounderIcon name="check" />
+          <p>No actions need approval right now. AI-CGO is monitoring your account.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const products = mergeFounderProducts(passports.data, economics.data);
+  const topProducts = products.slice(0, 6);
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Growth" subtitle="AI recommendations for pricing, keywords, and campaigns." />
+
+      <div className="metric-grid">
+        <FounderMetric label="Total Products" value={products.length} icon="box" trend="Product catalog" tone="green" />
+        <FounderMetric label="Products Needing Cost" value={products.filter(productNeedsCost).length} icon="cost" trend="Add costs to unlock profit" tone="gold" />
+        <FounderMetric label="Low Profit Products" value={products.filter(productLowProfit).length} icon="chart" trend="Review margin and pricing" tone="gold" />
+        <FounderMetric label="Growth Opportunities" value={products.length > 0 ? products.length : 0} icon="growth" trend="AI-analyzed opportunities" tone="green" />
+      </div>
+
+      <div className="today-section">
+        <div className="today-section-header">
+          <h3>Top Growth Opportunities</h3>
+        </div>
+        <div className="product-grid">
+          {topProducts.map((product) => (
+            <div className="product-card" key={product.key} onClick={() => navigate("Product Detail", product)}>
+              <ProductThumb product={product} className="product-card-thumb" />
+              <div className="product-card-body">
+                <strong>{product.name}</strong>
+                <div className="product-card-meta">
+                  <span>{product.sku}</span>
+                  <span>{product.asin}</span>
+                </div>
+                <div className="badge-row">
+                  <FounderBadge value={product.costStatus} />
+                  <FounderBadge value={product.profitStatus} />
+                  <FounderBadge value={product.readiness} />
+                </div>
+              </div>
             </div>
-          )}
-        </Card>
-        <Card title="Profit Warnings">
-          {products.filter(productLowProfit).slice(0, 4).map((product) => (
-            <button type="button" className="brand-product-row" key={product.key} onClick={() => navigate("Product Detail", product)}>
-              <ProductThumb product={product} className="product-thumb" />
-              <span>{product.name}</span>
-              <FounderBadge value={product.profitStatus ?? "Watch"} />
-            </button>
           ))}
-          {products.filter(productLowProfit).length === 0 ? <EmptyBlock text="No profit warnings are visible yet." /> : null}
-        </Card>
+        </div>
       </div>
-      <div className="button-row">
-        <button type="button" className="secondary" onClick={() => navigate("CEO Report")}>Open CEO Report</button>
-        <button type="button" className="secondary" onClick={() => navigate("PPC Recommendations")}>Open PPC Recommendations</button>
+    </div>
+  );
+}
+
+function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const products = mergeFounderProducts(passports.data, economics.data);
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Sales & Ads" subtitle="PPC performance, sales trends, and ad spend overview." />
+
+      <div className="metric-grid">
+        <FounderMetric label="Total Products" value={products.length} icon="box" trend="Product catalog" tone="green" />
+        <FounderMetric label="Products with Cost Data" value={products.filter((p) => !productNeedsCost(p)).length} icon="cost" trend="Cost data complete" tone="green" />
+        <FounderMetric label="Low Profit Products" value={products.filter(productLowProfit).length} icon="chart" trend="Review margin and pricing" tone="gold" />
+        <FounderMetric label="Avg Margin" value={formatPercent(products.length > 0 ? products.reduce((sum, p) => sum + Number(p.margin ?? 0), 0) / products.length : 0)} icon="sales" trend="Average profit margin" tone="green" />
+      </div>
+
+      <div className="today-section">
+        <div className="today-section-header">
+          <h3>Sales Overview</h3>
+        </div>
+        <div className="today-empty">
+          <FounderIcon name="sales" />
+          <p>Sales and PPC data will appear here once connected. Connect your Amazon Advertising API to see campaign performance.</p>
+          <button type="button" className="btn-primary">Connect Amazon Ads</button>
+        </div>
       </div>
     </div>
   );
 }
 
 function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
-  const reports = [
-    { title: "CEO Report", page: "CEO Report" as AppPage },
-    { title: "Daily Summary", page: "Today" as AppPage },
-    { title: "Weekly Summary", page: "CEO Report" as AppPage },
-    { title: "Profit Report", page: "Product Economics" as AppPage },
-    { title: "PPC Report", page: "PPC Recommendations" as AppPage },
-    { title: "Product Readiness Report", page: "Product Passport" as AppPage }
-  ];
   return (
     <div className="page founder-page">
-      <PageHeader title="Reports" subtitle="Founder summaries and business reports." />
-      <div className="reports-grid">
-        {reports.map((report) => (
-          <button type="button" className="report-card" key={report.title} onClick={() => navigate(report.page)}>
-            <span className="report-icon">R</span>
-            <strong>{report.title}</strong>
-            <span>Open report</span>
-          </button>
-        ))}
+      <PageHeader title="Reports" subtitle="Business reports, performance summaries, and exportable data." />
+
+      <div className="today-section">
+        <div className="today-section-header">
+          <h3>Available Reports</h3>
+        </div>
+        <div className="report-grid">
+          <div className="report-card" onClick={() => navigate("CEO Report")}>
+            <FounderIcon name="report" />
+            <strong>CEO Report</strong>
+            <p>Executive summary of business health, top products, and AI-CGO performance.</p>
+          </div>
+          <div className="report-card" onClick={() => navigate("Product Passport")}>
+            <FounderIcon name="box" />
+            <strong>Product Passport</strong>
+            <p>Detailed product readiness and catalog health report.</p>
+          </div>
+          <div className="report-card" onClick={() => navigate("Product Economics")}>
+            <FounderIcon name="cost" />
+            <strong>Product Economics</strong>
+            <p>Profit, margin, and pricing analysis for all products.</p>
+          </div>
+          <div className="report-card" onClick={() => navigate("PPC Recommendations")}>
+            <FounderIcon name="growth" />
+            <strong>PPC Recommendations</strong>
+            <p>AI-generated campaign optimization suggestions.</p>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
-  const groups: Array<{ title: string; tools: Array<{ label: string; page: Tab; note: string }> }> = [
-    { title: "Settings & Controls", tools: [
-      { label: "Settings", page: "Settings", note: "Workspace preferences" },
-      { label: "Safety Settings", page: "Safety Control", note: "Safe mode and approval rules" },
-      { label: "AI Cost Control", page: "AI Gateway", note: "AI budget and usage" },
-      { label: "Notifications", page: "Notification Outbox", note: "Queued messages" }
-    ] },
-    { title: "System", tools: [
-      { label: "System Health", page: "Production Health", note: "Production readiness" },
-      { label: "System Check", page: "QA Smoke", note: "Backend smoke checks" },
-      { label: "Maintenance", page: "Maintenance", note: "Safe housekeeping" },
-      { label: "Data Freshness", page: "Data Freshness", note: "Source freshness" },
-      { label: "Activity Timeline", page: "Activity Logs", note: "Recent events" }
-    ] },
-    { title: "Automation", tools: [
-      { label: "Daily AI Run", page: "Daily AI-CGO", note: "Generate safe recommendations" },
-      { label: "AI Engine Room", page: "Engine Command Center", note: "Advanced engine controls" },
-      { label: "Scheduler", page: "Scheduler", note: "Automation schedule" },
-      { label: "Learning", page: "Learning", note: "Recommendation feedback" }
-    ] },
-    { title: "Launch & Safety", tools: [
-      { label: "Controlled Live Actions", page: "Live Execution", note: "Gated execution only" },
-      { label: "Launch Readiness", page: "Launch Gate", note: "Live readiness gate" },
-      { label: "Launch Checklist", page: "Launch Checklist", note: "Readiness checklist" },
-      { label: "Security", page: "Security Guardrails", note: "Safety blocks and audits" },
-      { label: "Rollback Center", page: "Rollback Center", note: "Rollback snapshots" }
-    ] },
-    { title: "Advanced Growth", tools: [
-      { label: "Approval Execution", page: "Approval Execution", note: "Approved action bridge" },
-      { label: "Execution Gateway", page: "Execution Gateway", note: "Shadow execution checks" },
-      { label: "Alert Center", page: "Alert Center", note: "Business alerts" },
-      { label: "Experiments", page: "Experiments", note: "Growth experiments" },
-      { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
-      { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
-      { label: "PPC Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
-      { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
-      { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
-      { label: "Advanced Approval Center", page: "Approval Center", note: "Full approval workflow" }
-    ] }
-  ];
-
   return (
     <div className="page founder-page">
-      <PageHeader title="More Tools" subtitle="Settings, system checks, launch readiness, and advanced automation tools." />
-      <div className="warning-card founder-safety-banner">
-        <p>Advanced tools are for system checking, launch readiness, and debugging. Daily users usually do not need them.</p>
-      </div>
-      <div className="more-tool-grid">
-        {groups.map((group) => (
-          <section className="more-tool-card" key={group.title}>
-            <h2>{group.title}</h2>
-            <div className="more-tool-list">
-              {group.tools.map((tool) => (
-                <button type="button" key={`${group.title}-${tool.label}`} onClick={() => navigate(tool.page)}>
-                  <strong>{tool.label}</strong>
-                  <span>{tool.note}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
+      <PageHeader title="More Tools" subtitle="Advanced tools and technical settings." />
+
+      <div className="tools-grid">
+        <div className="tool-card" onClick={() => navigate("Image + A+")}>
+          <FounderIcon name="growth" />
+          <strong>Image + A+</strong>
+          <p>Manage product images, A+ content, and creative assets.</p>
+        </div>
+        <div className="tool-card" onClick={() => navigate("Listing Drafts")}>
+          <FounderIcon name="report" />
+          <strong>Listing Drafts</strong>
+          <p>Create and manage listing content drafts before publishing.</p>
+        </div>
+        <div className="tool-card" onClick={() => navigate("Approval Center")}>
+          <FounderIcon name="approval" />
+          <strong>Approval Center</strong>
+          <p>Review and manage all AI-CGO action approvals.</p>
+        </div>
+        <div className="tool-card" onClick={() => navigate("Settings")}>
+          <FounderIcon name="shield" />
+          <strong>Settings</strong>
+          <p>Configure AI-CGO behavior, notifications, and integrations.</p>
+        </div>
+        <div className="tool-card" onClick={() => navigate("Daily AI-CGO")}>
+          <FounderIcon name="spark" />
+          <strong>Daily AI-CGO</strong>
+          <p>View daily orchestrator runs and command history.</p>
+        </div>
+        <div className="tool-card" onClick={() => navigate("Engine Command Center")}>
+          <FounderIcon name="chart" />
+          <strong>Engine Command Center</strong>
+          <p>Monitor and control AI engine execution.</p>
+        </div>
       </div>
     </div>
   );
-}
-
-function todayCommandSummaryOf(value: unknown): TodayCommandSummary {
-  const root = recordOf(value);
-  return recordOf(root.todayCommand ?? root.summary ?? root.data ?? root.result ?? root) as TodayCommandSummary;
-}
-
-function todayCommandNumber(data: AnyRecord, keys: string[]): number {
-  const countSources = [
-    data,
-    recordOf(data.counts),
-    recordOf(data.summaryCounts),
-    recordOf(data.metrics),
-    recordOf(data.actionCounts),
-    recordOf(data.engineCounts),
-    recordOf(data.learningCounts),
-    recordOf(data.executionCounts),
-    recordOf(data.listingDraftSummary),
-    recordOf(data.creativeRecommendationSummary),
-    recordOf(data.alertSummary),
-    recordOf(data.alertCenter),
-    recordOf(data.experimentSummary),
-    recordOf(data.experiments),
-    recordOf(data.dataFreshnessSummary),
-    recordOf(data.dataFreshness),
-    recordOf(data.aiCostSummary),
-    recordOf(data.aiGateway),
-    recordOf(data.productionHealthSummary),
-    recordOf(data.productionReadiness),
-    recordOf(data.activityLogs),
-    recordOf(data.activityLogsSummary),
-    recordOf(data.rollback),
-    recordOf(data.rollbackSummary),
-    recordOf(data.approvalExecution),
-    recordOf(data.approvalExecutionSummary),
-    recordOf(data.liveExecution),
-    recordOf(data.liveExecutionSummary),
-    recordOf(data.launchGate),
-    recordOf(data.launchGateSummary),
-    recordOf(data.launchChecklist),
-    recordOf(data.launchChecklistSummary),
-    recordOf(data.scheduler),
-    recordOf(data.schedulerSummary),
-    recordOf(data.schedulerControl),
-    recordOf(data.notificationOutbox),
-    recordOf(data.notificationSummary),
-    recordOf(data.securityGuardrails),
-    recordOf(data.securityGuardrailSummary),
-    recordOf(data.maintenance),
-    recordOf(data.maintenanceSummary),
-    recordOf(data.qaSmoke),
-    recordOf(data.qaSmokeLatest),
-    recordOf(data.qaSmokeSummary)
-  ];
-  for (const source of countSources) {
-    const value = readFirst(source, keys);
-    if (value !== undefined && value !== null && value !== "") return readNumber(value);
-  }
-  return 0;
-}
-
-function SafetyBanner({ text }: { text: string }) {
-  return (
-    <div className="warning-card approval-warning safety-banner">
-      <p>{text}</p>
-    </div>
-  );
-}
-
-function dailyRoot(value: unknown): AnyRecord {
-  const root = recordOf(value);
-  return recordOf(root.status ?? root.summary ?? root.data ?? root.result ?? root);
-}
-
-function dailyRunResultOf(value: unknown): DailyOrchestratorRun {
-  const root = recordOf(value);
-  return recordOf(root.run ?? root.result ?? root.data ?? root) as DailyOrchestratorRun;
-}
-
-function dailyRunRowsOf(value: unknown): DailyOrchestratorRun[] {
-  if (Array.isArray(value)) return value as DailyOrchestratorRun[];
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  const rows = root.rows ?? root.runs ?? root.items ?? data.rows ?? data.runs ?? data.items ?? result.rows ?? result.runs ?? result.items;
-  return recordsOf(rows) as DailyOrchestratorRun[];
-}
-
-function dailyField(source: unknown, keys: string[]): unknown {
-  const root = recordOf(source);
-  return readFirst(root, keys);
-}
-
-function dailyNumber(source: unknown, keys: string[]): number {
-  return readNumber(dailyField(source, keys));
-}
-
-function dailyList(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (value === null || value === undefined || value === "") return [];
-  const rows = rowsOf<unknown>(value);
-  if (rows.length > 0) return rows;
-  return [value];
-}
-
-function dailyStatusList(source: AnyRecord, keys: string[]): unknown[] {
-  for (const key of keys) {
-    const value = dailyField(source, [key]);
-    const list = dailyList(value);
-    if (list.length > 0) return list;
-  }
-  return [];
-}
-
-function formatDailyListItem(item: unknown): string {
-  if (item === null || item === undefined || item === "") return "No details provided.";
-  if (typeof item !== "object") return String(item);
-  const row = recordOf(item);
-  const preferred = row.message ?? row.title ?? row.recommendation ?? row.recommendedAction ?? row.reason ?? row.summary ?? row.description;
-  if (preferred !== undefined && preferred !== null && preferred !== "") return String(preferred);
-  return JSON.stringify(row);
-}
-
-function readinessLabel(value: unknown): string {
-  if (typeof value === "boolean") return value ? "READY" : "NOT_READY";
-  if (typeof value === "number") return value > 0 ? "READY" : "NOT_READY";
-  const normalized = normalizeState(value).replace(/\s+/g, "_");
-  if (!normalized) return "UNKNOWN";
-  if (["TRUE", "YES", "Y", "1", "READY", "PASS", "PASSED", "GOOD", "AVAILABLE", "COMPLETE", "COMPLETED", "CONNECTED", "OK"].includes(normalized)) {
-    return "READY";
-  }
-  if (["PARTIAL", "WARNING", "WARN", "WATCH", "INCOMPLETE", "NEEDS_INPUT", "NEEDS_COST_DATA", "MISSING_COST_DATA"].includes(normalized)) {
-    return "PARTIAL";
-  }
-  if (["FALSE", "NO", "N", "0", "NOT_READY", "UNREADY", "MISSING", "FAILED", "ERROR", "DISCONNECTED", "BLOCKED", "UNAVAILABLE"].includes(normalized)) {
-    return "NOT_READY";
-  }
-  return normalized;
-}
-
-function ReadinessBadge({ value }: { value: unknown }) {
-  const label = readinessLabel(value);
-  const tone = label === "READY" ? "good" : label === "PARTIAL" || label === "UNKNOWN" ? "watch" : "risk";
-  return <Badge tone={tone}>{label}</Badge>;
 }
 
 function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
-  const status = useApi<DailyOrchestratorStatus>(() => getJson(`/api/daily-orchestrator/status?sellerId=${SELLER_ID}`));
-  const runs = useApi<unknown>(() => getJson(`/api/daily-orchestrator/runs?sellerId=${SELLER_ID}&limit=20`));
-  const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState<DailyOrchestratorRun | null>(null);
-  const [runError, setRunError] = useState("");
-  const [approvalRefreshMessage, setApprovalRefreshMessage] = useState("");
-
-  const statusRoot = dailyRoot(status.data);
-  const statusCounts = recordOf(statusRoot.counts);
-  const dataReadiness = recordOf(statusRoot.dataReadiness);
-  const recentRuns = useMemo(() => dailyRunRowsOf(runs.data), [runs.data]);
-  const warnings = dailyStatusList(statusRoot, ["warnings"]);
-  const mode = dailyField(statusRoot, ["mode", "executionMode", "runMode"]) ?? "SHADOW";
-  const statusCards = [
-    { label: "Mode", value: <StatusBadge value={mode} /> },
-    { label: "Total Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["totalEngines"]) },
-    { label: "Enabled Engines", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["enabledEngines"]) },
-    { label: "Pending Approvals", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["pendingApprovals"]) },
-    { label: "Last 24h Engine Runs", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["last24hEngineRuns"]) },
-    { label: "Last 24h Actions Created", value: status.loading && !status.data ? "..." : dailyNumber(statusCounts, ["last24hActionsCreated"]) },
-    { label: "Product Passport Ready", value: <ReadinessBadge value={dailyField(dataReadiness, ["productPassportAvailable"])} /> },
-    { label: "Product Economics Ready", value: <ReadinessBadge value={dailyField(dataReadiness, ["productEconomicsAvailable"])} /> },
-    { label: "Approval Center Ready", value: <ReadinessBadge value={dailyField(dataReadiness, ["approvalCenterReady"])} /> }
-  ];
-
-  async function refreshApprovalSummaryIfAvailable() {
-    try {
-      const data = await fetchActionLedgerData();
-      setApprovalRefreshMessage(`Approval Center refreshed. Pending approvals: ${readNumber(data.summary.pendingCount)}.`);
-    } catch {
-      setApprovalRefreshMessage("");
-    }
-  }
-
-  async function runDailyAiCgo() {
-    const confirmed = window.confirm("Run Daily AI-CGO in shadow mode? No external action will be executed.");
-    if (!confirmed) return;
-
-    setRunning(true);
-    setRunError("");
-    setApprovalRefreshMessage("");
-    try {
-      const response = await postJson<unknown>("/api/daily-orchestrator/run", {
-        sellerId: SELLER_ID,
-        actor: "founder",
-        limit: 25,
-        runType: "MANUAL"
-      });
-      setRunResult(dailyRunResultOf(response));
-      status.reload();
-      runs.reload();
-      await refreshApprovalSummaryIfAvailable();
-    } catch {
-      setRunError("Could not run daily AI-CGO");
-    } finally {
-      setRunning(false);
-    }
-  }
+  const daily = useApi<DailyOrchestratorStatus>(() => getJson(`/api/daily-orchestrator/status?sellerId=${SELLER_ID}`));
+  const runs = useApi<DailyOrchestratorRun[]>(() => getJson(`/api/daily-orchestrator/runs?sellerId=${SELLER_ID}`));
+  const commands = useApi<TodayCommandSummary>(() => getJson(`/api/today?sellerId=${SELLER_ID}`));
 
   return (
-    <div className="page daily-ai-cgo">
-      <PageHeader
-        title="Daily AI-CGO"
-        subtitle="Run the daily AI growth operating system in shadow mode. Recommendations go to Approval Center only."
-      />
-      <div className="warning-card approval-warning daily-safety-banner">
-        <p>Shadow mode active. No Amazon, Ads, Listing, Image, A+, Store, or Social action is executed.</p>
+    <div className="page">
+      <PageHeader title="Daily AI-CGO" subtitle="Orchestrator status, run history, and command summaries." />
+
+      <div className="metric-grid">
+        <FounderMetric label="Status" value={cleanFounderText(daily.data?.status, "Unknown")} badge />
+        <FounderMetric label="Last Run" value={cleanFounderText(daily.data?.lastRunDate, "Never")} />
+        <FounderMetric label="Next Run" value={cleanFounderText(daily.data?.nextRunDate, "Not scheduled")} />
+        <FounderMetric label="Total Runs" value={readNumber(daily.data?.totalRuns)} />
       </div>
 
-      {status.loading && !status.data ? <LoadingBlock text="Loading daily AI-CGO status..." /> : null}
-      {status.error ? <ErrorBlock text="Could not load daily status" /> : null}
-
-      <div className="summary-strip daily-status-grid" aria-label="Daily AI-CGO status">
-        {statusCards.map((card) => (
-          <MetricTile key={card.label} label={card.label} value={card.value} />
-        ))}
-      </div>
-
-      <div className="daily-command-grid">
-        <Card
-          title="Run Daily AI-CGO"
-          action={(
-            <button type="button" onClick={runDailyAiCgo} disabled={running}>
-              {running ? "Running daily AI-CGO..." : "Run Daily AI-CGO"}
-            </button>
-          )}
-        >
-          <p className="section-note">This creates approval-first recommendations only. No external action executed.</p>
-          {running ? <div className="soft-state compact-state">Running daily AI-CGO...</div> : null}
-          {runError ? <div className="soft-state error-state compact-state">{runError}</div> : null}
-          {approvalRefreshMessage ? <div className="soft-state success-state compact-state">{approvalRefreshMessage}</div> : null}
-        </Card>
-
-        <Card title="Quick Links">
-          <div className="quick-link-grid">
-            <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
-            <button type="button" onClick={() => setActiveTab("Engine Command Center")}>Open Engine Command Center</button>
-            <button type="button" onClick={() => setActiveTab("Product Passport")}>Open Product Passport Cost Queue</button>
-            <button type="button" onClick={() => setActiveTab("CEO Report")}>Open CEO Report</button>
+      <Card title="Recent Runs">
+        {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock /> : runs.data && runs.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Commands</th><th>Actions</th></tr></thead>
+              <tbody>
+                {runs.data.map((run) => (
+                  <tr key={run.runId}>
+                    <td>{formatShortId(run.runId)}</td>
+                    <td>{formatEmpty(run.runDate)}</td>
+                    <td><StatusBadge value={run.status} /></td>
+                    <td>{readNumber(run.commandCount)}</td>
+                    <td>{readNumber(run.actionCount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </Card>
-      </div>
+        ) : <EmptyBlock />}
+      </Card>
 
-      <Card title="Warnings">
-        {status.loading && !status.data ? (
-          <LoadingBlock text="Loading daily AI-CGO status..." />
-        ) : status.error ? (
-          <ErrorBlock text="Could not load daily status" />
-        ) : warnings.length === 0 ? (
-          <EmptyBlock text="No daily AI-CGO warnings right now." />
-        ) : (
-          <ul className="clean-list daily-list">
-            {warnings.map((warning, index) => (
-              <li key={index}>{formatDailyListItem(warning)}</li>
+      <Card title="Today's Commands">
+        {commands.loading ? <LoadingBlock /> : commands.error ? <ErrorBlock /> : (
+          <div className="action-list">
+            {actionLedgerRowsOf(commands.data).slice(0, 10).map((cmd) => (
+              <div className="action-item" key={cmd.actionId}>
+                <div className="action-item-top">
+                  <strong>{cmd.actionTitle}</strong>
+                  <StatusBadge value={cmd.actionStatus} />
+                </div>
+                <div className="action-item-meta">
+                  <span>{cmd.actionType}</span>
+                  <span>{formatShortId(cmd.actionId)}</span>
+                </div>
+                <p>{cmd.actionDescription}</p>
+              </div>
             ))}
-          </ul>
-        )}
-      </Card>
-
-      {runResult ? <DailyRunResultPanel result={runResult} /> : null}
-
-      <Card
-        title="Recent Runs"
-        action={<button type="button" className="secondary" onClick={runs.reload}>Refresh Runs</button>}
-      >
-        {runs.loading ? <LoadingBlock text="Loading recent runs..." /> : runs.error ? (
-          <ErrorBlock text="Could not load recent runs" />
-        ) : recentRuns.length === 0 ? (
-          <EmptyBlock text="No Daily AI-CGO runs yet." />
-        ) : (
-          <div className="daily-run-list">
-            {recentRuns.map((run, index) => {
-              const runId = dailyField(run, ["runId", "id", "dailyRunId", "run_id"]) ?? index;
-              return (
-                <article className="item-card daily-run-card" key={String(runId)}>
-                  <div className="item-top">
-                    <strong>{formatShortId(runId)}</strong>
-                    <StatusBadge value={dailyField(run, ["runStatus", "status", "run_status"])} />
-                  </div>
-                  <div className="detail-grid">
-                    <MetricRow label="Started At" value={formatLocalDateTime(dailyField(run, ["startedAt", "started_at"]))} />
-                    <MetricRow label="Finished At" value={formatLocalDateTime(dailyField(run, ["finishedAt", "finished_at"]))} />
-                    <MetricRow label="Run Type" value={formatEmpty(dailyField(run, ["runType", "run_type"]))} />
-                    <MetricRow label="Engines Planned" value={formatEmpty(dailyField(run, ["enginesPlanned", "plannedEngines", "engines_planned"]))} />
-                    <MetricRow label="Engines Run" value={formatEmpty(dailyField(run, ["enginesRun", "enginesRunCount", "engines_run"]))} />
-                    <MetricRow label="Actions Created" value={formatEmpty(dailyField(run, ["actionsCreated", "actionsCreatedCount", "actions_created"]))} />
-                    <MetricRow label="Skipped Count" value={formatEmpty(dailyField(run, ["skippedCount", "skipped", "skipped_count"]))} />
-                    <MetricRow label="Failed Count" value={formatEmpty(dailyField(run, ["failedCount", "failed", "failed_count"]))} />
-                    <MetricRow label="Approval Pending Before" value={formatEmpty(dailyField(run, ["approvalPendingBefore", "pendingBefore", "approval_pending_before"]))} />
-                    <MetricRow label="Approval Pending After" value={formatEmpty(dailyField(run, ["approvalPendingAfter", "pendingAfter", "approval_pending_after"]))} />
-                  </div>
-                </article>
-              );
-            })}
           </div>
         )}
       </Card>
-    </div>
-  );
-}
-
-function DailyRunResultPanel({ result }: { result: DailyOrchestratorRun }) {
-  const actionsCreated = dailyNumber(result, ["actionsCreated", "actionsCreatedCount", "actions_created"]);
-  const warnings = dailyStatusList(result, ["warnings", "warningMessages", "alerts"]);
-  const recommendations = dailyStatusList(result, ["recommendations", "recommendedActions", "topRecommendations"]);
-  const message = dailyField(result, ["message", "summary", "statusMessage"]);
-  const rows: Array<[string, ReactNode]> = [
-    ["runId", formatEmpty(dailyField(result, ["runId", "id", "dailyRunId", "run_id"]))],
-    ["runStatus", <StatusBadge key="run-status" value={dailyField(result, ["runStatus", "status", "run_status"])} />],
-    ["mode", <StatusBadge key="mode" value={dailyField(result, ["mode", "executionMode", "runMode"]) ?? "SHADOW"} />],
-    ["enginesPlanned", formatEmpty(dailyField(result, ["enginesPlanned", "plannedEngines", "engines_planned"]))],
-    ["enginesRun", formatEmpty(dailyField(result, ["enginesRun", "enginesRunCount", "engines_run"]))],
-    ["actionsCreated", formatEmpty(dailyField(result, ["actionsCreated", "actionsCreatedCount", "actions_created"]))],
-    ["skippedCount", formatEmpty(dailyField(result, ["skippedCount", "skipped", "skipped_count"]))],
-    ["failedCount", formatEmpty(dailyField(result, ["failedCount", "failed", "failed_count"]))],
-    ["approvalPendingBefore", formatEmpty(dailyField(result, ["approvalPendingBefore", "pendingBefore", "approval_pending_before"]))],
-    ["approvalPendingAfter", formatEmpty(dailyField(result, ["approvalPendingAfter", "pendingAfter", "approval_pending_after"]))]
-  ];
-
-  return (
-    <Card title="Run Result">
-      <div className="soft-state success-state daily-shadow-note">No external action executed.</div>
-      {actionsCreated === 0 ? (
-        <div className="soft-state compact-state">No new actions were created. Existing pending recommendations may already cover today's risks.</div>
-      ) : null}
-      <div className="detail-grid daily-result-grid">
-        {rows.map(([label, value]) => (
-          <MetricRow key={label} label={label} value={value} />
-        ))}
-      </div>
-      <div className="daily-result-sections">
-        <DailyTextList title="Warnings" rows={warnings} emptyText="No warnings returned for this run." />
-        <DailyTextList title="Recommendations" rows={recommendations} emptyText="No recommendations returned for this run." />
-      </div>
-      {message ? <p className="section-note daily-message">{formatEmpty(message)}</p> : null}
-    </Card>
-  );
-}
-
-function DailyTextList({ title, rows, emptyText }: { title: string; rows: unknown[]; emptyText: string }) {
-  return (
-    <div className="daily-text-list">
-      <h3>{title}</h3>
-      {rows.length === 0 ? (
-        <p className="section-note">{emptyText}</p>
-      ) : (
-        <ul className="clean-list daily-list">
-          {rows.map((item, index) => (
-            <li key={index}>{formatDailyListItem(item)}</li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
 
 function ProductPassportPage() {
+  const [section, setSection] = useState<ProductPassportSection>("READINESS");
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
-  const readiness = useApi<AnyRecord>(() => getJson(`/api/product-passports/readiness/summary?sellerId=${SELLER_ID}`));
-  const readinessRef = useRef<HTMLDivElement | null>(null);
-  const [section, setSection] = useState<ProductPassportSection>("COST_COMPLETION");
-  const [openForm, setOpenForm] = useState(false);
-  const [selectedPassport, setSelectedPassport] = useState<ProductPassport | null>(null);
-  const [detail, setDetail] = useState<LoadState<AnyRecord>>({ data: null, loading: false, error: null });
-  const [form, setForm] = useState({
-    productName: "",
-    brand: "Leafy Dew",
-    category: "",
-    subCategory: "",
-    productType: "",
-    sellingPrice: "",
-    targetCustomer: "",
-    useCase: "",
-    material: "",
-    color: "",
-    dimensions: "",
-    weight: "",
-    packageContents: "",
-    brandPositioning: ""
-  });
-
-  const summary = recordOf(readiness.data?.summary);
   const rows = rowsOf<ProductPassport>(passports.data);
-
-  async function loadReadiness(row: ProductPassport) {
-    setSelectedPassport(row);
-    setDetail({ data: null, loading: true, error: null });
-    window.setTimeout(() => {
-      readinessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      readinessRef.current?.focus({ preventScroll: true });
-    }, 0);
-    try {
-      const data = await getJson<AnyRecord>(`/api/product-passports/${row.id}/readiness`);
-      setDetail({ data, loading: false, error: null });
-    } catch {
-      setDetail({ data: null, loading: false, error: "Unable to load this section." });
-    }
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    await postJson("/api/product-passports", {
-      sellerId: SELLER_ID,
-      ...form,
-      sellingPrice: asInputNumber(form.sellingPrice)
-    });
-    setOpenForm(false);
-    setForm({ ...form, productName: "", sku: "" } as typeof form);
-    passports.reload();
-    readiness.reload();
-  }
 
   return (
     <div className="page">
-      <PageHeader title="Product Passport" subtitle="Keep product truth, listing readiness, and founder context in one place." />
+      <PageHeader title="Product Passport" subtitle="Product readiness and catalog health." />
 
-      <div className="product-passport-tabs segmented" aria-label="Product Passport sections">
-        <button
-          type="button"
-          className={section === "READINESS" ? "active" : ""}
-          onClick={() => setSection("READINESS")}
-        >
-          Product Readiness
-        </button>
-        <button
-          type="button"
-          className={section === "COST_COMPLETION" ? "active" : ""}
-          onClick={() => setSection("COST_COMPLETION")}
-        >
-          Cost Completion Queue
-        </button>
+      <div className="filter-pills">
+        <button type="button" className={`filter-pill ${section === "READINESS" ? "filter-pill-active" : ""}`} onClick={() => setSection("READINESS")}>Readiness</button>
+        <button type="button" className={`filter-pill ${section === "COST_COMPLETION" ? "filter-pill-active" : ""}`} onClick={() => setSection("COST_COMPLETION")}>Cost Completion</button>
       </div>
 
-      {section === "READINESS" ? (
-        <section className="product-passport-section" aria-labelledby="product-readiness-heading">
-          <div className="page-section-label" id="product-readiness-heading">Product Readiness</div>
-          <div className="summary-strip">
-            <MetricTile label="Product count" value={readNumber(readiness.data?.productCount ?? summary.productCount ?? rows.length)} />
-            <MetricTile label="Ready count" value={readNumber(summary.readyCount)} />
-            <MetricTile label="Needs fix count" value={readNumber(summary.needsFixCount)} />
-            <MetricTile label="Missing economics" value={readNumber(summary.missingEconomicsCount)} />
+      <Card title={section === "READINESS" ? "Readiness Status" : "Cost Completion Queue"}>
+        {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>SKU</th><th>ASIN</th><th>Name</th><th>Status</th><th>Score</th></tr></thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={index}>
+                    <td>{formatEmpty(row.sku)}</td>
+                    <td>{formatEmpty(row.asin)}</td>
+                    <td>{formatEmpty(row.productName ?? row.name)}</td>
+                    <td><StatusBadge value={row.status ?? row.readinessStatus} /></td>
+                    <td>{readNumber(row.readinessScore ?? row.score)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <Card title="Products" action={<button type="button" onClick={() => setOpenForm((value) => !value)}>Add Product</button>}>
-            {openForm ? (
-              <form className="form-grid" onSubmit={submit}>
-                {Object.entries(form).map(([key, value]) =>
-                  key === "brandPositioning" || key === "targetCustomer" || key === "useCase" ? (
-                    <TextArea key={key} label={labelize(key)} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />
-                  ) : (
-                    <TextInput
-                      key={key}
-                      label={labelize(key)}
-                      value={value}
-                      type={key === "sellingPrice" ? "number" : "text"}
-                      onChange={(next) => setForm({ ...form, [key]: next })}
-                    />
-                  )
-                )}
-                <button type="submit">Save Product</button>
-              </form>
-            ) : null}
-            {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Product Name</th>
-                      <th>SKU</th>
-                      <th>ASIN</th>
-                      <th>Category</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{formatEmpty(row.productName)}</td>
-                        <td>{formatEmpty(row.sku)}</td>
-                        <td>{formatEmpty(row.asin)}</td>
-                        <td>{formatEmpty(row.category)}</td>
-                        <td><StatusBadge value={row.status} /></td>
-                        <td><button type="button" onClick={() => loadReadiness(row)}>View Readiness</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-          <div ref={readinessRef} tabIndex={-1} className="readiness-detail-anchor">
-            <Card title="Readiness Details">
-              {detail.loading ? <LoadingBlock text="Loading readiness..." /> : detail.error ? <ErrorBlock /> : detail.data ? (
-                <ReadinessDetail data={detail.data} product={selectedPassport} />
-              ) : (
-                <EmptyBlock text="Choose a product to view readiness." />
-              )}
-            </Card>
-          </div>
-        </section>
-      ) : (
-        <CostCompletionQueueSection />
-      )}
-    </div>
-  );
-}
-
-function ReadinessDetail({ data, product }: { data: AnyRecord; product: ProductPassport | null }) {
-  const row = recordOf(data.row ?? data.readiness ?? data);
-  const missing = normalizeMissingFields(row.missingFields);
-  return (
-    <div className="detail-grid">
-      <MetricRow label="SKU" value={formatEmpty(row.sku ?? product?.sku)} />
-      <MetricRow label="ASIN" value={formatEmpty(row.asin ?? product?.asin)} />
-      <MetricRow label="Product name" value={formatEmpty(row.productName ?? row.title ?? product?.productName)} />
-      <MetricRow label="Passport score" value={formatEmpty(row.passportScore ?? row.score)} />
-      <MetricRow label="Economics status" value={<StatusBadge value={row.economicsStatus} />} />
-      <MetricRow label="Profit status" value={<StatusBadge value={row.profitStatus} />} />
-      <MetricRow label="Ad readiness status" value={<StatusBadge value={row.adReadinessStatus ?? row.readinessStatus} />} />
-      <MetricRow label="Next best action" value={formatEmpty(recordOf(row.nextBestAction).title ?? row.nextBestAction)} />
-      <MetricRow label="Missing fields" value={missing.length ? missing.map(String).join(", ") : "—"} />
-    </div>
-  );
-}
-
-type CostCompletionSummary = {
-  totalSkus?: number | string | null;
-  completeCount?: number | string | null;
-  incompleteCount?: number | string | null;
-  missingCostCount?: number | string | null;
-  missingRequiredProfitCount?: number | string | null;
-  missingSubcategoryCount?: number | string | null;
-  pendingCostActionCount?: number | string | null;
-};
-
-type CostQueueFilter = "ALL" | "INCOMPLETE" | "COMPLETE" | "MISSING_COST" | "MISSING_REQUIRED_PROFIT" | "MISSING_SUBCATEGORY";
-
-const costQueueFilterOptions: Array<{ id: CostQueueFilter; label: string }> = [
-  { id: "ALL", label: "All" },
-  { id: "INCOMPLETE", label: "Incomplete" },
-  { id: "COMPLETE", label: "Complete" },
-  { id: "MISSING_COST", label: "Missing Cost" },
-  { id: "MISSING_REQUIRED_PROFIT", label: "Missing Required Profit" },
-  { id: "MISSING_SUBCATEGORY", label: "Missing Subcategory" }
-];
-
-const editableCostFields = [
-  "productCost",
-  "landedCost",
-  "packagingCost",
-  "shippingCost",
-  "otherCost",
-  "requiredProfit",
-  "subcategory"
-] as const;
-
-type EditableCostField = (typeof editableCostFields)[number];
-type CostEditState = Record<EditableCostField, string>;
-type DirtyCostFields = Partial<Record<EditableCostField, true>>;
-
-type NormalizedCostCompletionRow = {
-  key: string;
-  sku: string;
-  asin: string;
-  productName: string;
-  title: string;
-  subcategory: unknown;
-  sellingPrice: unknown;
-  productCost: unknown;
-  landedCost: unknown;
-  packagingCost: unknown;
-  shippingCost: unknown;
-  otherCost: unknown;
-  requiredProfit: unknown;
-  missingFields: string[];
-  costStatus: unknown;
-  currentProfitStatus: unknown;
-  targetAcos: unknown;
-  breakEvenAcos: unknown;
-};
-
-type CostCompletionPayloadItem = {
-  sku: string | null;
-  asin: string | null;
-  productCost: number | null;
-  landedCost: number | null;
-  packagingCost: number | null;
-  shippingCost: number | null;
-  otherCost: number | null;
-  requiredProfit: number | null;
-  subcategory: string | null;
-};
-
-const COST_COMPLETION_PAGE_SIZE = 25;
-
-function costCompletionRowsOf(value: unknown): CostCompletionQueueItem[] {
-  if (Array.isArray(value)) return value as CostCompletionQueueItem[];
-  const rows = rowsOf<CostCompletionQueueItem>(value);
-  if (rows.length > 0) return rows;
-  const root = recordOf(value);
-  const result = recordOf(root.result);
-  const nestedData = recordOf(root.data);
-  return arrayOf(
-    root.items ??
-    root.queue ??
-    root.products ??
-    root.updatedRows ??
-    root.rows ??
-    result.items ??
-    result.queue ??
-    result.products ??
-    result.updatedRows ??
-    result.rows ??
-    nestedData.items ??
-    nestedData.queue ??
-    nestedData.products ??
-    nestedData.updatedRows ??
-    nestedData.rows
-  ) as CostCompletionQueueItem[];
-}
-
-function normalizeMissingFields(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean);
-  if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
-  return [];
-}
-
-function normalizeCostCompletionRow(item: CostCompletionQueueItem, index: number): NormalizedCostCompletionRow {
-  const raw = item as unknown as AnyRecord;
-  const economics = recordOf(raw.economics);
-  const sku = String(readFirst(raw, ["sku", "sellerSku", "seller_sku"]) ?? "");
-  const asin = String(readFirst(raw, ["asin"]) ?? "");
-  const key = String(readFirst(raw, ["key", "id"]) ?? (sku ? `sku:${sku}` : asin ? `asin:${asin}` : `row:${index}`));
-
-  return {
-    key,
-    sku,
-    asin,
-    productName: String(readFirst(raw, ["productName", "product_name", "itemName"]) ?? readFirst(economics, ["productName", "product_name"]) ?? readFirst(raw, ["title"]) ?? ""),
-    title: String(readFirst(raw, ["title", "itemName"]) ?? readFirst(raw, ["productName", "product_name"]) ?? readFirst(economics, ["productName", "product_name"]) ?? ""),
-    subcategory: readFirst(raw, ["subcategory", "subCategory", "sub_category"]) ?? readFirst(economics, ["subcategory", "subCategory", "sub_category"]),
-    sellingPrice: readFirst(raw, ["sellingPrice", "selling_price", "price"]) ?? readFirst(economics, ["sellingPrice", "selling_price"]),
-    productCost: readFirst(raw, ["productCost", "product_cost", "buyingCost", "buying_cost"]) ?? readFirst(economics, ["productCost", "product_cost", "buyingCost", "buying_cost"]),
-    landedCost: readFirst(raw, ["landedCost", "landed_cost"]) ?? readFirst(economics, ["landedCost", "landed_cost"]),
-    packagingCost: readFirst(raw, ["packagingCost", "packaging_cost"]) ?? readFirst(economics, ["packagingCost", "packaging_cost"]),
-    shippingCost: readFirst(raw, ["shippingCost", "shipping_cost"]) ?? readFirst(economics, ["shippingCost", "shipping_cost"]),
-    otherCost: readFirst(raw, ["otherCost", "other_cost", "otherCostPerUnit", "other_cost_per_unit", "otherFees", "other_fees"]) ?? readFirst(economics, ["otherCost", "other_cost", "otherCostPerUnit", "other_cost_per_unit", "otherFees", "other_fees"]),
-    requiredProfit: readFirst(raw, ["requiredProfit", "required_profit", "targetProfit", "target_profit"]) ?? readFirst(economics, ["requiredProfit", "required_profit", "targetProfit", "target_profit"]),
-    missingFields: normalizeMissingFields(readFirst(raw, ["missingFields", "missing_fields"])),
-    costStatus: readFirst(raw, ["costStatus", "cost_status", "costDataStatus", "profitDataStatus", "profitData_status", "currentProfitStatus", "current_profit_status", "status"]) ?? readFirst(economics, ["costStatus", "cost_status", "profitDataStatus", "profit_data_status", "currentProfitStatus", "current_profit_status"]),
-    currentProfitStatus: readFirst(raw, ["currentProfitStatus", "current_profit_status", "profitStatus", "profit_status"]) ?? readFirst(economics, ["currentProfitStatus", "current_profit_status", "profitStatus", "profit_status"]),
-    targetAcos: readFirst(raw, ["targetAcos", "target_acos"]) ?? readFirst(economics, ["targetAcos", "target_acos"]),
-    breakEvenAcos: readFirst(raw, ["breakEvenAcos", "break_even_acos"]) ?? readFirst(economics, ["breakEvenAcos", "break_even_acos"])
-  };
-}
-
-function inputValueOf(value: unknown): string {
-  return value === null || value === undefined ? "" : String(value);
-}
-
-function editStateForRow(row: NormalizedCostCompletionRow): CostEditState {
-  return {
-    productCost: inputValueOf(row.productCost),
-    landedCost: inputValueOf(row.landedCost),
-    packagingCost: inputValueOf(row.packagingCost),
-    shippingCost: inputValueOf(row.shippingCost),
-    otherCost: inputValueOf(row.otherCost),
-    requiredProfit: inputValueOf(row.requiredProfit),
-    subcategory: inputValueOf(row.subcategory)
-  };
-}
-
-function normalizedMissingToken(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function rowMissingField(row: NormalizedCostCompletionRow, field: "cost" | "requiredProfit" | "subcategory"): boolean {
-  const missingTokens = row.missingFields.map(normalizedMissingToken);
-  if (field === "requiredProfit") {
-    return missingTokens.includes("requiredprofit");
-  }
-  if (field === "subcategory") {
-    return missingTokens.includes("subcategory") || missingTokens.includes("category");
-  }
-  return missingTokens.includes("productcost") || missingTokens.includes("landedcost");
-}
-
-function isCostRowComplete(row: NormalizedCostCompletionRow): boolean {
-  return normalizeState(row.costStatus) === "COMPLETE";
-}
-
-function filterCostCompletionRows(rows: NormalizedCostCompletionRow[], filter: CostQueueFilter): NormalizedCostCompletionRow[] {
-  if (filter === "ALL") return rows;
-  if (filter === "COMPLETE") return rows.filter(isCostRowComplete);
-  if (filter === "INCOMPLETE") return rows.filter((row) => ["INCOMPLETE", "PARTIAL"].includes(normalizeState(row.costStatus)));
-  if (filter === "MISSING_COST") return rows.filter((row) => rowMissingField(row, "cost"));
-  if (filter === "MISSING_REQUIRED_PROFIT") return rows.filter((row) => rowMissingField(row, "requiredProfit"));
-  return rows.filter((row) => rowMissingField(row, "subcategory"));
-}
-
-function searchCostCompletionRows(rows: NormalizedCostCompletionRow[], query: string): NormalizedCostCompletionRow[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return rows;
-  return rows.filter((row) => [
-    row.sku,
-    row.asin,
-    row.productName,
-    row.title,
-    row.subcategory,
-    row.missingFields.join(" "),
-    row.costStatus
-  ].some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery)));
-}
-
-function parseNullableNumber(value: unknown, label: string): number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const text = String(value);
-  if (text.trim() === "") return null;
-  const numeric = Number(text);
-  if (!Number.isFinite(numeric)) {
-    throw new Error(`${label} must be a valid number.`);
-  }
-  return numeric;
-}
-
-function editedFieldValue(row: NormalizedCostCompletionRow, edits: CostEditState, dirtyFields: DirtyCostFields, field: EditableCostField): unknown {
-  if (dirtyFields[field]) return edits[field];
-  return row[field];
-}
-
-function nullableTextValue(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  const text = String(value).trim();
-  return text || null;
-}
-
-function buildCostPayload(row: NormalizedCostCompletionRow, edits: CostEditState, dirtyFields: DirtyCostFields = {}): CostCompletionPayloadItem {
-  return {
-    sku: row.sku || null,
-    asin: row.asin || null,
-    productCost: parseNullableNumber(editedFieldValue(row, edits, dirtyFields, "productCost"), "Product Cost"),
-    landedCost: parseNullableNumber(editedFieldValue(row, edits, dirtyFields, "landedCost"), "Landed Cost"),
-    packagingCost: parseNullableNumber(editedFieldValue(row, edits, dirtyFields, "packagingCost"), "Packaging Cost"),
-    shippingCost: parseNullableNumber(editedFieldValue(row, edits, dirtyFields, "shippingCost"), "Shipping Cost"),
-    otherCost: parseNullableNumber(editedFieldValue(row, edits, dirtyFields, "otherCost"), "Other Cost"),
-    requiredProfit: parseNullableNumber(editedFieldValue(row, edits, dirtyFields, "requiredProfit"), "Required Profit"),
-    subcategory: nullableTextValue(editedFieldValue(row, edits, dirtyFields, "subcategory"))
-  };
-}
-
-function readOptionalCount(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function resolvedCostActionCount(response: unknown): number | null {
-  const root = recordOf(response);
-  const result = recordOf(root.result);
-  const candidates = [
-    root.resolvedActionCount,
-    root.actionsResolvedCount,
-    root.costDataRequiredActionsResolved,
-    root.resolvedCostActionCount,
-    result.resolvedActionCount,
-    result.actionsResolvedCount,
-    result.costDataRequiredActionsResolved,
-    result.resolvedCostActionCount
-  ];
-  for (const candidate of candidates) {
-    const count = readOptionalCount(candidate);
-    if (count !== null) return count;
-  }
-
-  const arrayCandidates = [
-    root.resolvedActions,
-    root.resolvedActionIds,
-    root.autoResolvedActions,
-    result.resolvedActions,
-    result.resolvedActionIds,
-    result.autoResolvedActions
-  ];
-  for (const candidate of arrayCandidates) {
-    if (Array.isArray(candidate)) return candidate.length;
-  }
-
-  return null;
-}
-
-function costCompletionSaveMessage(savedCount: number, response: unknown): string {
-  const resolvedCount = resolvedCostActionCount(response) ?? 0;
-  if (resolvedCount === 0) return `Saved ${savedCount} row(s). No related pending cost actions were found.`;
-  return `Saved ${savedCount} row(s). Resolved ${resolvedCount} related COST_DATA_REQUIRED approval action(s).`;
-}
-
-function CostCompletionQueueSection() {
-  const summary = useApi<AnyRecord>(() => getJson(`/api/product-passport/cost-completion/summary?sellerId=${SELLER_ID}`));
-  const queue = useApi<unknown>(() => getJson(`/api/product-passport/cost-completion?sellerId=${SELLER_ID}&limit=200`));
-  const [filter, setFilter] = useState<CostQueueFilter>("INCOMPLETE");
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [edits, setEdits] = useState<Record<string, CostEditState>>({});
-  const [dirtyRows, setDirtyRows] = useState<Record<string, DirtyCostFields>>({});
-  const [savedOverrides, setSavedOverrides] = useState<Record<string, Partial<NormalizedCostCompletionRow>>>({});
-  const [lastSavedRows, setLastSavedRows] = useState<Record<string, CostCompletionPayloadItem>>({});
-  const [savedKeys, setSavedKeys] = useState<string[]>([]);
-  const [savingKeys, setSavingKeys] = useState<string[]>([]);
-  const [bulkSaving, setBulkSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [moveMessage, setMoveMessage] = useState("");
-  const [error, setError] = useState("");
-  const [completeRefetchTried, setCompleteRefetchTried] = useState(false);
-
-  const summaryRoot = recordOf(summary.data?.summary ?? summary.data) as CostCompletionSummary;
-  const summaryValue = (value: unknown) => summary.loading ? "..." : readNumber(value);
-  const rows = useMemo(
-    () => costCompletionRowsOf(queue.data).map((item, index) => {
-      const row = normalizeCostCompletionRow(item, index);
-      const override = savedOverrides[row.key];
-      if (!override) return row;
-      return {
-        ...row,
-        ...override
-      };
-    }),
-    [queue.data, savedOverrides]
-  );
-  const filteredRows = useMemo(
-    () => searchCostCompletionRows(filterCostCompletionRows(rows, filter), search),
-    [filter, rows, search]
-  );
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / COST_COMPLETION_PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const pageRows = filteredRows.slice((safePage - 1) * COST_COMPLETION_PAGE_SIZE, safePage * COST_COMPLETION_PAGE_SIZE);
-  const editedRowKeys = Object.keys(dirtyRows).filter((key) => Object.keys(dirtyRows[key] ?? {}).length > 0);
-  const editedRows = rows.filter((row) => editedRowKeys.includes(row.key));
-  const showingStart = filteredRows.length === 0 ? 0 : (safePage - 1) * COST_COMPLETION_PAGE_SIZE + 1;
-  const showingEnd = Math.min(safePage * COST_COMPLETION_PAGE_SIZE, filteredRows.length);
-  const completeCount = readNumber(summaryRoot.completeCount);
-  const loadedCompleteRows = filterCostCompletionRows(rows, "COMPLETE");
-  const completeRowsMissingFromQueue =
-    filter === "COMPLETE" &&
-    completeCount > 0 &&
-    loadedCompleteRows.length === 0 &&
-    completeRefetchTried &&
-    !queue.loading;
-
-  useEffect(() => {
-    setPage(1);
-  }, [filter, search]);
-
-  useEffect(() => {
-    if (filter !== "COMPLETE") {
-      setCompleteRefetchTried(false);
-      return;
-    }
-    if (completeCount > 0 && loadedCompleteRows.length === 0 && !queue.loading && !completeRefetchTried) {
-      setCompleteRefetchTried(true);
-      queue.reload();
-    }
-  }, [completeCount, completeRefetchTried, filter, loadedCompleteRows.length, queue.loading]);
-
-  useEffect(() => {
-    setSavedOverrides({});
-  }, [queue.data]);
-
-  function viewAllRows() {
-    setFilter("ALL");
-    setPage(1);
-  }
-
-  function clearFilters() {
-    setFilter("ALL");
-    setSearch("");
-    setPage(1);
-  }
-
-  function showCompleteRows() {
-    setSearch("");
-    setFilter("COMPLETE");
-    setPage(1);
-  }
-
-  function currentEditState(row: NormalizedCostCompletionRow): CostEditState {
-    return edits[row.key] ?? editStateForRow(row);
-  }
-
-  function setField(row: NormalizedCostCompletionRow, field: EditableCostField, value: string) {
-    setMessage("");
-    setMoveMessage("");
-    setError("");
-    setEdits((current) => ({
-      ...current,
-      [row.key]: {
-        ...currentEditState(row),
-        ...current[row.key],
-        [field]: value
-      }
-    }));
-    setDirtyRows((current) => ({
-      ...current,
-      [row.key]: {
-        ...(current[row.key] ?? {}),
-        [field]: true
-      }
-      }));
-  }
-
-  function resetRow(row: NormalizedCostCompletionRow) {
-    setMessage("");
-    setMoveMessage("");
-    setError("");
-    setEdits((current) => {
-      const next = { ...current };
-      delete next[row.key];
-      return next;
-    });
-    setDirtyRows((current) => {
-      const next = { ...current };
-      delete next[row.key];
-      return next;
-    });
-  }
-
-  function clearSavedRows(keys: string[]) {
-    setEdits((current) => {
-      const next = { ...current };
-      keys.forEach((key) => {
-        delete next[key];
-      });
-      return next;
-    });
-    setDirtyRows((current) => {
-      const next = { ...current };
-      keys.forEach((key) => {
-        delete next[key];
-      });
-      return next;
-    });
-  }
-
-  async function saveRows(targetRows: NormalizedCostCompletionRow[]) {
-    if (targetRows.length === 0) return;
-    const targetKeys = targetRows.map((row) => row.key);
-    const isBulk = targetRows.length > 1;
-    setMessage("");
-    setMoveMessage("");
-    setError("");
-    if (isBulk) {
-      setBulkSaving(true);
-    } else {
-      setSavingKeys((current) => Array.from(new Set([...current, ...targetKeys])));
-    }
-
-    try {
-      const items = targetRows.map((row) => buildCostPayload(row, currentEditState(row), dirtyRows[row.key] ?? {}));
-      const response = await postJson<AnyRecord>("/api/product-passport/cost-completion/bulk-update", {
-        sellerId: SELLER_ID,
-        autoResolveActions: true,
-        items
-      });
-      const responseRows = costCompletionRowsOf(response).map(normalizeCostCompletionRow);
-      const savedComplete = responseRows.some(isCostRowComplete);
-      setSavedOverrides((current) => {
-        const next = { ...current };
-        targetRows.forEach((row, index) => {
-          const responseRow = responseRows.find((candidate) => candidate.key === row.key || (candidate.sku && candidate.sku === row.sku) || (candidate.asin && candidate.asin === row.asin));
-          next[row.key] = responseRow ?? {
-            productCost: items[index].productCost,
-            landedCost: items[index].landedCost,
-            packagingCost: items[index].packagingCost,
-            shippingCost: items[index].shippingCost,
-            otherCost: items[index].otherCost,
-            requiredProfit: items[index].requiredProfit,
-            subcategory: items[index].subcategory
-          };
-        });
-        return next;
-      });
-      setSavedKeys(targetKeys);
-      window.setTimeout(() => {
-        setSavedKeys((current) => current.filter((key) => !targetKeys.includes(key)));
-      }, 4500);
-      setLastSavedRows((current) => {
-        const next = { ...current };
-        targetRows.forEach((row, index) => {
-          const responseRow = responseRows.find((candidate) => candidate.key === row.key || (candidate.sku && candidate.sku === row.sku) || (candidate.asin && candidate.asin === row.asin));
-          next[row.key] = responseRow ? buildCostPayload(responseRow, editStateForRow(responseRow)) : items[index];
-        });
-        return next;
-      });
-      clearSavedRows(targetKeys);
-      summary.reload();
-      queue.reload();
-      setMessage(costCompletionSaveMessage(items.length, response));
-      if (!["ALL", "COMPLETE"].includes(filter)) {
-        setMoveMessage(savedComplete ? "Saved successfully. The row moved to Complete." : "Saved successfully. The row may have moved because its cost status changed.");
-      }
-    } catch (saveError) {
-      setError(saveError instanceof Error ? sanitizeActionError(saveError) : "Could not save cost data. Please try again.");
-    } finally {
-      if (isBulk) {
-        setBulkSaving(false);
-      } else {
-        setSavingKeys((current) => current.filter((key) => !targetKeys.includes(key)));
-      }
-    }
-  }
-
-  return (
-    <section className="cost-completion-section" aria-labelledby="cost-completion-heading">
-      <div className="page-title cost-section-title">
-        <h1 id="cost-completion-heading">Cost Completion Queue</h1>
-        <p>Fill the missing business fields while Amazon-provided SKU, ASIN, product name, and selling price stay read-only.</p>
-      </div>
-
-      {summary.loading ? <LoadingBlock text="Loading summary..." /> : null}
-      <div className="summary-strip cost-summary-strip">
-        <MetricTile label="Total SKUs" value={summaryValue(summaryRoot.totalSkus)} />
-        <MetricTile label="Complete" value={summaryValue(summaryRoot.completeCount)} />
-        <MetricTile label="Incomplete" value={summaryValue(summaryRoot.incompleteCount)} />
-        <MetricTile label="Missing Cost" value={summaryValue(summaryRoot.missingCostCount)} />
-        <MetricTile label="Missing Required Profit" value={summaryValue(summaryRoot.missingRequiredProfitCount)} />
-        <MetricTile label="Missing Subcategory" value={summaryValue(summaryRoot.missingSubcategoryCount)} />
-        <MetricTile label="Pending Cost Actions" value={summaryValue(summaryRoot.pendingCostActionCount)} />
-      </div>
-
-      <div className="cost-completion-toolbar">
-        <p className="section-note cost-helper-note">
-          Completing cost data will automatically resolve related COST_DATA_REQUIRED approval actions. No Amazon or Ads action is executed.
-        </p>
-        <div className="queue-controls">
-          <div className="segmented cost-filter-tabs">
-            {costQueueFilterOptions.map((option) => (
-              <button
-                type="button"
-                key={option.id}
-                className={filter === option.id ? "active" : ""}
-                onClick={() => {
-                  setFilter(option.id);
-                  setPage(1);
-                }}
-                disabled={bulkSaving}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <label className="field queue-search">
-            <span>Search</span>
-            <input
-              type="search"
-              value={search}
-              placeholder="SKU, ASIN, product name, subcategory"
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-            />
-          </label>
-          <div className="queue-save-control">
-            <button type="button" onClick={() => saveRows(editedRows)} disabled={bulkSaving || editedRows.length === 0}>
-              {bulkSaving ? "Saving..." : `Save Edited Rows${editedRows.length ? ` (${editedRows.length})` : ""}`}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <Card title="Queue">
-
-        {message ? <div className="soft-state success-state queue-message">{message}</div> : null}
-        {moveMessage ? (
-          <div className="soft-state success-state queue-message queue-move-message">
-            <span>{moveMessage}</span>
-            <div className="button-row compact">
-              <button type="button" className="secondary" onClick={showCompleteRows}>View Complete rows</button>
-              <button type="button" className="secondary" onClick={viewAllRows}>View All rows</button>
-              <button type="button" className="secondary" onClick={clearFilters}>Clear filters</button>
-            </div>
-          </div>
-        ) : null}
-        {completeRowsMissingFromQueue ? (
-          <div className="soft-state error-state queue-message">Complete count exists, but complete rows are not loaded. Please refresh.</div>
-        ) : null}
-        {error ? <div className="soft-state error-state queue-message">{error}</div> : null}
-        {summary.error ? <ErrorBlock text="Could not load cost summary. Backend may still be deploying." /> : null}
-
-        {queue.loading ? <LoadingBlock text="Loading cost queue..." /> : queue.error ? (
-          <ErrorBlock text="Could not load cost completion queue. Backend may still be deploying." />
-        ) : rows.length === 0 ? (
-          <EmptyBlock text="No cost completion rows yet." />
-        ) : filteredRows.length === 0 ? (
-          <div className="soft-state">
-            <p>No rows match this filter or search.</p>
-            <div className="button-row compact">
-              <button type="button" className="secondary" onClick={clearFilters}>Clear filters</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="queue-pagination">
-              <span>Showing {showingStart}-{showingEnd} of {filteredRows.length}</span>
-              <div className="button-row compact">
-                <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || bulkSaving}>Previous</button>
-                <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || bulkSaving}>Next</button>
-              </div>
-            </div>
-            <datalist id="cost-subcategory-options">
-              {referralFeeSubcategories.map((option) => <option key={option} value={option} />)}
-            </datalist>
-            <div className="cost-card-list">
-              {pageRows.map((row) => {
-                const rowEdits = currentEditState(row);
-                const isEdited = Boolean(dirtyRows[row.key] && Object.keys(dirtyRows[row.key] ?? {}).length > 0);
-                const rowSaving = savingKeys.includes(row.key) || bulkSaving;
-                const displayName = row.productName || row.title;
-                const lastSaved = lastSavedRows[row.key];
-                const isSaved = savedKeys.includes(row.key);
-                const rowLabel = row.sku || row.asin || displayName;
-
-                return (
-                  <article key={row.key} className={`cost-completion-card ${isEdited ? "edited-row" : ""} ${isSaved ? "saved-row" : ""}`}>
-                    <div className="cost-card-head">
-                      <div className="cost-card-title">
-                        <h3>{formatEmpty(displayName)}</h3>
-                        <div className="cost-card-meta">
-                          <span><strong>SKU</strong> {formatEmpty(row.sku)}</span>
-                          <span><strong>ASIN</strong> {formatEmpty(row.asin)}</span>
-                        </div>
-                      </div>
-                      <div className="badge-row cost-card-badges">
-                        <StatusBadge value={row.costStatus ?? "NEEDS_INPUT"} />
-                        <StatusBadge value={row.currentProfitStatus ?? "NEEDS_INPUT"} />
-                      </div>
-                    </div>
-
-                    <div className="cost-card-readonly">
-                      <MetricRow label="Selling Price" value={formatMoney(row.sellingPrice)} />
-                      <MetricRow label="Missing Fields" value={row.missingFields.length ? row.missingFields.map(labelize).join(", ") : "None"} />
-                    </div>
-
-                    <div className="cost-edit-grid">
-                      <label className="field">
-                        <span>Subcategory</span>
-                        <input
-                          list="cost-subcategory-options"
-                          value={rowEdits.subcategory}
-                          aria-label={`Subcategory for ${rowLabel}`}
-                          onChange={(event) => setField(row, "subcategory", event.target.value)}
-                        />
-                      </label>
-                      <TextInput label="Product Cost" type="number" value={rowEdits.productCost} onChange={(value) => setField(row, "productCost", value)} />
-                      <TextInput label="Landed Cost" type="number" value={rowEdits.landedCost} onChange={(value) => setField(row, "landedCost", value)} />
-                      <TextInput label="Packaging Cost" type="number" value={rowEdits.packagingCost} onChange={(value) => setField(row, "packagingCost", value)} />
-                      <TextInput label="Shipping Cost" type="number" value={rowEdits.shippingCost} onChange={(value) => setField(row, "shippingCost", value)} />
-                      <TextInput label="Other Cost" type="number" value={rowEdits.otherCost} onChange={(value) => setField(row, "otherCost", value)} />
-                      <TextInput label="Required Profit" type="number" value={rowEdits.requiredProfit} onChange={(value) => setField(row, "requiredProfit", value)} />
-                    </div>
-
-                    <div className="cost-card-footer">
-                      <div className="cost-card-state">
-                        {isEdited ? <span className="unsaved-label">Unsaved changes</span> : null}
-                        {!isEdited && (lastSaved || isSaved) ? <span className="last-saved-label">{isSaved ? "Saved" : "Last saved values"}</span> : null}
-                      </div>
-                      <div className="button-row compact">
-                        <button type="button" onClick={() => saveRows([row])} disabled={rowSaving || !isEdited}>
-                          {rowSaving ? "Saving..." : "Save Row"}
-                        </button>
-                        <button type="button" className="secondary" onClick={() => resetRow(row)} disabled={rowSaving || !isEdited}>
-                          Reset Row
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-            <div className="queue-pagination bottom">
-              <span>Page {safePage} of {totalPages}</span>
-              <div className="button-row compact">
-                <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || bulkSaving}>Previous</button>
-                <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || bulkSaving}>Next</button>
-              </div>
-            </div>
-          </>
-        )}
+        ) : <EmptyBlock />}
       </Card>
-    </section>
+    </div>
   );
 }
 
 function ProductEconomicsPage() {
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const rows = rowsOf<ProductEconomics>(economics.data);
-  const [selectedId, setSelectedId] = useState("");
-  const selectedRow = rows.find((row) => row.id === selectedId) ?? null;
-  const completeCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("COMPLETE") || normalizeState(row.profitDataStatus).includes("AVAILABLE")).length;
-  const needsInputCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("MISSING") || normalizeState(row.profitDataStatus).includes("NEEDS") || normalizeState(row.profitDataStatus).includes("PARTIAL")).length;
-
-  function economicsDetailRows(row: ProductEconomics): Array<[string, ReactNode]> {
-    return [
-      ["Selling Price", formatMoney(row.sellingPrice)],
-      ["Buying Cost", formatMoney(row.buyingCost)],
-      ["Landed Cost", formatMoney(row.landedCost)],
-      ["Required Profit", formatMoney(row.requiredProfit)],
-      ["Net Profit", formatMoney(row.netProfit)],
-      ["Net Profit Before Ads", formatMoney(row.netProfitBeforeAds)],
-      ["Profit Margin", formatPercent(row.profitMargin)],
-      ["Target ACOS", formatPercent(row.targetAcos)],
-      ["Break-even ACOS", formatPercent(row.breakEvenAcos)],
-      ["Profit Status", <StatusBadge key="profit-status" value={row.profitStatus ?? "NEEDS_INPUT"} />],
-      ["Data Status", <StatusBadge key="data-status" value={row.profitDataStatus ?? "NEEDS_INPUT"} />],
-      ["Fee Rules Version", formatEmpty(row.feeRulesVersion)]
-    ];
-  }
 
   return (
     <div className="page">
-      <PageHeader
-        title="Product Economics"
-        subtitle="Profitability, readiness, and calculated economics. Cost completion lives in Product Passport."
-      />
-      <div className="summary-strip">
-        <MetricTile label="Economics rows" value={economics.loading ? "..." : rows.length} />
-        <MetricTile label="Complete data" value={economics.loading ? "..." : completeCount} />
-        <MetricTile label="Needs input" value={economics.loading ? "..." : needsInputCount} />
-        <MetricTile label="Selected SKU" value={selectedRow ? formatEmpty(selectedRow.sku) : "-"} />
-      </div>
+      <PageHeader title="Product Economics" subtitle="Profit, margin, and pricing analysis." />
 
-      <Card title="Profitability Readiness">
-        {economics.loading ? <LoadingBlock /> : economics.error ? (
-          <ErrorBlock text="Could not load product economics. Backend may still be deploying." />
-        ) : rows.length === 0 ? (
-          <EmptyBlock text="No product economics rows yet. Complete cost data in Product Passport first." />
-        ) : (
-          <div className="table-wrap economics-table">
+      <Card title="Economics Overview">
+        {economics.loading ? <LoadingBlock /> : economics.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Product Name</th>
-                  <th>SKU</th>
-                  <th>ASIN</th>
-                  <th>Subcategory</th>
-                  <th>Selling Price</th>
-                  <th>Landed Cost</th>
-                  <th>Required Profit</th>
-                  <th>Profit Status</th>
-                  <th>Target ACOS</th>
-                  <th>Break-even ACOS</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
+              <thead><tr><th>SKU</th><th>ASIN</th><th>Price</th><th>Net Profit</th><th>Margin</th><th>Status</th></tr></thead>
               <tbody>
-                {rows.map((row) => {
-                  const open = selectedId === row.id;
-                  return (
-                    <Fragment key={row.id}>
-                      <tr className={open ? "edited-row" : ""}>
-                        <td className="product-name-cell">{formatEmpty(row.productName)}</td>
-                        <td className="identity-cell">{formatEmpty(row.sku)}</td>
-                        <td className="identity-cell">{formatEmpty(row.asin)}</td>
-                        <td>{formatEmpty(row.subCategory)}</td>
-                        <td>{formatMoney(row.sellingPrice)}</td>
-                        <td>{formatMoney(row.landedCost)}</td>
-                        <td>{formatMoney(row.requiredProfit)}</td>
-                        <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
-                        <td>{formatPercent(row.targetAcos)}</td>
-                        <td>{formatPercent(row.breakEvenAcos)}</td>
-                        <td>
-                          <button type="button" className="secondary" onClick={() => setSelectedId(open ? "" : row.id)}>
-                            {open ? "Close Details" : "View Details"}
-                          </button>
-                        </td>
-                      </tr>
-                      {open ? (
-                        <tr className="economics-inline-detail-row">
-                          <td colSpan={11}>
-                            <div className="economics-inline-detail">
-                              <div className="approval-card-head">
-                                <div className="approval-title-block">
-                                  <strong>{formatEmpty(row.productName)}</strong>
-                                  <span>{formatEmpty(row.sku)} / {formatEmpty(row.asin)}</span>
-                                </div>
-                                <button type="button" className="secondary" onClick={() => setSelectedId("")}>Close Details</button>
-                              </div>
-                              <div className="detail-grid">
-                                {economicsDetailRows(row).map(([label, value]) => (
-                                  <MetricRow key={label} label={label} value={value} />
-                                ))}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-const referralFeeSubcategories = [
-  "Mattresses",
-  "Rugs and Doormats",
-  "Clocks",
-  "Wall Art",
-  "Home - Fragrance & Candles",
-  "Bedsheets, Blankets and covers",
-  "Home furnishing",
-  "Containers, Boxes, Bottles",
-  "Home improvement - Accessories",
-  "Home Storage",
-  "Curtains and Accessories",
-  "Cushion Covers",
-  "Indoor Lighting",
-  "Indoor Lighting - Others",
-  "LED Bulbs and Battens",
-  "Wall Paints and Tools",
-  "Craft materials",
-  "Safes and Lockers",
-  "Home Decor Products",
-  "Home - Other Products",
-  "Home improvement - Other Products",
-  "Kitchen - Glassware & Ceramicware",
-  "Cookware, Tableware & Dinnerware"
-];
-
-function readFirst(source: unknown, keys: string[]): unknown {
-  const root = recordOf(source);
-  for (const key of keys) {
-    const value = key.split(".").reduce<unknown>((current, part) => recordOf(current)[part], root);
-    if (value !== null && value !== undefined && value !== "") return value;
-  }
-  return undefined;
-}
-
-function queueMissingFields(value: unknown): string {
-  if (Array.isArray(value)) return value.map((item) => formatEmpty(item)).join(", ");
-  return formatEmpty(value);
-}
-
-export function CostCompletionQueuePage({ title = "Product Economics" }: { title?: string }) {
-  const queue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const queueRows = useMemo(() => {
-    const directRows = rowsOf<CostCompletionQueueItem>(queue.data);
-    if (directRows.length > 0) return directRows;
-    const dataRecord = recordOf(queue.data);
-    return arrayOf(dataRecord.queue ?? dataRecord.items ?? dataRecord.products) as CostCompletionQueueItem[];
-  }, [queue.data]);
-  const economicsRows = rowsOf<ProductEconomics>(economics.data);
-  const economicsBySku = useMemo(() => new Map(economicsRows.filter((row) => row.sku).map((row) => [String(row.sku), row])), [economicsRows]);
-  const economicsByAsin = useMemo(() => new Map(economicsRows.filter((row) => row.asin).map((row) => [String(row.asin), row])), [economicsRows]);
-
-  const products = useMemo(() => queueRows.map((item, index) => {
-    const raw = item as unknown as AnyRecord;
-    const sku = String(readFirst(raw, ["sku", "sellerSku"]) ?? "");
-    const asin = String(readFirst(raw, ["asin"]) ?? "");
-    const economicsRow = item.economics ?? (sku ? economicsBySku.get(sku) : undefined) ?? (asin ? economicsByAsin.get(asin) : undefined) ?? null;
-    const key = String(readFirst(raw, ["key", "id"]) ?? (sku ? `sku:${sku}` : asin ? `asin:${asin}` : `row:${index}`));
-
-    return {
-      key,
-      sku,
-      asin,
-      productName: String(readFirst(raw, ["productName", "product_name", "title"]) ?? economicsRow?.productName ?? ""),
-      subCategory: String(readFirst(raw, ["subCategory", "sub_category"]) ?? economicsRow?.subCategory ?? ""),
-      sellingPrice: readFirst(raw, ["sellingPrice", "price"]) ?? economicsRow?.sellingPrice,
-      costStatus: String(readFirst(raw, ["costStatus", "status", "profitDataStatus"]) ?? economicsRow?.profitDataStatus ?? "NEEDS_INPUT"),
-      missingFields: readFirst(raw, ["missingFields", "missing_fields"]) ?? [],
-      profitStatus: String(readFirst(raw, ["profitStatus"]) ?? economicsRow?.profitStatus ?? ""),
-      targetAcos: readFirst(raw, ["targetAcos"]) ?? economicsRow?.targetAcos,
-      fulfillmentType: String(readFirst(raw, ["fulfillmentType", "fulfillmentChannel"]) ?? economicsRow?.fulfillmentType ?? ""),
-      productType: String(readFirst(raw, ["productType"]) ?? economicsRow?.productType ?? ""),
-      weightKg: readFirst(raw, ["weightKg"]) ?? economicsRow?.weightKg,
-      volumeCuFt: readFirst(raw, ["volumeCuFt"]) ?? economicsRow?.volumeCuFt,
-      productGstRatePercent: readFirst(raw, ["productGstRatePercent"]) ?? economicsRow?.productGstRatePercent,
-      amazonFeeGstRatePercent: readFirst(raw, ["amazonFeeGstRatePercent"]) ?? economicsRow?.amazonFeeGstRatePercent,
-      marketplaceId: String(readFirst(raw, ["marketplaceId"]) ?? economicsRow?.marketplaceId ?? ""),
-      economics: economicsRow
-    };
-  }), [economicsByAsin, economicsBySku, queueRows]);
-
-  const [selectedKey, setSelectedKey] = useState("");
-  const [form, setForm] = useState({
-    sellingPrice: "",
-    buyingCost: "",
-    requiredProfit: "",
-    fulfillmentType: "FC",
-    productType: "Standard",
-    weightKg: "",
-    volumeCuFt: "",
-    otherFees: "",
-    shippingRegion: "National",
-    categoryException: "No",
-    productGstRatePercent: "18",
-    amazonFeeGstRatePercent: "18",
-    subCategory: "",
-    notes: ""
-  });
-  const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const [calculatedResult, setCalculatedResult] = useState<AnyRecord | null>(null);
-  const selectedProduct = products.find((product) => product.key === selectedKey) ?? null;
-  const resultSource = calculatedResult ?? recordOf(selectedProduct?.economics);
-  const profitBands = arrayOf(readFirst(resultSource, ["profitBands", "profit_bands"]));
-  const hasFounderOverrideBand = profitBands.some((band) => {
-    const record = recordOf(band);
-    return String(record.approvalTier ?? record.approval_tier ?? "").toUpperCase() === "FOUNDER_OVERRIDE_REQUIRED";
-  });
-
-  function openCostForm(product: (typeof products)[number]) {
-    const row = product.economics;
-    setSelectedKey(product.key);
-    setCalculatedResult(row ? (row as unknown as AnyRecord) : null);
-    setSaveMessage("");
-    setSaveError("");
-    setForm({
-      sellingPrice: row?.sellingPrice !== null && row?.sellingPrice !== undefined ? String(row.sellingPrice) : product.sellingPrice !== null && product.sellingPrice !== undefined ? String(product.sellingPrice) : "",
-      buyingCost: row?.buyingCost !== null && row?.buyingCost !== undefined ? String(row.buyingCost) : row?.landedCost !== null && row?.landedCost !== undefined ? String(row.landedCost) : "",
-      requiredProfit: row?.requiredProfit !== null && row?.requiredProfit !== undefined ? String(row.requiredProfit) : row?.targetProfit !== null && row?.targetProfit !== undefined ? String(row.targetProfit) : "",
-      fulfillmentType: row?.fulfillmentType ?? product.fulfillmentType ?? "FC",
-      productType: row?.productType ?? product.productType ?? "Standard",
-      weightKg: row?.weightKg !== null && row?.weightKg !== undefined ? String(row.weightKg) : product.weightKg !== null && product.weightKg !== undefined ? String(product.weightKg) : "",
-      volumeCuFt: row?.volumeCuFt !== null && row?.volumeCuFt !== undefined ? String(row.volumeCuFt) : product.volumeCuFt !== null && product.volumeCuFt !== undefined ? String(product.volumeCuFt) : "",
-      otherFees: row?.otherFees !== null && row?.otherFees !== undefined ? String(row.otherFees) : row?.otherCostPerUnit !== null && row?.otherCostPerUnit !== undefined ? String(row.otherCostPerUnit) : "",
-      shippingRegion: row?.shippingRegion ?? "National",
-      categoryException: row?.categoryException === true ? "Yes" : row?.categoryException === false ? "No" : row?.categoryException ?? "No",
-      productGstRatePercent: row?.productGstRatePercent !== null && row?.productGstRatePercent !== undefined ? String(row.productGstRatePercent) : product.productGstRatePercent !== null && product.productGstRatePercent !== undefined ? String(product.productGstRatePercent) : "18",
-      amazonFeeGstRatePercent: row?.amazonFeeGstRatePercent !== null && row?.amazonFeeGstRatePercent !== undefined ? String(row.amazonFeeGstRatePercent) : product.amazonFeeGstRatePercent !== null && product.amazonFeeGstRatePercent !== undefined ? String(product.amazonFeeGstRatePercent) : "18",
-      subCategory: product.subCategory,
-      notes: row?.notes ?? ""
-    });
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedProduct) return;
-    if (!selectedProduct.subCategory && !form.subCategory) {
-      setSaveError("Choose a subcategory before saving cost data.");
-      return;
-    }
-
-    setSaving(true);
-    setSaveError("");
-    setSaveMessage("");
-
-    try {
-      const response = await postJson<AnyRecord>("/api/product-economics", {
-        sellerId: SELLER_ID,
-        sku: selectedProduct.sku,
-        asin: selectedProduct.asin || null,
-        marketplaceId: selectedProduct.marketplaceId || null,
-        productName: selectedProduct.productName || selectedProduct.sku,
-        subCategory: selectedProduct.subCategory || form.subCategory,
-        sellingPrice: asInputNumber(form.sellingPrice) ?? 0,
-        buyingCost: asInputNumber(form.buyingCost),
-        requiredProfit: asInputNumber(form.requiredProfit) ?? 0,
-        fulfillmentType: form.fulfillmentType,
-        productType: form.productType,
-        weightKg: asInputNumber(form.weightKg),
-        volumeCuFt: asInputNumber(form.volumeCuFt),
-        otherFees: asInputNumber(form.otherFees) ?? 0,
-        otherCostPerUnit: asInputNumber(form.otherFees) ?? 0,
-        shippingRegion: form.shippingRegion,
-        categoryException: form.categoryException,
-        productGstRatePercent: asInputNumber(form.productGstRatePercent) ?? 18,
-        amazonFeeGstRatePercent: asInputNumber(form.amazonFeeGstRatePercent) ?? 18,
-        notes: form.notes.trim() || null
-      });
-
-      const result = recordOf(response.economics ?? response.row ?? response.result ?? response.calculation ?? response);
-      setCalculatedResult(result);
-      setSaveMessage("Cost data saved. Amazon fee calculations refreshed.");
-      queue.reload();
-      economics.reload();
-    } catch {
-      setSaveError("Could not save cost data. Backend may still be deploying.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const calculatedRows = [
-    ["Net Revenue before GST", ["netRevenueBeforeGst", "net_revenue_before_gst"], "money"],
-    ["Output GST on Sale", ["outputGstOnSale", "output_gst_on_sale"], "money"],
-    ["Referral Fee %", ["referralFeePercent", "referral_fee_percent", "feeBreakdown.referralFeePercent"], "percent"],
-    ["Referral Fee", ["referralFee", "referral_fee", "amazonFeeEstimate", "amazon_fee_estimate", "feeBreakdown.referralFee"], "money"],
-    ["Closing Fee", ["closingFee", "closing_fee", "feeBreakdown.closingFee"], "money"],
-    ["Shipping Fee", ["shippingFee", "shipping_fee", "shippingFeeEstimate", "shipping_fee_estimate", "feeBreakdown.shippingFee"], "money"],
-    ["Pick & Pack Fee", ["pickAndPackFee", "pick_and_pack_fee", "feeBreakdown.pickAndPackFee"], "money"],
-    ["Storage Fee", ["storageFee", "storage_fee", "feeBreakdown.storageFee"], "money"],
-    ["Other Fees", ["otherFees", "other_fees", "otherCostPerUnit", "other_cost_per_unit"], "money"],
-    ["Total Amazon Fees", ["totalAmazonFees", "total_amazon_fees", "feeBreakdown.totalAmazonFees"], "money"],
-    ["GST on Amazon Fees", ["gstOnAmazonFees", "gst_on_amazon_fees", "feeBreakdown.gstOnAmazonFees"], "money"],
-    ["Return Cost Provision", ["returnCostProvision", "return_cost_provision"], "money"],
-    ["Gross Profit", ["grossProfit", "gross_profit"], "money"],
-    ["Net Profit", ["netProfit", "net_profit"], "money"],
-    ["Net Profit Before Ads", ["netProfitBeforeAds", "net_profit_before_ads"], "money"],
-    ["Profit Margin %", ["profitMargin", "profit_margin"], "percent"],
-    ["Max Allowable Ad Spend", ["maxAllowableAdSpend", "max_allowable_ad_spend"], "money"],
-    ["Target ACOS", ["targetAcos", "target_acos"], "percent"],
-    ["Break-even ACOS", ["breakEvenAcos", "break_even_acos"], "percent"],
-    ["Fee Rules Version", ["feeRulesVersion", "fee_rules_version"], "text"]
-  ] as const;
-
-  return (
-    <div className="page">
-      <PageHeader
-        title={title}
-        subtitle="Review economics inputs, Amazon fee calculations, and profit readiness without changing Amazon or Ads."
-      />
-
-      <Card title="Economics Inputs">
-        {queue.loading || economics.loading ? <LoadingBlock /> : queue.error || economics.error ? (
-          <ErrorBlock text="Could not load cost queue. Backend may still be deploying." />
-        ) : products.length === 0 ? (
-          <EmptyBlock text="No products need cost completion right now." />
-        ) : (
-          <div className="table-wrap cost-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Product Name</th>
-                  <th>SKU</th>
-                  <th>ASIN</th>
-                  <th>Subcategory</th>
-                  <th>Selling Price</th>
-                  <th>Cost Status</th>
-                  <th>Missing Fields</th>
-                  <th>Profit Status</th>
-                  <th>Target ACOS</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => (
-                  <tr key={product.key}>
-                    <td>{formatEmpty(product.productName)}</td>
-                    <td>{formatEmpty(product.sku)}</td>
-                    <td>{formatEmpty(product.asin)}</td>
-                    <td>{product.subCategory ? formatEmpty(product.subCategory) : <StatusBadge value="Subcategory missing" />}</td>
-                    <td>{formatMoney(product.sellingPrice)}</td>
-                    <td><StatusBadge value={product.costStatus} /></td>
-                    <td>{queueMissingFields(product.missingFields)}</td>
-                    <td><StatusBadge value={product.profitStatus || product.economics?.profitStatus || "NEEDS_INPUT"} /></td>
-                    <td>{formatPercent(product.targetAcos ?? product.economics?.targetAcos)}</td>
-                    <td><button type="button" onClick={() => openCostForm(product)}>{product.economics ? "Edit Cost" : "Complete Cost Data"}</button></td>
+                {rows.map((row, index) => (
+                  <tr key={index}>
+                    <td>{formatEmpty(row.sku)}</td>
+                    <td>{formatEmpty(row.asin)}</td>
+                    <td>{formatMoney(row.sellingPrice ?? row.price)}</td>
+                    <td>{formatMoney(row.netProfit ?? row.net_profit)}</td>
+                    <td>{formatPercent(row.profitMargin ?? row.margin)}</td>
+                    <td><StatusBadge value={row.profitStatus ?? row.costStatus} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
+        ) : <EmptyBlock />}
       </Card>
-
-      <Card title="Cost Completion">
-        {!selectedProduct ? (
-          <EmptyBlock text="Choose Complete Cost Data or Edit Cost from the queue." />
-        ) : (
-          <form className="form-grid" onSubmit={submit}>
-            <ReadOnlyField label="SKU" value={formatEmpty(selectedProduct.sku)} />
-            <ReadOnlyField label="ASIN" value={formatEmpty(selectedProduct.asin)} />
-            <ReadOnlyField label="Product Name" value={formatEmpty(selectedProduct.productName)} />
-            {selectedProduct.subCategory ? (
-              <ReadOnlyField label="Subcategory" value={formatEmpty(selectedProduct.subCategory)} />
-            ) : (
-              <label className="field">
-                <span>Subcategory</span>
-                <select value={form.subCategory} onChange={(event) => setForm({ ...form, subCategory: event.target.value })}>
-                  <option value="">Subcategory missing</option>
-                  {referralFeeSubcategories.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </label>
-            )}
-            <TextInput label="Selling Price" type="number" value={form.sellingPrice} onChange={(value) => setForm({ ...form, sellingPrice: value })} />
-            <TextInput label="Product Cost / Buying Cost" type="number" value={form.buyingCost} onChange={(value) => setForm({ ...form, buyingCost: value })} />
-            <TextInput label="Required Profit" type="number" value={form.requiredProfit} onChange={(value) => setForm({ ...form, requiredProfit: value })} />
-            <SelectField label="Fulfillment Type" value={form.fulfillmentType} options={["FC", "Easy Ship", "Easy Ship Prime", "Self Ship", "Seller Flex"]} onChange={(value) => setForm({ ...form, fulfillmentType: value })} />
-            <SelectField label="Product Type" value={form.productType} options={["Standard", "Oversize"]} onChange={(value) => setForm({ ...form, productType: value })} />
-            <TextInput label="Weight kg" type="number" value={form.weightKg} onChange={(value) => setForm({ ...form, weightKg: value })} />
-            <TextInput label="Volume cu ft" type="number" value={form.volumeCuFt} onChange={(value) => setForm({ ...form, volumeCuFt: value })} />
-            <TextInput label="Other Fees" type="number" value={form.otherFees} onChange={(value) => setForm({ ...form, otherFees: value })} />
-            <SelectField label="Shipping Region" value={form.shippingRegion} options={["National"]} onChange={(value) => setForm({ ...form, shippingRegion: value })} />
-            <SelectField label="Category Exception" value={form.categoryException} options={["No", "Yes"]} onChange={(value) => setForm({ ...form, categoryException: value })} />
-            <details className="advanced-settings field-wide">
-              <summary>Advanced Tax Settings</summary>
-              <div className="advanced-settings-grid">
-                <TextInput label="Product GST Rate %" type="number" value={form.productGstRatePercent} onChange={(value) => setForm({ ...form, productGstRatePercent: value })} />
-                <TextInput label="Amazon Fee GST Rate %" type="number" value={form.amazonFeeGstRatePercent} onChange={(value) => setForm({ ...form, amazonFeeGstRatePercent: value })} />
-              </div>
-            </details>
-            <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
-            <div className="field-wide cost-form-actions">
-              <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
-              {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
-              {saveError ? <span className="save-error">{saveError}</span> : null}
-            </div>
-          </form>
-        )}
-      </Card>
-
-      {selectedProduct && Object.keys(resultSource).length > 0 ? (
-        <Card title="Calculated Result">
-          <div className="calculated-grid">
-            {calculatedRows.map(([label, keys, format]) => {
-              const value = readFirst(resultSource, [...keys]);
-              const display = format === "money" ? formatMoney(value) : format === "percent" ? formatPercent(value) : formatEmpty(value);
-              return <MetricRow key={label} label={label} value={display} />;
-            })}
-            <MetricRow label="Profit Status" value={<StatusBadge value={readFirst(resultSource, ["profitStatus", "profit_status"]) ?? "NEEDS_INPUT"} />} />
-          </div>
-        </Card>
-      ) : null}
-
-      {selectedProduct && profitBands.length > 0 ? (
-        <Card title="Profit Flex Options">
-          <p className="section-note">Lower profit bands are approval-only. This screen does not auto-apply any lower profit target.</p>
-          {hasFounderOverrideBand ? (
-            <div className="warning-card profit-band-warning">
-              <StatusBadge value="FOUNDER_OVERRIDE_REQUIRED" />
-              <p>This profit band is too far below target. Founder override required.</p>
-            </div>
-          ) : null}
-          <div className="table-wrap profit-band-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Profit Band</th>
-                  <th>Target ACOS</th>
-                  <th>Max Allowable Ad Spend</th>
-                  <th>Risk Level</th>
-                  <th>Approval Required</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {profitBands.map((band, index) => {
-                  const bandRecord = recordOf(band);
-                  const approvalRequired = Boolean(readFirst(bandRecord, ["approvalRequired", "approval_required"]));
-                  const approvalTier = String(readFirst(bandRecord, ["approvalTier", "approval_tier"]) ?? "");
-                  const bandWarning = String(readFirst(bandRecord, ["warning"]) ?? "");
-                  const status = approvalTier || (approvalRequired ? "APPROVAL_REQUIRED" : "AVAILABLE");
-                  const needsFounderOverride =
-                    approvalTier.toUpperCase() === "FOUNDER_OVERRIDE_REQUIRED" ||
-                    bandWarning.toLowerCase().includes("significantly below") ||
-                    bandWarning.toLowerCase().includes("too far");
-
-                  return (
-                    <tr key={String(readFirst(bandRecord, ["bandLabel", "band_label"]) ?? index)}>
-                      <td>
-                        <strong>{formatEmpty(readFirst(bandRecord, ["bandLabel", "band_label"]))}</strong>
-                        {needsFounderOverride ? <p className="table-warning">Founder override required.</p> : null}
-                      </td>
-                      <td>{formatPercent(readFirst(bandRecord, ["targetAcos", "target_acos"]))}</td>
-                      <td>{formatMoney(readFirst(bandRecord, ["maxAllowableAdSpend", "max_allowable_ad_spend"]))}</td>
-                      <td><StatusBadge value={readFirst(bandRecord, ["riskLevel", "risk_level"])} /></td>
-                      <td>{approvalRequired ? "Approval Required" : "No Approval Required"}</td>
-                      <td><StatusBadge value={status} /></td>
-                      <td>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => setSaveMessage("Profit band approval request noted for review. No lower profit band was applied automatically.")}
-                        >
-                          Request Approval for This Profit Band
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      ) : null}
     </div>
   );
 }
 
 function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
-  const live = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
-  const saved = useApi<ApiRows<Recommendation>>(() => getJson(`/api/recommendations?sellerId=${SELLER_ID}`));
-  const [saving, setSaving] = useState(false);
-
-  const liveData = live.data ?? {};
-  const scale = [
-    ...arrayOf(liveData.scaleOpportunities),
-    ...arrayOf(liveData.exactMatchOpportunities),
-    ...arrayOf(liveData.productTargetingOpportunities)
-  ];
-  const watchlist = [...arrayOf(liveData.watchlistRisks), ...arrayOf(liveData.watchlistWasteTerms)];
-  const listingWarnings = arrayOf(liveData.listingCheckWarnings ?? liveData.productPageCheckWarnings);
-  const savedRows = rowsOf<Recommendation>(saved.data).filter((row) => row.status === "NEW").slice(0, 10);
-
-  async function generateAndSave() {
-    setSaving(true);
-    try {
-      await getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35&save=true`);
-      saved.reload();
-    } finally {
-      setSaving(false);
-    }
-  }
+  const recommendations = useApi<ApiRows<Recommendation>>(() => getJson(`/api/ppc-recommendations?sellerId=${SELLER_ID}`));
+  const rows = rowsOf<Recommendation>(recommendations.data);
 
   return (
     <div className="page">
-      <PageHeader title="PPC Recommendations" subtitle="Shadow-mode ideas only. No Amazon action is executed here." />
-      <div className="button-row">
-        <button type="button" disabled={saving} onClick={generateAndSave}>{saving ? "Saving..." : "Generate & Save Recommendations"}</button>
-        <button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>
-      </div>
-      {live.loading ? <LoadingBlock /> : live.error ? <ErrorBlock /> : (
-        <div className="stack">
-          <RecommendationSection title="Scale Opportunities" rows={scale} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} />
-          <RecommendationSection title="Watchlist Risks" rows={watchlist} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} />
-          <RecommendationSection title="Listing Check Warnings" rows={listingWarnings} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} />
-        </div>
-      )}
-      <RecommendationSection title="Pending Saved Recommendations" rows={savedRows as unknown as AnyRecord[]} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} loading={saved.loading} error={saved.error} />
+      <PageHeader title="PPC Recommendations" subtitle="AI-generated campaign optimization suggestions." />
+
+      <Card title="Recommendations">
+        {recommendations.loading ? <LoadingBlock /> : recommendations.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="item-list">
+            {rows.map((row, index) => (
+              <RecommendationCard key={index} item={row as AnyRecord} />
+            ))}
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
-}
-
-function RecommendationSection({ title, rows, footer, loading, error }: { title: string; rows: AnyRecord[]; footer?: ReactNode; loading?: boolean; error?: string | null }) {
-  return (
-    <Card title={title}>
-      {loading ? <LoadingBlock /> : error ? <ErrorBlock /> : rows.length === 0 ? <EmptyBlock /> : (
-        <div className="card-list">
-          {rows.slice(0, 8).map((row, index) => (
-            <RecommendationCard key={String(row.id ?? row.entityValue ?? index)} item={row} footer={footer} />
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-type EngineSortMode = "PRIORITY_FIRST" | "RISK_HIGH_FIRST" | "CATEGORY" | "LAST_RUN_NEWEST" | "LAST_RUN_OLDEST";
-
-const engineCategories = [
-  "All",
-  "DATA_QUALITY",
-  "PRODUCT_ECONOMICS",
-  "PPC",
-  "LISTING_SEO",
-  "LISTING_CONVERSION",
-  "INVENTORY",
-  "PRICING",
-  "ACCOUNT_HEALTH",
-  "RETURNS_REVIEWS",
-  "COMPETITOR_INTELLIGENCE",
-  "SEASONALITY",
-  "CONTENT_A_PLUS",
-  "IMAGE_CREATIVE",
-  "BRAND_STORE",
-  "SOCIAL_CONTENT"
-];
-const engineSortOptions = ["Priority First", "Risk High First", "Category", "Last Run Newest", "Last Run Oldest"];
-const ENGINE_REGISTRY_PAGE_SIZE = 25;
-
-function firstRecordRows<T extends AnyRecord>(...sources: unknown[]): T[] {
-  for (const source of sources) {
-    const rows = recordsOf(source);
-    if (rows.length > 0) return rows as T[];
-  }
-  return [];
-}
-
-function engineRegistryRowsOf(value: unknown): EngineRegistryItem[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  const registry = recordOf(root.registry);
-  return firstRecordRows<EngineRegistryItem>(
-    value,
-    root.engines,
-    root.registry,
-    root.items,
-    root.data,
-    data.engines,
-    data.registry,
-    data.items,
-    result.engines,
-    registry.engines
-  );
-}
-
-function engineRunLogsOf(value: unknown): EngineRunLog[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<EngineRunLog>(
-    value,
-    root.logs,
-    root.runLogs,
-    root.items,
-    root.data,
-    data.logs,
-    data.runLogs,
-    result.logs,
-    result.runLogs
-  );
-}
-
-function engineNestedRecord(row: AnyRecord): AnyRecord {
-  return recordOf(row.engine ?? row.registryEntry ?? row.registry ?? row.engineRegistry ?? row.definition);
-}
-
-function engineField(row: AnyRecord, keys: string[]): unknown {
-  const direct = readFirst(row, keys);
-  if (direct !== undefined) return direct;
-  return readFirst(engineNestedRecord(row), keys);
-}
-
-function engineKeyOf(row: AnyRecord): string {
-  return String(engineField(row, ["engineKey", "key", "id", "engine_key"]) ?? "");
-}
-
-function engineNameOf(row: AnyRecord): string {
-  return String(engineField(row, ["engineName", "name", "displayName", "title", "engine_name"]) ?? engineKeyOf(row));
-}
-
-function engineLastRun(row: AnyRecord): AnyRecord {
-  return recordOf(engineField(row, ["lastRun", "lastRunLog", "latestRun", "last_run"]));
-}
-
-function engineLastRunField(row: AnyRecord, keys: string[]): unknown {
-  const direct = engineField(row, keys);
-  if (direct !== undefined) return direct;
-  return readFirst(engineLastRun(row), keys);
-}
-
-function engineEnabled(row: AnyRecord): boolean {
-  const value = engineField(row, ["enabled", "isEnabled", "is_enabled"]);
-  if (value === undefined) return normalizeState(engineField(row, ["status"])) !== "DISABLED";
-  return readBoolean(value);
-}
-
-function engineShadowMode(row: AnyRecord): boolean {
-  const value = engineField(row, ["shadowMode", "isShadowMode", "previewOnly", "shadow_mode"]);
-  if (value !== undefined) return readBoolean(value);
-  const mode = normalizeState(engineField(row, ["mode", "executionMode", "runMode"]));
-  return mode === "" || mode.includes("SHADOW") || mode.includes("PREVIEW");
-}
-
-function engineRequiresApproval(row: AnyRecord): boolean {
-  const value = engineField(row, ["requiresApproval", "approvalRequired", "requires_approval", "approval_required"]);
-  return value === undefined ? true : readBoolean(value);
-}
-
-function enginePriority(row: AnyRecord): number {
-  return readNumber(engineField(row, ["priorityScore", "priority_score", "priority", "score"]));
-}
-
-function engineLastRunTimestamp(row: AnyRecord): number | null {
-  const value = engineLastRunField(row, ["lastRunAt", "last_run_at", "finishedAt", "finished_at", "startedAt", "started_at", "createdAt", "created_at"]);
-  const parsed = Date.parse(String(value ?? ""));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function engineRiskPriority(row: AnyRecord): number {
-  const risk = normalizeState(engineField(row, ["riskLevel", "risk_level", "risk"]));
-  if (["HIGH", "CRITICAL", "VERY_HIGH"].includes(risk)) return 0;
-  if (risk === "MEDIUM") return 1;
-  if (risk === "LOW") return 2;
-  return 3;
-}
-
-function engineCategoryOf(row: AnyRecord): string {
-  return String(engineField(row, ["category"]) ?? "");
-}
-
-function engineSearchText(row: AnyRecord): string {
-  return [
-    engineKeyOf(row),
-    engineNameOf(row),
-    engineCategoryOf(row),
-    engineField(row, ["subcategory", "subCategory", "sub_category"]),
-    engineField(row, ["outputActionType", "actionType", "output_action_type"]),
-    engineField(row, ["ruleTemplate", "rule_template"]),
-    engineField(row, ["ownerModule", "owner_module"])
-  ].map((value) => String(value ?? "").toLowerCase()).join(" ");
-}
-
-function sortEngineRows(rows: EngineRegistryItem[], sortMode: EngineSortMode): EngineRegistryItem[] {
-  return [...rows].sort((a, b) => {
-    if (sortMode === "RISK_HIGH_FIRST") {
-      return engineRiskPriority(a) - engineRiskPriority(b) || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-    }
-    if (sortMode === "CATEGORY") {
-      return engineCategoryOf(a).localeCompare(engineCategoryOf(b)) || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-    }
-    if (sortMode === "LAST_RUN_NEWEST") {
-      const aTime = engineLastRunTimestamp(a);
-      const bTime = engineLastRunTimestamp(b);
-      if (aTime === null && bTime === null) return enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-      if (aTime === null) return 1;
-      if (bTime === null) return -1;
-      return bTime - aTime || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-    }
-    if (sortMode === "LAST_RUN_OLDEST") {
-      const aTime = engineLastRunTimestamp(a);
-      const bTime = engineLastRunTimestamp(b);
-      if (aTime === null && bTime === null) return enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-      if (aTime === null) return -1;
-      if (bTime === null) return 1;
-      return aTime - bTime || enginePriority(b) - enginePriority(a) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-    }
-    return enginePriority(b) - enginePriority(a) || engineRiskPriority(a) - engineRiskPriority(b) || engineKeyOf(a).localeCompare(engineKeyOf(b));
-  });
-}
-
-function engineSortModeFromLabel(label: string): EngineSortMode {
-  if (label === "Risk High First") return "RISK_HIGH_FIRST";
-  if (label === "Category") return "CATEGORY";
-  if (label === "Last Run Newest") return "LAST_RUN_NEWEST";
-  if (label === "Last Run Oldest") return "LAST_RUN_OLDEST";
-  return "PRIORITY_FIRST";
-}
-
-function engineSortLabel(sortMode: EngineSortMode): string {
-  if (sortMode === "RISK_HIGH_FIRST") return "Risk High First";
-  if (sortMode === "CATEGORY") return "Category";
-  if (sortMode === "LAST_RUN_NEWEST") return "Last Run Newest";
-  if (sortMode === "LAST_RUN_OLDEST") return "Last Run Oldest";
-  return "Priority First";
-}
-
-function summaryNumber(source: unknown, keys: string[], fallback = 0): number {
-  const value = readFirst(source, keys);
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function responseCount(value: unknown, keys: string[]): number {
-  const root = recordOf(value);
-  const result = recordOf(root.result);
-  const summary = recordOf(root.summary);
-  return summaryNumber(root, keys, summaryNumber(result, keys, summaryNumber(summary, keys, 0)));
-}
-
-function runLogField(row: EngineRunLog, keys: string[]): unknown {
-  return readFirst(row, keys);
 }
 
 function EngineCommandCenterPage() {
-  const registrySummary = useApi<AnyRecord>(() => getJson("/api/engine-registry/summary"));
-  const routerSummary = useApi<AnyRecord>(() => getJson(`/api/engine-router/summary?sellerId=${SELLER_ID}`));
-  const registry = useApi<unknown>(() => getJson("/api/engine-registry?limit=300"));
-  const dailyPlan = useApi<unknown>(() => getJson(`/api/engine-router/daily-plan?sellerId=${SELLER_ID}&limit=25`));
-  const runLogs = useApi<unknown>(() => getJson(`/api/engine-router/run-logs?sellerId=${SELLER_ID}&limit=50`));
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortMode, setSortMode] = useState<EngineSortMode>("PRIORITY_FIRST");
-  const [enginePage, setEnginePage] = useState(1);
-  const [runningEngineKey, setRunningEngineKey] = useState<string | null>(null);
-  const [togglingEngineKey, setTogglingEngineKey] = useState<string | null>(null);
-  const [runningDaily, setRunningDaily] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  const engineRows = useMemo(() => engineRegistryRowsOf(registry.data), [registry.data]);
-  const dailyPlanRows = useMemo(() => engineRegistryRowsOf(dailyPlan.data).slice(0, 25), [dailyPlan.data]);
-  const logRows = useMemo(() => engineRunLogsOf(runLogs.data), [runLogs.data]);
-  const registrySummaryRoot = recordOf(registrySummary.data?.summary ?? registrySummary.data?.data ?? registrySummary.data);
-  const routerSummaryRoot = recordOf(routerSummary.data?.summary ?? routerSummary.data?.data ?? routerSummary.data);
-  const filteredEngines = useMemo(() => {
-    const normalizedSearch = searchQuery.trim().toLowerCase();
-    const rows = engineRows.filter((row) => {
-      const categoryMatches = categoryFilter === "All" || normalizeState(engineCategoryOf(row)) === categoryFilter;
-      const searchMatches = !normalizedSearch || engineSearchText(row).includes(normalizedSearch);
-      return categoryMatches && searchMatches;
-    });
-    return sortEngineRows(rows, sortMode);
-  }, [categoryFilter, engineRows, searchQuery, sortMode]);
-  const enginePageCount = Math.max(1, Math.ceil(filteredEngines.length / ENGINE_REGISTRY_PAGE_SIZE));
-  const currentEnginePage = Math.min(enginePage, enginePageCount);
-  const enginePageStartIndex = filteredEngines.length === 0 ? 0 : (currentEnginePage - 1) * ENGINE_REGISTRY_PAGE_SIZE;
-  const enginePageEndIndex = Math.min(enginePageStartIndex + ENGINE_REGISTRY_PAGE_SIZE, filteredEngines.length);
-  const visibleEngines = filteredEngines.slice(enginePageStartIndex, enginePageEndIndex);
-  const filtersActive = categoryFilter !== "All" || searchQuery.trim().length > 0;
-  const controlsDisabled = Boolean(runningEngineKey || togglingEngineKey || runningDaily);
-
-  useEffect(() => {
-    if (enginePage > enginePageCount) {
-      setEnginePage(enginePageCount);
-    }
-  }, [enginePage, enginePageCount]);
-
-  const summaryCards = [
-    {
-      label: "Total Engines",
-      value: registrySummary.loading && !registrySummary.data ? "..." : summaryNumber(registrySummaryRoot, ["totalEngines", "engineCount", "total", "count"], engineRows.length)
-    },
-    {
-      label: "Enabled Engines",
-      value: registrySummary.loading && !registrySummary.data ? "..." : summaryNumber(registrySummaryRoot, ["enabledEngines", "enabledCount"], engineRows.filter(engineEnabled).length)
-    },
-    {
-      label: "Shadow Mode Engines",
-      value: registrySummary.loading && !registrySummary.data ? "..." : summaryNumber(registrySummaryRoot, ["shadowModeEngines", "shadowModeCount", "previewOnlyCount"], engineRows.filter(engineShadowMode).length)
-    },
-    {
-      label: "Approval Required",
-      value: registrySummary.loading && !registrySummary.data ? "..." : summaryNumber(registrySummaryRoot, ["approvalRequired", "approvalRequiredEngines", "approvalRequiredCount", "requiresApprovalCount"], engineRows.filter(engineRequiresApproval).length)
-    },
-    {
-      label: "Last 24h Runs",
-      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["last24hRuns", "runsLast24h", "last24HoursRuns"], 0)
-    },
-    {
-      label: "Actions Created",
-      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["last24hActionsCreated", "actionsCreated", "actionsCreatedCount", "totalActionsCreated"], 0)
-    },
-    {
-      label: "Failed Runs",
-      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["failedRuns", "failedRunCount"], 0)
-    },
-    {
-      label: "Preview Runs",
-      value: routerSummary.loading && !routerSummary.data ? "..." : summaryNumber(routerSummaryRoot, ["previewOnlyRuns", "previewRuns", "previewRunCount"], 0)
-    }
-  ];
-
-  function refreshEngineData() {
-    registrySummary.reload();
-    routerSummary.reload();
-    registry.reload();
-    dailyPlan.reload();
-    runLogs.reload();
-  }
-
-  async function runEnginePreview(engineKey: string) {
-    setRunningEngineKey(engineKey);
-    setMessage(null);
-    try {
-      await postJson(`/api/engine-router/run-engine/${encodeURIComponent(engineKey)}`, {
-        sellerId: SELLER_ID,
-        actor: "founder"
-      });
-      refreshEngineData();
-      setMessage({ type: "success", text: "Preview run completed. No external action executed." });
-    } catch {
-      setMessage({ type: "error", text: "Could not run preview." });
-    } finally {
-      setRunningEngineKey(null);
-    }
-  }
-
-  async function toggleEngine(row: EngineRegistryItem) {
-    const engineKey = engineKeyOf(row);
-    const enabled = !engineEnabled(row);
-    setTogglingEngineKey(engineKey);
-    setMessage(null);
-    try {
-      await postJson(`/api/engine-registry/${encodeURIComponent(engineKey)}/toggle`, {
-        enabled,
-        actor: "founder",
-        note: "Toggled from Engine Command Center"
-      });
-      registrySummary.reload();
-      routerSummary.reload();
-      registry.reload();
-      setMessage({ type: "success", text: `${engineNameOf(row)} ${enabled ? "enabled" : "disabled"}.` });
-    } catch {
-      setMessage({ type: "error", text: "Could not update engine status." });
-    } finally {
-      setTogglingEngineKey(null);
-    }
-  }
-
-  async function runDailyPreview() {
-    setRunningDaily(true);
-    setMessage(null);
-    try {
-      const response = await postJson<AnyRecord>("/api/engine-router/run-preview", {
-        sellerId: SELLER_ID,
-        limit: 25,
-        actor: "founder"
-      });
-      refreshEngineData();
-      const enginesRun = responseCount(response, ["enginesRun", "enginesRunCount", "runCount"]);
-      const actionsCreated = responseCount(response, ["actionsCreated", "actionsCreatedCount"]);
-      const skippedCount = responseCount(response, ["skippedCount", "enginesSkipped", "skipped"]);
-      setMessage({
-        type: "success",
-        text: `Daily preview completed. Engines run: ${enginesRun}. Actions created: ${actionsCreated}. Skipped: ${skippedCount}. No external action executed.`
-      });
-    } catch {
-      setMessage({ type: "error", text: "Could not run preview." });
-    } finally {
-      setRunningDaily(false);
-    }
-  }
+  const registry = useApi<EngineRegistryItem[]>(() => getJson(`/api/engine-registry?sellerId=${SELLER_ID}`));
+  const logs = useApi<EngineRunLog[]>(() => getJson(`/api/engine-logs?sellerId=${SELLER_ID}`));
 
   return (
-    <div className="page engine-command-center">
-      <PageHeader
-        title="Engine Command Center"
-        subtitle="300-engine AI-CGO foundation. Shadow mode active. No Amazon or Ads action is executed."
-      />
-      <div className="warning-card approval-warning engine-safety-banner">
-        <p>All engines are running in preview/shadow mode. Recommendations go to Approval Center only. No external Amazon, Ads, Listing, Image, A+, Store, or Social action is executed.</p>
-      </div>
-      <div className="summary-strip engine-summary" aria-label="Engine summary">
-        {summaryCards.map((card) => (
-          <MetricTile key={card.label} label={card.label} value={card.value} />
-        ))}
-      </div>
-      {registrySummary.error || routerSummary.error ? (
-        <ErrorBlock text="Could not load engine registry" />
-      ) : null}
-      {message ? <div className={`soft-state ${message.type === "error" ? "error-state" : "success-state"} engine-message`}>{message.text}</div> : null}
+    <div className="page">
+      <PageHeader title="Engine Command Center" subtitle="Monitor and control AI engine execution." />
 
       <Card title="Engine Registry">
-        <div className="engine-controls">
-          <TextInput
-            label="Search engines"
-            value={searchQuery}
-            onChange={(value) => {
-              setSearchQuery(value);
-              setEnginePage(1);
-            }}
-          />
-          <SelectField
-            label="Sort"
-            value={engineSortLabel(sortMode)}
-            options={engineSortOptions}
-            onChange={(value) => setSortMode(engineSortModeFromLabel(value))}
-          />
-        </div>
-        <div className="segmented engine-category-filter" aria-label="Engine categories">
-          {engineCategories.map((category) => (
-            <button
-              key={category}
-              type="button"
-              className={categoryFilter === category ? "active" : ""}
-              onClick={() => {
-                setCategoryFilter(category);
-                setEnginePage(1);
-              }}
-            >
-              {category}
-            </button>
-          ))}
-        </div>
-        {!registry.loading && !registry.error ? (
-          <div className="approval-pagination engine-pagination" aria-label="Engine registry pagination">
-            <span>
-              {filteredEngines.length === 0 ? (
-                <>Showing 0 of {engineRows.length} loaded engines{filtersActive ? " after filters" : ""}</>
-              ) : filtersActive ? (
-                <>Showing {enginePageStartIndex + 1}-{enginePageEndIndex} of {filteredEngines.length} matching engines ({engineRows.length} loaded)</>
-              ) : (
-                <>Showing {enginePageStartIndex + 1}-{enginePageEndIndex} of {engineRows.length} loaded engines</>
-              )}
-            </span>
-            <div className="button-row compact engine-pagination-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setEnginePage((page) => Math.max(1, page - 1))}
-                disabled={currentEnginePage <= 1}
-              >
-                Previous
-              </button>
-              <span>Page {currentEnginePage} of {enginePageCount}</span>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setEnginePage((page) => Math.min(enginePageCount, page + 1))}
-                disabled={currentEnginePage >= enginePageCount}
-              >
-                Next
-              </button>
-            </div>
+        {registry.loading ? <LoadingBlock /> : registry.error ? <ErrorBlock /> : registry.data && registry.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Engine</th><th>Status</th><th>Last Run</th><th>Health</th></tr></thead>
+              <tbody>
+                {registry.data.map((engine) => (
+                  <tr key={engine.engineId}>
+                    <td>{formatEmpty(engine.name)}</td>
+                    <td><StatusBadge value={engine.status} /></td>
+                    <td>{formatEmpty(engine.lastRunDate)}</td>
+                    <td><StatusBadge value={engine.health} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ) : null}
-        {registry.loading ? <LoadingBlock text="Loading engines..." /> : registry.error ? (
-          <ErrorBlock text="Could not load engine registry" />
-        ) : engineRows.length === 0 ? (
-          <EmptyBlock text="No engines returned from registry." />
-        ) : filteredEngines.length === 0 ? (
-          <EmptyBlock text="No engines match this filter." />
-        ) : (
-          <>
-            <div className="engine-card-list">
-              {visibleEngines.map((row, index) => {
-                const engineKey = engineKeyOf(row) || `engine-${enginePageStartIndex + index}`;
-                const enabled = engineEnabled(row);
-                const lastRunStatus = engineLastRunField(row, ["lastRunStatus", "runStatus", "status", "last_run_status"]);
-                const lastRunSummary = engineLastRunField(row, ["lastRunSummary", "summary", "message", "last_run_summary"]);
-                const lastRunAt = engineLastRunField(row, ["lastRunAt", "last_run_at", "finishedAt", "finished_at", "startedAt", "started_at", "createdAt", "created_at"]);
-
-                return (
-                  <article className="item-card engine-card" key={engineKey}>
-                    <div className="approval-card-head engine-card-head">
-                      <div className="approval-title-block">
-                        <strong>{formatEmpty(engineNameOf(row))}</strong>
-                        <span>{formatEmpty(engineKey)}</span>
-                      </div>
-                      <div className="badge-row approval-badges engine-badges">
-                        <StatusBadge value={engineCategoryOf(row) || "UNCATEGORIZED"} />
-                        <StatusBadge value={engineField(row, ["riskLevel", "risk_level", "risk"]) ?? "LOW"} />
-                        <StatusBadge value={enabled ? "ENABLED" : "DISABLED"} />
-                        {engineShadowMode(row) ? <StatusBadge value="SHADOW" /> : null}
-                        {engineRequiresApproval(row) ? <StatusBadge value="APPROVAL_REQUIRED" /> : null}
-                      </div>
-                    </div>
-                    <div className="detail-grid engine-detail-grid">
-                      <MetricRow label="Category" value={formatEmpty(engineCategoryOf(row))} />
-                      <MetricRow label="Subcategory" value={formatEmpty(engineField(row, ["subcategory", "subCategory", "sub_category"]))} />
-                      <MetricRow label="Rule Template" value={formatEmpty(engineField(row, ["ruleTemplate", "rule_template"]))} />
-                      <MetricRow label="Output Action Type" value={formatEmpty(engineField(row, ["outputActionType", "actionType", "output_action_type"]))} />
-                      <MetricRow label="Cost Level" value={<StatusBadge value={engineField(row, ["costLevel", "cost_level"]) ?? "LOW"} />} />
-                      <MetricRow label="Priority Score" value={formatEmpty(engineField(row, ["priorityScore", "priority_score", "priority", "score"]))} />
-                      <MetricRow label="Last Run Status" value={<StatusBadge value={lastRunStatus ?? "NOT_RUN"} />} />
-                      <MetricRow label="Last Run At" value={formatLocalDateTime(lastRunAt)} />
-                    </div>
-                    <p className="section-note engine-run-summary">{formatEmpty(lastRunSummary)}</p>
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => runEnginePreview(engineKey)} disabled={controlsDisabled || !engineKey}>
-                        {runningEngineKey === engineKey ? "Running..." : "Run Preview"}
-                      </button>
-                      <button type="button" className="secondary" onClick={() => toggleEngine(row)} disabled={controlsDisabled || !engineKey}>
-                        {togglingEngineKey === engineKey ? "Saving..." : enabled ? "Disable" : "Enable"}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </>
-        )}
+        ) : <EmptyBlock />}
       </Card>
 
-      <div className="engine-section-grid">
-        <Card
-          title="Daily Plan"
-          action={(
-            <div className="button-row compact">
-              <button type="button" className="secondary" onClick={dailyPlan.reload} disabled={controlsDisabled}>Refresh Daily Plan</button>
-              <button type="button" onClick={runDailyPreview} disabled={controlsDisabled}>
-                {runningDaily ? "Running..." : "Run Daily Preview"}
-              </button>
-            </div>
-          )}
-        >
-          <p className="section-note">Engines do not directly change Amazon. They create approval items in Approval Center.</p>
-          {dailyPlan.loading ? <LoadingBlock text="Loading daily plan..." /> : dailyPlan.error ? (
-            <ErrorBlock text="Loading daily plan failed." />
-          ) : dailyPlanRows.length === 0 ? (
-            <EmptyBlock text="No daily plan engines returned." />
-          ) : (
-            <div className="table-wrap engine-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Engine</th>
-                    <th>Priority</th>
-                    <th>Risk</th>
-                    <th>Category</th>
-                    <th>Last Run</th>
+      <Card title="Run Logs">
+        {logs.loading ? <LoadingBlock /> : logs.error ? <ErrorBlock /> : logs.data && logs.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Log ID</th><th>Engine</th><th>Date</th><th>Status</th><th>Duration</th></tr></thead>
+              <tbody>
+                {logs.data.map((log) => (
+                  <tr key={log.logId}>
+                    <td>{formatShortId(log.logId)}</td>
+                    <td>{formatEmpty(log.engineName)}</td>
+                    <td>{formatEmpty(log.runDate)}</td>
+                    <td><StatusBadge value={log.status} /></td>
+                    <td>{readNumber(log.durationMs)}ms</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {dailyPlanRows.map((row, index) => (
-                    <tr key={engineKeyOf(row) || index}>
-                      <td className="product-name-cell">
-                        <strong>{formatEmpty(engineNameOf(row))}</strong>
-                        <span className="engine-key-line">{formatEmpty(engineKeyOf(row))}</span>
-                      </td>
-                      <td>{formatEmpty(engineField(row, ["priorityScore", "priority_score", "priority", "score"]))}</td>
-                      <td><StatusBadge value={engineField(row, ["riskLevel", "risk_level", "risk"]) ?? "LOW"} /></td>
-                      <td>{formatEmpty(engineCategoryOf(row))}</td>
-                      <td><StatusBadge value={engineLastRunField(row, ["lastRunStatus", "runStatus", "status", "last_run_status"]) ?? "NOT_RUN"} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-
-        <Card title="Recent Run Logs">
-          {runLogs.loading ? <LoadingBlock text="Loading run logs..." /> : runLogs.error ? (
-            <ErrorBlock text="Loading run logs failed." />
-          ) : logRows.length === 0 ? (
-            <EmptyBlock text="No engine run logs yet." />
-          ) : (
-            <div className="table-wrap engine-table engine-log-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Engine Key</th>
-                    <th>Status</th>
-                    <th>Run Type</th>
-                    <th>Actions</th>
-                    <th>Error</th>
-                    <th>Started</th>
-                    <th>Finished</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logRows.map((row, index) => (
-                    <tr key={String(runLogField(row, ["id", "runId", "run_id"]) ?? `${runLogField(row, ["engineKey", "engine_key"]) ?? "run"}-${index}`)}>
-                      <td className="identity-cell">{formatEmpty(runLogField(row, ["engineKey", "engine_key"]))}</td>
-                      <td><StatusBadge value={runLogField(row, ["runStatus", "run_status", "status"])} /></td>
-                      <td>{formatEmpty(runLogField(row, ["runType", "run_type"]))}</td>
-                      <td>{formatEmpty(runLogField(row, ["actionsCreatedCount", "actions_created_count", "actionsCreated"]))}</td>
-                      <td>{formatEmpty(runLogField(row, ["errorMessage", "error_message"]))}</td>
-                      <td>{formatLocalDateTime(runLogField(row, ["startedAt", "started_at"]))}</td>
-                      <td>{formatLocalDateTime(runLogField(row, ["finishedAt", "finished_at"]))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
-  );
-}
-
-type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
-type LedgerAction = "approve" | "reject" | "monitor" | "complete";
-type BatchLedgerAction = "reject" | "monitor" | "complete";
-type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
-type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
-type WorkflowEvent = AnyRecord;
-type WorkflowHistory = {
-  actionId: string;
-  currentState: string;
-  currentApprovalStatus: string;
-  events: WorkflowEvent[];
-};
-type RollbackPreview = {
-  canRollback: boolean;
-  message: string;
-  rollbackSnapshot?: unknown;
-};
-type RollbackPreviewState = {
-  data: RollbackPreview | null;
-  loading: boolean;
-  error: string | null;
-};
-type WorkflowPanelState = {
-  open: boolean;
-  data: WorkflowHistory | null;
-  loading: boolean;
-  error: string | null;
-  rollback: RollbackPreviewState;
-};
-type BatchActionResult = {
-  updatedCount?: number | string | null;
-  skippedCount?: number | string | null;
-  result?: {
-    updatedCount?: number | string | null;
-    skippedCount?: number | string | null;
-  } | null;
-};
-
-const approvalFilters: ApprovalFilter[] = ["ALL", "PENDING", "APPROVED", "REJECTED", "MONITORING", "COMPLETED"];
-const defaultSourceFilters = ["ALL SOURCES", "CEO_REPORT", "PRODUCT_ECONOMICS", "PPC_RECOMMENDATIONS"];
-const defaultActionTypeFilters = [
-  "ALL ACTION TYPES",
-  "COST_DATA_REQUIRED",
-  "ACCOUNT_HEALTH_REVIEW",
-  "PPC_GUARDRAIL_REVIEW",
-  "PROFIT_BAND_APPROVAL",
-  "ADD_EXACT_KEYWORD_AFTER_APPROVAL",
-  "ADD_PRODUCT_TARGET_AFTER_APPROVAL",
-  "CHECK_LISTING_BEFORE_NEGATIVE"
-];
-const quickViewFilters: Array<{ id: QuickViewFilter; label: string }> = [
-  { id: "ALL", label: "All Review" },
-  { id: "NEEDS_COST_DATA", label: "Needs Cost Data" },
-  { id: "ACCOUNT_RISK", label: "Account Risk" },
-  { id: "PPC_GUARDRAILS", label: "PPC Guardrails" },
-  { id: "PROFIT_BAND_APPROVALS", label: "Profit Band Approvals" },
-  { id: "HIGH_RISK_ONLY", label: "High Risk Only" },
-  { id: "FOUNDER_OVERRIDE", label: "Founder Override" }
-];
-const approvalSortOptions = ["Priority First", "Newest First", "Oldest First", "Risk High First"];
-const APPROVAL_PAGE_SIZE = 25;
-const ACTION_LEDGER_FETCH_LIMIT = 200;
-const workflowEventLabels: Record<string, string> = {
-  INITIAL_STATE_CAPTURE: "Initial state captured",
-  APPROVED: "Approved",
-  REJECTED: "Rejected",
-  MOVED_TO_MONITORING: "Moved to monitoring",
-  COMPLETED: "Completed",
-  BATCH_REJECTED: "Batch rejected",
-  BATCH_MONITORING: "Batch moved to monitoring",
-  BATCH_COMPLETED: "Batch completed",
-  COST_DATA_COMPLETED_AUTO_RESOLVE: "Cost data completed automatically",
-  REOPEN: "Reopened"
-};
-
-const emptyRollbackPreviewState = (): RollbackPreviewState => ({ data: null, loading: false, error: null });
-
-function normalizeState(value: unknown): string {
-  return String(value ?? "").toUpperCase();
-}
-
-function recordsOf(value: unknown): AnyRecord[] {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is AnyRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item));
-  }
-  return rowsOf<AnyRecord>(value);
-}
-
-function readBoolean(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value !== 0;
-  const normalized = String(value ?? "").trim().toLowerCase();
-  return ["true", "yes", "1", "y"].includes(normalized);
-}
-
-function formatLocalDateTime(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return formatEmpty(value);
-  const timestamp = Date.parse(raw);
-  if (!Number.isFinite(timestamp)) return raw;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(timestamp));
-}
-
-function formatWorkflowEventType(value: unknown): string {
-  const eventType = normalizeState(value);
-  if (!eventType) return "Unknown event";
-  return workflowEventLabels[eventType] ?? labelize(eventType);
-}
-
-function workflowHistoryOf(value: unknown, row: ActionLedgerRow): WorkflowHistory {
-  const root = recordOf(value);
-  const workflow = recordOf(root.workflow ?? root.data ?? root.result ?? root);
-  const action = recordOf(workflow.action ?? workflow.actionLedger ?? workflow.row ?? root.action ?? root.actionLedger);
-  const eventSource = workflow.events ?? workflow.auditEvents ?? workflow.history ?? root.events ?? root.auditEvents ?? root.history;
-
-  return {
-    actionId: String(workflow.actionId ?? workflow.id ?? action.id ?? row.id),
-    currentState: String(workflow.currentState ?? workflow.state ?? action.state ?? row.state ?? "UNKNOWN"),
-    currentApprovalStatus: String(
-      workflow.currentApprovalStatus ?? workflow.approvalStatus ?? action.approvalStatus ?? row.approvalStatus ?? "UNKNOWN"
-    ),
-    events: recordsOf(eventSource)
-  };
-}
-
-function rollbackPreviewOf(value: unknown): RollbackPreview {
-  const root = recordOf(value);
-  const preview = recordOf(root.preview ?? root.rollbackPreview ?? root.data ?? root.result ?? root);
-  const rollback = recordOf(preview.rollback);
-  const rollbackSnapshot =
-    preview.rollbackSnapshot ??
-    preview.rollback_snapshot ??
-    preview.snapshot ??
-    preview.snapshotBefore ??
-    preview.restoreSnapshot ??
-    rollback.snapshot;
-  const canRollback = readBoolean(preview.canRollback ?? preview.allowed ?? preview.rollbackAllowed);
-
-  return {
-    canRollback,
-    message: String(preview.message ?? root.message ?? (canRollback ? "Rollback preview is available." : "Rollback is not available.")),
-    rollbackSnapshot
-  };
-}
-
-function canReopenAction(row: ActionLedgerRow): boolean {
-  const approvalStatus = normalizeState(row.approvalStatus);
-  return approvalStatus === "REJECTED" || isCompletedAction(row);
-}
-
-function workflowEventField(event: WorkflowEvent, keys: string[]): unknown {
-  for (const key of keys) {
-    if (event[key] !== undefined && event[key] !== null && event[key] !== "") return event[key];
-  }
-  return undefined;
-}
-
-function workflowEventHasSnapshot(event: WorkflowEvent): boolean {
-  return workflowEventField(event, ["snapshotBefore", "snapshot_before"]) !== undefined
-    || workflowEventField(event, ["snapshotAfter", "snapshot_after"]) !== undefined;
-}
-
-function uniqueSortedValues(rows: ActionLedgerRow[], field: keyof ActionLedgerRow): string[] {
-  return Array.from(
-    new Set(rows.map((row) => String(row[field] ?? "").trim()).filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b));
-}
-
-function isMonitoringAction(row: ActionLedgerRow): boolean {
-  return ["MONITOR", "MONITORING"].includes(normalizeState(row.state));
-}
-
-function isCompletedAction(row: ActionLedgerRow): boolean {
-  return ["COMPLETED", "COMPLETED_MANUALLY"].includes(normalizeState(row.state));
-}
-
-function isPendingBatchAction(row: ActionLedgerRow): boolean {
-  return normalizeState(row.approvalStatus) === "PENDING" && !isMonitoringAction(row) && !isCompletedAction(row);
-}
-
-function isSelectableBatchAction(row: ActionLedgerRow): boolean {
-  const approvalStatus = normalizeState(row.approvalStatus);
-  if (isCompletedAction(row) || approvalStatus === "APPROVED" || approvalStatus === "REJECTED") return false;
-  return isPendingBatchAction(row) || isMonitoringAction(row);
-}
-
-function filterActionLedgerRows(rows: ActionLedgerRow[], filter: ApprovalFilter): ActionLedgerRow[] {
-  if (filter === "ALL") return rows;
-  if (filter === "PENDING") return rows.filter((row) => normalizeState(row.approvalStatus) === "PENDING");
-  if (filter === "APPROVED") return rows.filter((row) => normalizeState(row.approvalStatus) === "APPROVED");
-  if (filter === "REJECTED") return rows.filter((row) => normalizeState(row.approvalStatus) === "REJECTED");
-  if (filter === "MONITORING") return rows.filter(isMonitoringAction);
-  return rows.filter(isCompletedAction);
-}
-
-function filterByQuickView(rows: ActionLedgerRow[], quickView: QuickViewFilter): ActionLedgerRow[] {
-  if (quickView === "ALL") return rows;
-  if (quickView === "NEEDS_COST_DATA") return rows.filter((row) => normalizeState(row.actionType) === "COST_DATA_REQUIRED");
-  if (quickView === "ACCOUNT_RISK") return rows.filter((row) => normalizeState(row.actionType) === "ACCOUNT_HEALTH_REVIEW");
-  if (quickView === "PPC_GUARDRAILS") {
-    return rows.filter((row) => normalizeState(row.actionType).includes("PPC") || normalizeState(row.source) === "PPC_RECOMMENDATIONS");
-  }
-  if (quickView === "PROFIT_BAND_APPROVALS") return rows.filter((row) => normalizeState(row.actionType) === "PROFIT_BAND_APPROVAL");
-  if (quickView === "HIGH_RISK_ONLY") return rows.filter((row) => ["HIGH", "CRITICAL"].includes(normalizeState(row.riskLevel)));
-  return rows.filter((row) => normalizeState(row.approvalTier) === "FOUNDER_OVERRIDE");
-}
-
-function filterBySearch(rows: ActionLedgerRow[], query: string): ActionLedgerRow[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return rows;
-  return rows.filter((row) => [
-    row.title,
-    row.summary,
-    row.recommendedAction,
-    row.sku,
-    row.asin,
-    row.actionType,
-    row.source,
-    row.entityId,
-    row.id,
-    formatShortId(row.id)
-  ].some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery)));
-}
-
-function actionRiskPriority(row: ActionLedgerRow): number {
-  const riskLevel = normalizeState(row.riskLevel);
-  if (riskLevel === "CRITICAL") return 0;
-  if (riskLevel === "HIGH") return 1;
-  return 2;
-}
-
-function actionTierPriority(row: ActionLedgerRow): number {
-  return normalizeState(row.approvalTier).includes("FOUNDER_OVERRIDE") ? 0 : 1;
-}
-
-function actionSourcePriority(row: ActionLedgerRow): number {
-  const source = normalizeState(row.source);
-  if (source === "CEO_REPORT") return 0;
-  if (source === "PRODUCT_ECONOMICS") return 1;
-  if (source === "PPC_RECOMMENDATIONS") return 2;
-  return 3;
-}
-
-function actionCreatedAtValue(row: ActionLedgerRow): number {
-  const parsed = Date.parse(String(row.createdAt ?? ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function sortActionLedgerRowsByPriority(rows: ActionLedgerRow[]): ActionLedgerRow[] {
-  return [...rows].sort((a, b) => (
-    actionRiskPriority(a) - actionRiskPriority(b)
-    || actionTierPriority(a) - actionTierPriority(b)
-    || actionSourcePriority(a) - actionSourcePriority(b)
-    || actionCreatedAtValue(b) - actionCreatedAtValue(a)
-    || String(a.id).localeCompare(String(b.id))
-  ));
-}
-
-function sortActionLedgerRows(rows: ActionLedgerRow[], sortMode: ApprovalSortMode): ActionLedgerRow[] {
-  if (sortMode === "NEWEST_FIRST") return [...rows].sort((a, b) => actionCreatedAtValue(b) - actionCreatedAtValue(a) || String(a.id).localeCompare(String(b.id)));
-  if (sortMode === "OLDEST_FIRST") return [...rows].sort((a, b) => actionCreatedAtValue(a) - actionCreatedAtValue(b) || String(a.id).localeCompare(String(b.id)));
-  if (sortMode === "RISK_HIGH_FIRST") return [...rows].sort((a, b) => actionRiskPriority(a) - actionRiskPriority(b) || actionCreatedAtValue(b) - actionCreatedAtValue(a) || String(a.id).localeCompare(String(b.id)));
-  return sortActionLedgerRowsByPriority(rows);
-}
-
-function sortModeFromLabel(label: string): ApprovalSortMode {
-  if (label === "Newest First") return "NEWEST_FIRST";
-  if (label === "Oldest First") return "OLDEST_FIRST";
-  if (label === "Risk High First") return "RISK_HIGH_FIRST";
-  return "PRIORITY_FIRST";
-}
-
-function labelFromSortMode(sortMode: ApprovalSortMode): string {
-  if (sortMode === "NEWEST_FIRST") return "Newest First";
-  if (sortMode === "OLDEST_FIRST") return "Oldest First";
-  if (sortMode === "RISK_HIGH_FIRST") return "Risk High First";
-  return "Priority First";
-}
-
-async function fetchActionLedgerData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
-  const [summaryResponse, rowsResponse] = await Promise.all([
-    getJson<AnyRecord>(`/api/action-ledger/summary?sellerId=${SELLER_ID}`),
-    getJson<unknown>(`/api/action-ledger?sellerId=${SELLER_ID}&limit=${ACTION_LEDGER_FETCH_LIMIT}`)
-  ]);
-  const summaryRoot = recordOf(summaryResponse);
-  return {
-    summary: recordOf(summaryRoot.summary ?? summaryRoot) as ActionLedgerSummary,
-    rows: actionLedgerRowsOf(rowsResponse)
-  };
-}
-
-function formatBatchCounts(value: unknown): string {
-  const root = recordOf(value);
-  const nested = recordOf(root.result);
-  const updatedCount = readNumber(root.updatedCount ?? nested.updatedCount);
-  const skippedCount = readNumber(root.skippedCount ?? nested.skippedCount);
-  return `Updated ${updatedCount}, skipped ${skippedCount}.`;
-}
-
-function WorkflowHistoryPanel({
-  row,
-  panel,
-  onRollbackPreview,
-  onReopen,
-  disabled,
-  reopening
-}: {
-  row: ActionLedgerRow;
-  panel: WorkflowPanelState;
-  onRollbackPreview: (row: ActionLedgerRow) => void;
-  onReopen: (row: ActionLedgerRow) => void;
-  disabled: boolean;
-  reopening: boolean;
-}) {
-  const data = panel.data;
-  const rollback = panel.rollback;
-  const snapshot = rollback.data?.rollbackSnapshot;
-  const hasRollbackSnapshot = snapshot !== undefined && snapshot !== null && snapshot !== "";
-
-  return (
-    <section className="workflow-panel" aria-label={`Workflow history for action ${formatShortId(row.id)}`}>
-      <div className="workflow-panel-head">
-        <div>
-          <h3>Workflow History</h3>
-          <span>Action {formatShortId(data?.actionId ?? row.id)}</span>
-        </div>
-        <div className="button-row compact workflow-panel-actions">
-          <button type="button" className="secondary tiny-button" onClick={() => onRollbackPreview(row)} disabled={disabled || rollback.loading}>
-            Rollback Preview
-          </button>
-          {canReopenAction(row) ? (
-            <button type="button" className="secondary tiny-button" onClick={() => onReopen(row)} disabled={disabled}>
-              {reopening ? "Reopening..." : "Reopen"}
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {panel.loading ? (
-        <div className="soft-state compact-state">Loading workflow history...</div>
-      ) : panel.error ? (
-        <div className="soft-state error-state compact-state">Could not load workflow history.</div>
-      ) : data ? (
-        <>
-          <div className="workflow-status-row">
-            <MetricRow label="Current State" value={<StatusBadge value={data.currentState} />} />
-            <MetricRow label="Approval Status" value={<StatusBadge value={data.currentApprovalStatus} />} />
-          </div>
-          {data.events.length === 0 ? (
-            <div className="soft-state compact-state">No workflow events yet.</div>
-          ) : (
-            <ol className="workflow-timeline">
-              {data.events.map((event, index) => {
-                const eventType = workflowEventField(event, ["eventType", "event_type", "type"]);
-                const createdAt = workflowEventField(event, ["createdAt", "created_at", "timestamp", "time"]);
-                const fromState = workflowEventField(event, ["fromState", "from_state", "previousState", "from"]);
-                const toState = workflowEventField(event, ["toState", "to_state", "nextState", "to"]);
-                const actor = workflowEventField(event, ["actor", "actorType", "createdBy", "created_by", "user"]);
-                const note = workflowEventField(event, ["note", "message", "reason"]);
-
-                return (
-                  <li key={String(event.id ?? `${row.id}-${index}`)} className="workflow-event">
-                    <div className="workflow-event-main">
-                      <span className="workflow-event-date">{formatLocalDateTime(createdAt)}</span>
-                      <strong>{formatWorkflowEventType(eventType)}</strong>
-                    </div>
-                    <div className="workflow-event-meta">
-                      <span>{formatEmpty(fromState)} to {formatEmpty(toState)}</span>
-                      <span>Actor: {formatEmpty(actor)}</span>
-                      {workflowEventHasSnapshot(event) ? <span className="snapshot-pill">Snapshot available</span> : null}
-                    </div>
-                    {note ? <p>{formatEmpty(note)}</p> : null}
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-        </>
-      ) : null}
-
-      {rollback.loading ? <div className="soft-state compact-state">Loading rollback preview...</div> : null}
-      {rollback.error ? <div className="soft-state error-state compact-state">{rollback.error}</div> : null}
-      {rollback.data ? (
-        <div className="rollback-preview">
-          <MetricRow label="Can Rollback" value={rollback.data.canRollback ? "Yes" : "No"} />
-          <MetricRow label="Message" value={rollback.data.message} />
-          {hasRollbackSnapshot ? (
-            <pre>{JSON.stringify(snapshot, null, 2)}</pre>
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ActionLedgerCard({
-  row,
-  selected,
-  processing,
-  batchProcessing,
-  workflowPanel,
-  reopening,
-  actionsDisabled,
-  onAction,
-  onCopy,
-  onToggleSelected,
-  onToggleWorkflow,
-  onRollbackPreview,
-  onReopen
-}: {
-  row: ActionLedgerRow;
-  selected: boolean;
-  processing: { id: string; action: LedgerAction } | null;
-  batchProcessing: BatchLedgerAction | "daily-priorities" | "dismiss-low-priority" | null;
-  workflowPanel?: WorkflowPanelState;
-  reopening: boolean;
-  actionsDisabled: boolean;
-  onAction: (row: ActionLedgerRow, action: LedgerAction) => void;
-  onCopy: (id: string) => void;
-  onToggleSelected: (row: ActionLedgerRow) => void;
-  onToggleWorkflow: (row: ActionLedgerRow) => void;
-  onRollbackPreview: (row: ActionLedgerRow) => void;
-  onReopen: (row: ActionLedgerRow) => void;
-}) {
-  const approvalStatus = normalizeState(row.approvalStatus);
-  const completed = isCompletedAction(row);
-  const monitoring = isMonitoringAction(row);
-  const selectable = isSelectableBatchAction(row);
-  const buttonDisabled = Boolean(processing || batchProcessing || actionsDisabled);
-  const showProductThumbnail = hasProductContext(row);
-  const imageDebugFields = productImageDebugFields(row);
-  const importantFields: Array<[string, ReactNode]> = [
-    ["Recommended Action", formatEmpty(row.recommendedAction)],
-    ["SKU", formatEmpty(row.sku)],
-    ["ASIN", formatEmpty(row.asin)],
-    ["Entity", `${formatEmpty(row.entityType)} / ${formatEmpty(row.entityId)}`],
-    ["Created At", formatEmpty(row.createdAt)]
-  ];
-  const detailFields: Array<[string, ReactNode]> = [
-    ["Full Action ID", row.id],
-    ["Confidence", <StatusBadge key="confidence-label" value={row.confidenceLabel ?? "LOW"} />],
-    ["Approval Tier", formatEmpty(row.approvalTier)],
-    ["State", <StatusBadge key="state" value={row.state ?? "UNKNOWN"} />],
-    ["Source", formatEmpty(row.source)],
-    ["Action Type", formatEmpty(row.actionType)]
-  ];
-
-  let footer: ReactNode = null;
-  if (completed) {
-    footer = <p className="approval-status-note">Completed manually.</p>;
-  } else if (approvalStatus === "REJECTED") {
-    footer = <p className="approval-status-note">Rejected. No action executed.</p>;
-  } else if (monitoring) {
-    footer = (
-      <div className="button-row compact">
-        <button type="button" onClick={() => onAction(row, "complete")} disabled={buttonDisabled}>
-          {processing?.id === row.id && processing.action === "complete" ? "Completing..." : "Complete"}
-        </button>
-      </div>
-    );
-  } else if (approvalStatus === "APPROVED") {
-    footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
-  } else if (approvalStatus === "PENDING") {
-    footer = (
-      <div className="button-row compact">
-        <button type="button" onClick={() => onAction(row, "approve")} disabled={buttonDisabled}>
-          {processing?.id === row.id && processing.action === "approve" ? "Approving..." : "Approve"}
-        </button>
-        <button type="button" onClick={() => onAction(row, "reject")} disabled={buttonDisabled}>
-          {processing?.id === row.id && processing.action === "reject" ? "Rejecting..." : "Reject"}
-        </button>
-        <button type="button" onClick={() => onAction(row, "monitor")} disabled={buttonDisabled}>
-          {processing?.id === row.id && processing.action === "monitor" ? "Moving..." : "Monitor"}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <article className={`item-card action-ledger-card ${selected ? "selected" : ""}`}>
-      <div className="approval-card-head">
-        <div className="approval-card-title-row">
-          {selectable ? (
-            <label className="batch-checkbox" aria-label={`Select action ${formatShortId(row.id)}`}>
-              <input
-                type="checkbox"
-                checked={selected}
-                onChange={() => onToggleSelected(row)}
-                disabled={buttonDisabled}
-              />
-            </label>
-          ) : null}
-          {showProductThumbnail ? <ProductThumb product={row} className="action-ledger-thumb" variant="small" /> : null}
-          <div className="approval-title-block">
-            <strong>{formatEmpty(row.title)}</strong>
-            <span>Action ID {formatShortId(row.id)}</span>
-          </div>
-        </div>
-        <div className="badge-row approval-badges">
-          <StatusBadge value={row.source ?? "UNKNOWN_SOURCE"} />
-          <StatusBadge value={row.actionType ?? "UNKNOWN_ACTION"} />
-          <StatusBadge value={row.riskLevel ?? "LOW"} />
-          <StatusBadge value={row.approvalStatus ?? row.state ?? "PENDING"} />
-        </div>
-      </div>
-      <p className="approval-summary-text">{formatEmpty(row.summary)}</p>
-      <div className="approval-id-row">
-        <span>{formatEmpty(row.source)} priority review</span>
-        <div className="approval-id-actions">
-          <button type="button" className="secondary tiny-button" onClick={() => onCopy(row.id)} disabled={buttonDisabled}>Copy ID</button>
-          <button
-            type="button"
-            className="secondary tiny-button"
-            onClick={() => onToggleWorkflow(row)}
-            disabled={buttonDisabled}
-            aria-expanded={Boolean(workflowPanel?.open)}
-          >
-            Workflow History
-          </button>
-        </div>
-      </div>
-      <div className="detail-grid approval-detail-grid">
-        {importantFields.map(([label, value]) => (
-          <MetricRow key={label} label={label} value={value} />
-        ))}
-      </div>
-      <details className="approval-more-details">
-        <summary>More details</summary>
-        <div className="detail-grid approval-detail-grid">
-          {detailFields.map(([label, value]) => (
-            <MetricRow key={label} label={label} value={value} />
-          ))}
-          {imageDebugFields.map(([label, value]) => (
-            <MetricRow key={label} label={label} value={value} />
-          ))}
-        </div>
-        <ProductImageDebug product={row} compact />
-      </details>
-      {footer}
-      {workflowPanel?.open ? (
-        <WorkflowHistoryPanel
-          row={row}
-          panel={workflowPanel}
-          onRollbackPreview={onRollbackPreview}
-          onReopen={onReopen}
-          disabled={buttonDisabled}
-          reopening={reopening}
-        />
-      ) : null}
-    </article>
   );
 }
 
 function ApprovalCenterPage() {
-  const [activeFilter, setActiveFilter] = useState<ApprovalFilter>("ALL");
-  const [sourceFilter, setSourceFilter] = useState("ALL SOURCES");
-  const [actionTypeFilter, setActionTypeFilter] = useState("ALL ACTION TYPES");
-  const [quickView, setQuickView] = useState<QuickViewFilter>("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortMode, setSortMode] = useState<ApprovalSortMode>("PRIORITY_FIRST");
-  const [page, setPage] = useState(1);
-  const [processing, setProcessing] = useState<{ id: string; action: LedgerAction } | null>(null);
-  const [batchProcessing, setBatchProcessing] = useState<BatchLedgerAction | "daily-priorities" | "dismiss-low-priority" | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [dailyPriorityRows, setDailyPriorityRows] = useState<ActionLedgerRow[] | null>(null);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [summaryState, setSummaryState] = useState<LoadState<ActionLedgerSummary>>(emptyState<ActionLedgerSummary>());
-  const [rowsState, setRowsState] = useState<LoadState<ActionLedgerRow[]>>(emptyState<ActionLedgerRow[]>());
-  const [workflowPanels, setWorkflowPanels] = useState<Record<string, WorkflowPanelState>>({});
-  const [reopeningId, setReopeningId] = useState<string | null>(null);
-
-  async function refreshApprovalData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
-    setSummaryState((current) => ({ ...current, loading: true, error: null }));
-    setRowsState((current) => ({ ...current, loading: true, error: null }));
-    try {
-      const data = await fetchActionLedgerData();
-      setSummaryState({ data: data.summary, loading: false, error: null });
-      setRowsState({ data: data.rows, loading: false, error: null });
-      return data;
-    } catch (error) {
-      const safeMessage = sanitizeActionError(error);
-      setSummaryState({ data: null, loading: false, error: safeMessage });
-      setRowsState({ data: null, loading: false, error: safeMessage });
-      throw error;
-    }
-  }
-
-  useEffect(() => {
-    let alive = true;
-    setSummaryState((current) => ({ ...current, loading: true, error: null }));
-    setRowsState((current) => ({ ...current, loading: true, error: null }));
-
-    fetchActionLedgerData()
-      .then((data) => {
-        if (!alive) return;
-        setSummaryState({ data: data.summary, loading: false, error: null });
-        setRowsState({ data: data.rows, loading: false, error: null });
-      })
-      .catch((error) => {
-        if (!alive) return;
-        const safeMessage = sanitizeActionError(error);
-        setSummaryState({ data: null, loading: false, error: safeMessage });
-        setRowsState({ data: null, loading: false, error: safeMessage });
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const loadedRows = rowsState.data ?? [];
-  const allRows = dailyPriorityRows ?? loadedRows;
-  const sourceOptions = useMemo(() => (
-    Array.from(new Set([...defaultSourceFilters, ...uniqueSortedValues(loadedRows, "source")]))
-  ), [loadedRows]);
-  const actionTypeOptions = useMemo(() => (
-    Array.from(new Set([...defaultActionTypeFilters, ...uniqueSortedValues(loadedRows, "actionType")]))
-  ), [loadedRows]);
-  const rows = useMemo(() => {
-    const statusRows = filterActionLedgerRows(allRows, activeFilter);
-    const sourceRows = sourceFilter === "ALL SOURCES"
-      ? statusRows
-      : statusRows.filter((row) => normalizeState(row.source) === normalizeState(sourceFilter));
-    const actionTypeRows = actionTypeFilter === "ALL ACTION TYPES"
-      ? sourceRows
-      : sourceRows.filter((row) => normalizeState(row.actionType) === normalizeState(actionTypeFilter));
-    const quickViewRows = filterByQuickView(actionTypeRows, quickView);
-    return sortActionLedgerRows(filterBySearch(quickViewRows, searchQuery), sortMode);
-  }, [allRows, activeFilter, sourceFilter, actionTypeFilter, quickView, searchQuery, sortMode]);
-  const totalPages = Math.max(1, Math.ceil(rows.length / APPROVAL_PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const pageStartIndex = rows.length === 0 ? 0 : (safePage - 1) * APPROVAL_PAGE_SIZE;
-  const pageRows = rows.slice(pageStartIndex, pageStartIndex + APPROVAL_PAGE_SIZE);
-  const showingStart = rows.length === 0 ? 0 : pageStartIndex + 1;
-  const showingEnd = rows.length === 0 ? 0 : pageStartIndex + pageRows.length;
-  const selectedRows = useMemo(() => (
-    allRows.filter((row) => selectedIds.has(row.id) && isSelectableBatchAction(row))
-  ), [allRows, selectedIds]);
-  const selectedCount = selectedRows.length;
-  const selectedPendingOnly = selectedCount > 0 && selectedRows.every(isPendingBatchAction);
-  const selectedMonitoringOnly = selectedCount > 0 && selectedRows.every(isMonitoringAction);
-  const hasSelectablePageRows = pageRows.some(isSelectableBatchAction);
-  const costDataDismissVisible = quickView === "NEEDS_COST_DATA" || normalizeState(actionTypeFilter) === "COST_DATA_REQUIRED";
-  const controlsDisabled = Boolean(processing || batchProcessing || reopeningId);
-  const summaryData = summaryState.data ?? {};
-  const loading = rowsState.loading || summaryState.loading;
-  const loadError = rowsState.error ?? summaryState.error;
-  const summaryCounts = {
-    pending: readNumber(summaryData.pendingCount),
-    approved: readNumber(summaryData.approvedCount),
-    rejected: readNumber(summaryData.rejectedCount),
-    monitoring: readNumber(summaryData.monitoringCount),
-    completed: readNumber(summaryData.completedCount),
-    highRisk: readNumber(summaryData.highRiskCount),
-    founderOverride: readNumber(summaryData.founderOverrideCount)
-  };
-
-  useEffect(() => {
-    setSelectedIds((current) => {
-      const allowedIds = new Set(rows.filter(isSelectableBatchAction).map((row) => row.id));
-      const next = new Set(Array.from(current).filter((id) => allowedIds.has(id)));
-      return next.size === current.size ? current : next;
-    });
-  }, [rows]);
-
-  function resetPagedView() {
-    setPage(1);
-  }
-
-  function resetPagedViewAndSelection() {
-    resetPagedView();
-    setSelectedIds(new Set());
-  }
-
-  function toggleSelectedRow(row: ActionLedgerRow) {
-    if (!isSelectableBatchAction(row)) return;
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(row.id)) {
-        next.delete(row.id);
-      } else {
-        next.add(row.id);
-      }
-      return next;
-    });
-  }
-
-  function selectCurrentPage() {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      pageRows.filter(isSelectableBatchAction).forEach((row) => next.add(row.id));
-      return next;
-    });
-  }
-
-  function clearSelection() {
-    setSelectedIds(new Set());
-  }
-
-  function syncDailyPriorityRows(refreshedRows: ActionLedgerRow[]) {
-    setDailyPriorityRows((current) => {
-      if (!current) return current;
-      const rowsById = new Map(refreshedRows.map((row) => [row.id, row]));
-      return current.map((row) => rowsById.get(row.id) ?? row);
-    });
-  }
-
-  async function refreshDailyPriorityRows(refreshedRows: ActionLedgerRow[]) {
-    if (!dailyPriorityRows) return;
-    try {
-      const response = await getJson<unknown>(`/api/action-ledger/daily-priorities?sellerId=${SELLER_ID}&limit=25`);
-      setDailyPriorityRows(actionLedgerRowsOf(response));
-    } catch {
-      syncDailyPriorityRows(refreshedRows);
-    }
-  }
-
-  async function fetchWorkflowPanel(row: ActionLedgerRow, preserveRollback = false) {
-    const id = row.id;
-    setWorkflowPanels((current) => {
-      const existing = current[id];
-      return {
-        ...current,
-        [id]: {
-          open: true,
-          data: existing?.data ?? null,
-          loading: true,
-          error: null,
-          rollback: preserveRollback ? existing?.rollback ?? emptyRollbackPreviewState() : emptyRollbackPreviewState()
-        }
-      };
-    });
-
-    try {
-      const response = await getJson<unknown>(`/api/action-ledger/${id}/workflow?sellerId=${SELLER_ID}`);
-      const data = workflowHistoryOf(response, row);
-      setWorkflowPanels((current) => {
-        const existing = current[id];
-        return {
-          ...current,
-          [id]: {
-            open: true,
-            data,
-            loading: false,
-            error: null,
-            rollback: preserveRollback ? existing?.rollback ?? emptyRollbackPreviewState() : emptyRollbackPreviewState()
-          }
-        };
-      });
-    } catch (error) {
-      setWorkflowPanels((current) => {
-        const existing = current[id];
-        return {
-          ...current,
-          [id]: {
-            open: true,
-            data: existing?.data ?? null,
-            loading: false,
-            error: sanitizeActionError(error),
-            rollback: preserveRollback ? existing?.rollback ?? emptyRollbackPreviewState() : emptyRollbackPreviewState()
-          }
-        };
-      });
-    }
-  }
-
-  function toggleWorkflowPanel(row: ActionLedgerRow) {
-    const current = workflowPanels[row.id];
-    if (current?.open) {
-      setWorkflowPanels((panels) => ({
-        ...panels,
-        [row.id]: { ...current, open: false }
-      }));
-      return;
-    }
-    void fetchWorkflowPanel(row);
-  }
-
-  async function loadRollbackPreview(row: ActionLedgerRow) {
-    const id = row.id;
-    setWorkflowPanels((current) => {
-      const existing = current[id] ?? {
-        open: true,
-        data: null,
-        loading: false,
-        error: null,
-        rollback: emptyRollbackPreviewState()
-      };
-      return {
-        ...current,
-        [id]: {
-          ...existing,
-          open: true,
-          rollback: { data: null, loading: true, error: null }
-        }
-      };
-    });
-
-    try {
-      const response = await getJson<unknown>(`/api/action-ledger/${id}/rollback-preview?sellerId=${SELLER_ID}`);
-      const data = rollbackPreviewOf(response);
-      setWorkflowPanels((current) => {
-        const existing = current[id] ?? {
-          open: true,
-          data: null,
-          loading: false,
-          error: null,
-          rollback: emptyRollbackPreviewState()
-        };
-        return {
-          ...current,
-          [id]: {
-            ...existing,
-            open: true,
-            rollback: { data, loading: false, error: null }
-          }
-        };
-      });
-    } catch (error) {
-      setWorkflowPanels((current) => {
-        const existing = current[id] ?? {
-          open: true,
-          data: null,
-          loading: false,
-          error: null,
-          rollback: emptyRollbackPreviewState()
-        };
-        return {
-          ...current,
-          [id]: {
-            ...existing,
-            open: true,
-            rollback: {
-              data: null,
-              loading: false,
-              error: `Could not load rollback preview: ${sanitizeActionError(error)}`
-            }
-          }
-        };
-      });
-    }
-  }
-
-  async function copyActionId(id: string) {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(id);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = id;
-        textArea.style.position = "fixed";
-        textArea.style.opacity = "0";
-        document.body.appendChild(textArea);
-        textArea.select();
-        const copied = document.execCommand("copy");
-        document.body.removeChild(textArea);
-        if (!copied) throw new Error("Clipboard copy was not available.");
-      }
-      setMessage({ type: "success", text: `Copied action ID ${formatShortId(id)} for debugging.` });
-    } catch (error) {
-      setMessage({ type: "error", text: `Copy failed: ${sanitizeActionError(error)}` });
-    }
-  }
-
-  async function act(row: ActionLedgerRow, action: LedgerAction) {
-    const id = row.id;
-    const actions = {
-      approve: {
-        path: `/api/action-ledger/${id}/approve`,
-        body: { note: "Approved from Approval Center", approvedBy: "founder" }
-      },
-      reject: {
-        path: `/api/action-ledger/${id}/reject`,
-        body: { note: "Rejected from Approval Center" }
-      },
-      monitor: {
-        path: `/api/action-ledger/${id}/monitor`,
-        body: { note: "Moved to monitoring from Approval Center" }
-      },
-      complete: {
-        path: `/api/action-ledger/${id}/complete`,
-        body: { note: "Completed from Approval Center" }
-      }
-    };
-    setProcessing({ id, action });
-    setMessage(null);
-    try {
-      await postJson(actions[action].path, actions[action].body);
-      const refreshed = await refreshApprovalData();
-      await refreshDailyPriorityRows(refreshed.rows);
-      if (workflowPanels[id]?.open) {
-        await fetchWorkflowPanel(refreshed.rows.find((refreshedRow) => refreshedRow.id === id) ?? row);
-      }
-      setMessage({ type: "success", text: `${labelize(action)} saved for action ${formatShortId(id)}.` });
-    } catch (error) {
-      setMessage({ type: "error", text: `Action failed: ${sanitizeActionError(error)}` });
-    } finally {
-      setProcessing(null);
-    }
-  }
-
-  async function reopenAction(row: ActionLedgerRow) {
-    if (!canReopenAction(row)) return;
-    const confirmed = window.confirm("Reopen this action and move it back to Waiting for Approval?");
-    if (!confirmed) return;
-
-    const id = row.id;
-    setReopeningId(id);
-    setMessage(null);
-    try {
-      await postJson(`/api/action-ledger/${id}/reopen`, {
-        sellerId: SELLER_ID,
-        note: "Reopened from Approval Center",
-        actor: "founder"
-      });
-      const refreshed = await refreshApprovalData();
-      await refreshDailyPriorityRows(refreshed.rows);
-      if (workflowPanels[id]?.open) {
-        await fetchWorkflowPanel(refreshed.rows.find((refreshedRow) => refreshedRow.id === id) ?? row);
-      }
-      setMessage({ type: "success", text: `Action ${formatShortId(id)} reopened and moved back to Waiting for Approval.` });
-    } catch (error) {
-      setMessage({ type: "error", text: `Reopen failed: ${sanitizeActionError(error)}` });
-    } finally {
-      setReopeningId(null);
-    }
-  }
-
-  async function batchAct(action: BatchLedgerAction) {
-    const ids = selectedRows.map((row) => row.id);
-    if (ids.length === 0) return;
-
-    const actions: Record<BatchLedgerAction, { path: string; body: Record<string, unknown>; label: string }> = {
-      reject: {
-        path: "/api/action-ledger/batch/reject",
-        body: {
-          sellerId: SELLER_ID,
-          ids,
-          note: "Rejected in batch from Approval Center",
-          rejectedBy: "founder"
-        },
-        label: "Batch reject"
-      },
-      monitor: {
-        path: "/api/action-ledger/batch/monitor",
-        body: {
-          sellerId: SELLER_ID,
-          ids,
-          note: "Moved to monitoring in batch from Approval Center"
-        },
-        label: "Batch monitor"
-      },
-      complete: {
-        path: "/api/action-ledger/batch/complete",
-        body: {
-          sellerId: SELLER_ID,
-          ids,
-          note: "Completed in batch from Approval Center"
-        },
-        label: "Batch complete"
-      }
-    };
-
-    setBatchProcessing(action);
-    setMessage(null);
-    try {
-      const response = await postJson<BatchActionResult>(actions[action].path, actions[action].body);
-      setSelectedIds(new Set());
-      const refreshed = await refreshApprovalData();
-      await refreshDailyPriorityRows(refreshed.rows);
-      setMessage({ type: "success", text: `${actions[action].label} finished. ${formatBatchCounts(response)}` });
-    } catch (error) {
-      setMessage({ type: "error", text: `${actions[action].label} failed: ${sanitizeActionError(error)}` });
-    } finally {
-      setBatchProcessing(null);
-    }
-  }
-
-  async function loadDailyPriorities() {
-    setBatchProcessing("daily-priorities");
-    setMessage(null);
-    try {
-      const response = await getJson<unknown>(`/api/action-ledger/daily-priorities?sellerId=${SELLER_ID}&limit=25`);
-      setDailyPriorityRows(actionLedgerRowsOf(response));
-      setSelectedIds(new Set());
-      resetPagedView();
-      setMessage({ type: "success", text: "Daily Priorities Mode loaded." });
-    } catch (error) {
-      setMessage({ type: "error", text: `Daily priorities failed: ${sanitizeActionError(error)}` });
-    } finally {
-      setBatchProcessing(null);
-    }
-  }
-
-  function clearDailyPriorities() {
-    setDailyPriorityRows(null);
-    setSelectedIds(new Set());
-    resetPagedView();
-  }
-
-  async function dismissLowPriorityCostActions() {
-    const confirmed = window.confirm(
-      "This will reject low-priority pending cost-data actions only. High-risk and Founder Override actions will not be dismissed. Continue?"
-    );
-    if (!confirmed) return;
-
-    setBatchProcessing("dismiss-low-priority");
-    setMessage(null);
-    try {
-      const response = await postJson<BatchActionResult>("/api/action-ledger/batch/dismiss-low-priority", {
-        sellerId: SELLER_ID,
-        source: "PRODUCT_ECONOMICS",
-        actionType: "COST_DATA_REQUIRED",
-        limit: 50,
-        note: "Dismissed low-priority duplicate cost-data actions from Approval Center"
-      });
-      setSelectedIds(new Set());
-      const refreshed = await refreshApprovalData();
-      await refreshDailyPriorityRows(refreshed.rows);
-      setMessage({ type: "success", text: `Low-priority cost actions dismissed. ${formatBatchCounts(response)}` });
-    } catch (error) {
-      setMessage({ type: "error", text: `Dismiss low-priority failed: ${sanitizeActionError(error)}` });
-    } finally {
-      setBatchProcessing(null);
-    }
-  }
+  const approvals = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
+  const rows = actionLedgerRowsOf(approvals.data);
 
   return (
     <div className="page">
-      <PageHeader title="Approval Center" subtitle="Shadow mode active. No Amazon action is executed." />
-      <div className="warning-card approval-warning">
-        <p>Approval Center works in shadow mode. No external Amazon, Ads, Store, Image, A+, or Social action is executed yet.</p>
-      </div>
-      <div className="summary-strip approval-summary" aria-label="Approval summary">
-        <MetricTile label="Pending" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.pending} />
-        <MetricTile label="Approved" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.approved} />
-        <MetricTile label="Rejected" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.rejected} />
-        <MetricTile label="Monitoring" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.monitoring} />
-        <MetricTile label="Completed" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.completed} />
-        <MetricTile label="High Risk" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.highRisk} />
-        <MetricTile label="Founder Override" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.founderOverride} />
-      </div>
-      {message ? <div className={`soft-state ${message.type === "error" ? "error-state" : "success-state"}`}>{message.text}</div> : null}
-      <div className="segmented">
-        {approvalFilters.map((filter) => (
-          <button
-            key={filter}
-            type="button"
-            className={activeFilter === filter ? "active" : ""}
-            onClick={() => {
-              setActiveFilter(filter);
-              resetPagedViewAndSelection();
-            }}
-            disabled={controlsDisabled}
-          >
-            {filter}
-          </button>
-        ))}
-      </div>
-      <div className="approval-controls">
-        <SelectField
-          label="Source"
-          value={sourceFilter}
-          options={sourceOptions}
-          onChange={(value) => {
-            setSourceFilter(value);
-            resetPagedViewAndSelection();
-          }}
-        />
-        <SelectField
-          label="Action Type"
-          value={actionTypeFilter}
-          options={actionTypeOptions}
-          onChange={(value) => {
-            setActionTypeFilter(value);
-            resetPagedViewAndSelection();
-          }}
-        />
-        <TextInput
-          label="Search"
-          value={searchQuery}
-          onChange={(value) => {
-            setSearchQuery(value);
-            resetPagedViewAndSelection();
-          }}
-        />
-        <SelectField
-          label="Sort"
-          value={labelFromSortMode(sortMode)}
-          options={approvalSortOptions}
-          onChange={(value) => {
-            setSortMode(sortModeFromLabel(value));
-            resetPagedViewAndSelection();
-          }}
-        />
-      </div>
-      <div className="approval-quick-views" aria-label="Quick views">
-        {quickViewFilters.map((filter) => (
-          <button
-            key={filter.id}
-            type="button"
-            className={`secondary ${quickView === filter.id ? "active" : ""}`}
-            onClick={() => {
-              setQuickView(filter.id);
-              resetPagedViewAndSelection();
-            }}
-            disabled={controlsDisabled}
-          >
-            {filter.label}
-          </button>
-        ))}
-        <button type="button" className="secondary" onClick={loadDailyPriorities} disabled={controlsDisabled}>
-          {batchProcessing === "daily-priorities" ? "Loading Priorities..." : "Daily Priorities"}
-        </button>
-        {dailyPriorityRows ? (
-          <button type="button" className="secondary" onClick={clearDailyPriorities} disabled={controlsDisabled}>
-            Clear Daily Priorities
-          </button>
-        ) : null}
-        {costDataDismissVisible ? (
-          <button
-            type="button"
-            className="secondary danger-button"
-            onClick={dismissLowPriorityCostActions}
-            disabled={controlsDisabled}
-          >
-            {batchProcessing === "dismiss-low-priority" ? "Dismissing..." : "Dismiss Low-Priority Cost Actions"}
-          </button>
-        ) : null}
-      </div>
-      {dailyPriorityRows ? (
-        <div className="daily-priority-label">
-          Daily Priorities Mode: Top 25 pending actions
-        </div>
-      ) : null}
-      {selectedCount > 0 ? (
-        <div className="batch-action-bar" aria-label="Batch actions">
-          <div>
-            <strong>Selected: {selectedCount}</strong>
-            <span>Batch approve is disabled. Only reject, monitor, or complete are allowed in batch.</span>
-          </div>
-          <div className="button-row compact">
-            <button type="button" onClick={() => batchAct("reject")} disabled={!selectedPendingOnly || controlsDisabled}>
-              {batchProcessing === "reject" ? "Rejecting..." : "Batch Reject Selected"}
-            </button>
-            <button type="button" onClick={() => batchAct("monitor")} disabled={!selectedPendingOnly || controlsDisabled}>
-              {batchProcessing === "monitor" ? "Moving..." : "Batch Monitor Selected"}
-            </button>
-            <button type="button" onClick={() => batchAct("complete")} disabled={!selectedMonitoringOnly || controlsDisabled}>
-              {batchProcessing === "complete" ? "Completing..." : "Batch Complete Selected"}
-            </button>
-            <button type="button" className="secondary" onClick={clearSelection} disabled={controlsDisabled}>
-              Clear Selection
-            </button>
-          </div>
-        </div>
-      ) : null}
-      {loading && !rowsState.data ? <LoadingBlock /> : loadError ? (
-        <ErrorBlock text={`Could not load approval actions: ${loadError}`} />
-      ) : allRows.length === 0 ? (
-        <EmptyBlock text="No approval actions yet. AI recommendations will appear here before execution." />
-      ) : rows.length === 0 ? (
-        <EmptyBlock text="No actions match this filter." />
-      ) : (
-        <>
-          <p className="approval-count-line">Showing {rows.length} of {allRows.length} loaded actions</p>
-          <div className="approval-pagination">
-            <span>Showing {showingStart}-{showingEnd} of {rows.length}</span>
-            <div className="button-row compact">
-              <button type="button" className="secondary" onClick={selectCurrentPage} disabled={!hasSelectablePageRows || controlsDisabled}>Select Current Page</button>
-              <button type="button" className="secondary" onClick={clearSelection} disabled={selectedCount === 0 || controlsDisabled}>Clear Selection</button>
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || controlsDisabled}>Previous</button>
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || controlsDisabled}>Next</button>
-            </div>
-          </div>
-          <div className="card-list">
-            {pageRows.map((row) => (
-              <ActionLedgerCard
-                key={row.id}
-                row={row}
-                selected={selectedIds.has(row.id)}
-                processing={processing}
-                batchProcessing={batchProcessing}
-                workflowPanel={workflowPanels[row.id]}
-                reopening={reopeningId === row.id}
-                actionsDisabled={controlsDisabled}
-                onAction={act}
-                onCopy={copyActionId}
-                onToggleSelected={toggleSelectedRow}
-                onToggleWorkflow={toggleWorkflowPanel}
-                onRollbackPreview={loadRollbackPreview}
-                onReopen={reopenAction}
-              />
-            ))}
-          </div>
-          <div className="approval-pagination bottom">
-            <span>Showing {showingStart}-{showingEnd} of {rows.length}</span>
-            <div className="button-row compact">
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage <= 1 || controlsDisabled}>Previous</button>
-              <button type="button" className="secondary" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage >= totalPages || controlsDisabled}>Next</button>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+      <PageHeader title="Approval Center" subtitle="Review and manage all AI-CGO action approvals." />
 
-function jsonText(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "UNKNOWN";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function JsonSnippet({ value }: { value: unknown }) {
-  return <code className="json-snippet">{jsonText(value)}</code>;
-}
-
-function safeBooleanLabel(value: unknown, trueLabel = "WARNING", falseLabel = "SAFE") {
-  return readBoolean(value) ? trueLabel : falseLabel;
-}
-
-function SafetyControlPage() {
-  const status = useApi<SafetyControlStatus>(() => safetyControlApi.status(SELLER_ID));
-  const audits = useApi<ApiRows<SafetyAuditEvent>>(() => safetyControlApi.auditEvents(SELLER_ID));
-  const data = safetyControlStatusOf(status.data);
-  const settingsValue = readFirst(data, ["settings", "safetySettings", "controlSettings"]);
-  const settings = recordOf(settingsValue);
-  const hasSettings = settingsValue !== null && settingsValue !== undefined && Object.keys(settings).length > 0;
-  const auditRows = safetyAuditRowsOf(audits.data);
-  const [form, setForm] = useState({
-    maxDailyEngineRuns: "3",
-    maxDailyExecutionAttempts: "10",
-    maxDailyAiCost: "0",
-    safetyNotes: ""
-  });
-  const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
-
-  useEffect(() => {
-    if (!hasSettings) return;
-    setForm({
-      maxDailyEngineRuns: String(readFirst(settings, ["maxDailyEngineRuns"]) ?? 3),
-      maxDailyExecutionAttempts: String(readFirst(settings, ["maxDailyExecutionAttempts"]) ?? 10),
-      maxDailyAiCost: String(readFirst(settings, ["maxDailyAiCost"]) ?? 0),
-      safetyNotes: String(readFirst(settings, ["safetyNotes", "notes"]) ?? "")
-    });
-  }, [hasSettings, status.data]);
-
-  async function initialize() {
-    setActionState({ loading: true, message: "", error: "" });
-    try {
-      await safetyControlApi.initialize(SELLER_ID);
-      setActionState({ loading: false, message: "Safety Control initialized.", error: "" });
-      status.reload();
-      audits.reload();
-    } catch {
-      setActionState({ loading: false, message: "", error: "Could not initialize safety control" });
-    }
-  }
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    setActionState({ loading: true, message: "", error: "" });
-    try {
-      await safetyControlApi.saveSettings(SELLER_ID, {
-        maxDailyEngineRuns: asInputNumber(form.maxDailyEngineRuns),
-        maxDailyExecutionAttempts: asInputNumber(form.maxDailyExecutionAttempts),
-        maxDailyAiCost: asInputNumber(form.maxDailyAiCost),
-        safetyNotes: form.safetyNotes
-      });
-      setActionState({ loading: false, message: "Safety settings saved.", error: "" });
-      status.reload();
-      audits.reload();
-    } catch {
-      setActionState({ loading: false, message: "", error: "Could not save safety settings" });
-    }
-  }
-
-  const statusCards = [
-    { label: "Global Mode", value: <StatusBadge value={readFirst(settings, ["globalMode", "mode"]) ?? "SHADOW"} /> },
-    { label: "Live Execution Enabled", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["liveExecutionEnabled"]), "WARNING", "SAFE")} /> },
-    { label: "PPC Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["ppcLiveExecution", "ppcLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
-    { label: "Listing Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["listingLiveExecution", "listingLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
-    { label: "Image Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["imageLiveExecution", "imageLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
-    { label: "A+ Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["aplusLiveExecution", "aPlusLiveExecution", "aplusLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
-    { label: "Social Live Execution", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["socialLiveExecution", "socialLiveExecutionEnabled"]), "WARNING", "SAFE")} /> },
-    { label: "AI Calls Enabled", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["aiCallsEnabled"]), "WARNING", "DISABLED")} /> },
-    { label: "Approval Required", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["approvalRequired"]), "REQUIRED", "WARNING")} /> },
-    { label: "Founder Approval Required", value: <StatusBadge value={safeBooleanLabel(readFirst(settings, ["founderApprovalRequired"]), "REQUIRED", "WARNING")} /> },
-    { label: "Max Daily Engine Runs", value: formatEmpty(readFirst(settings, ["maxDailyEngineRuns"])) },
-    { label: "Max Daily Execution Attempts", value: formatEmpty(readFirst(settings, ["maxDailyExecutionAttempts"])) },
-    { label: "Max Daily AI Cost", value: formatMoney(readFirst(settings, ["maxDailyAiCost"])) }
-  ];
-
-  return (
-    <div className="page">
-      <PageHeader title="Safety Control Center" subtitle="Control automation mode, approval rules, AI usage, and execution safety." />
-      <SafetyBanner text="Live execution is blocked in V1. Shadow mode and founder approval remain required." />
-      {status.loading || status.error ? (
-        <div className="stack">
-          <Card title="Locked Execution Controls">
-            <div className="readiness-grid">
-              {["Marketplace live execution", "Ads live execution", "Listing updates", "Image uploads", "A+ uploads", "External notifications", "AI calls"].map((label) => (
-                <div className="readiness-item" key={label}>
-                  <span>{label}</span>
-                  <Badge tone="good">Locked in V1</Badge>
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Card title="Edit Safe Settings">
-            <form className="form-grid" onSubmit={save}>
-              <TextInput label="Max Daily Engine Runs" type="number" value={form.maxDailyEngineRuns} onChange={(value) => setForm({ ...form, maxDailyEngineRuns: value })} />
-              <TextInput label="Max Daily Execution Attempts" type="number" value={form.maxDailyExecutionAttempts} onChange={(value) => setForm({ ...form, maxDailyExecutionAttempts: value })} />
-              <TextInput label="Max Daily AI Cost" type="number" value={form.maxDailyAiCost} onChange={(value) => setForm({ ...form, maxDailyAiCost: value })} />
-              <TextArea label="Safety Notes" value={form.safetyNotes} onChange={(value) => setForm({ ...form, safetyNotes: value })} />
-              <div className="button-row"><button type="submit" disabled>Save Safety Settings</button></div>
-            </form>
-          </Card>
-        </div>
-      ) : null}
-      {status.loading ? <LoadingBlock text="Loading safety control..." /> : status.error ? <ErrorBlock text="Could not load safety control" /> : (
-        <div className="stack">
-          {!hasSettings ? (
-            <Card title="Initialize Safety Control" action={<button type="button" onClick={initialize} disabled={actionState.loading}>Initialize Safety Control</button>}>
-              <p className="section-note">Safety Control settings are not initialized yet. V1 remains blocked until founder-safe defaults are created.</p>
-            </Card>
-          ) : null}
-          <div className="summary-strip command-summary">
-            {statusCards.map((card) => <MetricTile key={card.label} label={card.label} value={card.value} />)}
-          </div>
-          <Card title="Locked Execution Controls">
-            <div className="readiness-grid">
-              {["Marketplace live execution", "Ads live execution", "Listing updates", "Image uploads", "A+ uploads", "External notifications", "AI calls"].map((label) => (
-                <div className="readiness-item" key={label}>
-                  <span>{label}</span>
-                  <Badge tone="good">Locked in V1</Badge>
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Card title="Edit Safe Settings">
-            <form className="form-grid" onSubmit={save}>
-              <TextInput label="Max Daily Engine Runs" type="number" value={form.maxDailyEngineRuns} onChange={(value) => setForm({ ...form, maxDailyEngineRuns: value })} />
-              <TextInput label="Max Daily Execution Attempts" type="number" value={form.maxDailyExecutionAttempts} onChange={(value) => setForm({ ...form, maxDailyExecutionAttempts: value })} />
-              <TextInput label="Max Daily AI Cost" type="number" value={form.maxDailyAiCost} onChange={(value) => setForm({ ...form, maxDailyAiCost: value })} />
-              <TextArea label="Safety Notes" value={form.safetyNotes} onChange={(value) => setForm({ ...form, safetyNotes: value })} />
-              <div className="button-row">
-                <button type="submit" disabled={actionState.loading || !hasSettings}>Save Safety Settings</button>
-                {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
-                {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
-              </div>
-            </form>
-          </Card>
-          <Card title="Audit Events">
-            {audits.loading ? <LoadingBlock text="Loading safety audit events..." /> : audits.error ? <ErrorBlock text="Could not load safety audit events." /> : auditRows.length === 0 ? <EmptyBlock text="No safety audit events yet." /> : (
-              <div className="table-wrap command-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Created At</th>
-                      <th>Event Type</th>
-                      <th>Actor</th>
-                      <th>Note</th>
-                      <th>Before State</th>
-                      <th>After State</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {auditRows.map((row, index) => (
-                      <tr key={String(row.id ?? index)}>
-                        <td>{formatLocalDateTime(row.createdAt)}</td>
-                        <td>{formatEmpty(row.eventType)}</td>
-                        <td>{formatEmpty(row.actor)}</td>
-                        <td className="wrap-cell">{formatEmpty(row.note)}</td>
-                        <td><JsonSnippet value={row.beforeState} /></td>
-                        <td><JsonSnippet value={row.afterState} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AlertCenterPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
-  const summary = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
-  const events = useApi<ApiRows<AlertEvent>>(() => alertCenterApi.events(SELLER_ID));
-  const data = alertSummaryOf(summary.data);
-  const rows = alertRowsOf(events.data);
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [severityFilter, setSeverityFilter] = useState("ALL");
-  const [categoryFilter, setCategoryFilter] = useState("ALL");
-  const [query, setQuery] = useState("");
-  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
-
-  const filteredRows = rows.filter((row) => {
-    const matchesStatus = statusFilter === "ALL" || normalizeState(row.status) === statusFilter;
-    const matchesSeverity = severityFilter === "ALL" || normalizeState(row.severity) === severityFilter;
-    const matchesCategory = categoryFilter === "ALL" || normalizeState(row.category) === categoryFilter;
-    const haystack = `${row.title ?? ""} ${row.message ?? ""} ${row.sku ?? ""} ${row.asin ?? ""}`.toLowerCase();
-    return matchesStatus && matchesSeverity && matchesCategory && haystack.includes(query.trim().toLowerCase());
-  });
-
-  async function runAction(id: string, action: "acknowledge" | "resolve") {
-    if (action === "resolve" && !window.confirm("Resolve this internal alert?")) return;
-    setActionState({ id, message: "", error: "" });
-    try {
-      if (action === "acknowledge") await alertCenterApi.acknowledge(id);
-      else await alertCenterApi.resolve(id);
-      setActionState({ id: "", message: `Alert ${action}d.`, error: "" });
-      summary.reload();
-      events.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: `Could not ${action} alert.` });
-    }
-  }
-
-  async function seedRules() {
-    setActionState({ id: "seed", message: "", error: "" });
-    try {
-      await alertCenterApi.seedRules(SELLER_ID);
-      setActionState({ id: "", message: "Default alert rules seeded.", error: "" });
-      summary.reload();
-      events.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not seed default alert rules." });
-    }
-  }
-
-  async function generateAlerts() {
-    setActionState({ id: "generate", message: "", error: "" });
-    try {
-      await alertCenterApi.generate(SELLER_ID);
-      setActionState({ id: "", message: "Alerts generated.", error: "" });
-      summary.reload();
-      events.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not generate alerts." });
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Alert Center" subtitle="Internal founder alerts for risks, stale data, approvals, and blocked execution." />
-      <SafetyBanner text="Alerts are internal only. No email, WhatsApp, Slack, or external notification is sent." />
-      <div className="stack">
-        <div className="button-row">
-          <button type="button" onClick={seedRules} disabled={actionState.id !== ""}>Seed Default Rules</button>
-          <button type="button" onClick={generateAlerts} disabled={actionState.id !== ""}>Generate Alerts</button>
-          <button type="button" className="secondary" onClick={() => { summary.reload(); events.reload(); }}>Refresh Alerts</button>
-          {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
-          {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
-        </div>
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load alert summary." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Open Alerts" value={summaryNumber(data, ["openAlerts", "openCount"])} />
-            <MetricTile label="High Alerts" value={summaryNumber(data, ["highAlerts", "highCount"])} />
-            <MetricTile label="Critical Alerts" value={summaryNumber(data, ["criticalAlerts", "criticalCount"])} />
-            <MetricTile label="Acknowledged Alerts" value={summaryNumber(data, ["acknowledgedAlerts", "acknowledgedCount"])} />
-            <MetricTile label="Resolved Alerts" value={summaryNumber(data, ["resolvedAlerts", "resolvedCount"])} />
+      <Card title="Approval Summary">
+        {approvals.loading ? <LoadingBlock /> : approvals.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Actions" value={rows.length} />
+            <MetricRow label="Pending" value={rows.filter((r) => r.actionStatus === "APPROVAL_REQUIRED").length} />
+            <MetricRow label="High Risk" value={rows.filter((r) => r.actionStatus === "HIGH_RISK_APPROVAL").length} />
+            <MetricRow label="Approved" value={rows.filter((r) => r.actionStatus === "APPROVED").length} />
+            <MetricRow label="Executed" value={rows.filter((r) => r.actionStatus === "EXECUTED").length} />
+            <MetricRow label="Rejected" value={rows.filter((r) => r.actionStatus === "REJECTED").length} />
           </div>
         )}
-        <Card title="Alert Filters">
-          <div className="form-grid filters-grid">
-            <SelectField label="Status" value={statusFilter} options={["ALL", ...uniqueTextValues(rows.map((row) => normalizeState(row.status)))]} onChange={setStatusFilter} />
-            <SelectField label="Severity" value={severityFilter} options={["ALL", ...uniqueTextValues(rows.map((row) => normalizeState(row.severity)))]} onChange={setSeverityFilter} />
-            <SelectField label="Category" value={categoryFilter} options={["ALL", ...uniqueTextValues(rows.map((row) => normalizeState(row.category)))]} onChange={setCategoryFilter} />
-            <TextInput label="Search Title, Message, SKU, ASIN" value={query} onChange={setQuery} />
-          </div>
-        </Card>
-        <Card title="Alerts">
-          {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock text="Could not load alert events." /> : filteredRows.length === 0 ? <EmptyBlock text="No founder alerts match these filters." /> : (
-            <div className="card-list command-card-list">
-              {filteredRows.map((row, index) => (
-                <article className="item-card command-item-card" key={String(row.id ?? index)}>
-                  <div className="item-top">
-                    <strong>{formatEmpty(row.title ?? "Alert")}</strong>
-                    <StatusBadge value={row.severity ?? "LOW"} />
-                  </div>
-                  <div className="badge-row">
-                    <StatusBadge value={row.category ?? "GENERAL"} />
-                    <StatusBadge value={row.status ?? "OPEN"} />
-                  </div>
-                  <p className="long-text">{formatEmpty(row.message)}</p>
-                  <div className="detail-grid">
-                    <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
-                    <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
-                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                    <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
-                  </div>
-                  <div className="button-row compact">
-                    {normalizeState(row.status) !== "RESOLVED" ? <button type="button" onClick={() => runAction(row.id, "acknowledge")} disabled={actionState.id === row.id}>Acknowledge</button> : null}
-                    {normalizeState(row.status) !== "RESOLVED" ? <button type="button" className="secondary" onClick={() => runAction(row.id, "resolve")} disabled={actionState.id === row.id}>Resolve</button> : null}
-                    {row.actionId ? <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button> : null}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function CeoReportPage() {
-  const report = useApi<AnyRecord>(() => getJson(`/api/ceo-report/daily?sellerId=${SELLER_ID}&days=30`));
-  const data = report.data ?? {};
-
-  return (
-    <div className="page">
-      <PageHeader title="CEO Report" subtitle="A calm daily operating report for the founder." />
-      {report.loading ? <LoadingBlock /> : report.error ? <ErrorBlock /> : (
-        <div className="stack">
-          <ObjectCard title="Executive Summary" data={recordOf(data.executiveSummary)} />
-          <ObjectCard title="Profit Guardrail" data={recordOf(data.profitGuardrail)} />
-          <ObjectCard title="PPC Snapshot" data={recordOf(data.ppcSnapshot)} moneyKeys={["cost", "sales"]} percentKeys={["acos"]} />
-          <ListCard title="Profit Risk Alerts" rows={arrayOf(data.profitRiskAlerts)} />
-          <ListCard title="Today Top Actions" rows={arrayOf(data.todayTopActions ?? data.topActions)} />
-          <ListCard title="Pending Approvals" rows={arrayOf(data.pendingApprovals)} />
-          <ListCard title="Approved Shadow Actions" rows={arrayOf(data.approvedShadowActions)} />
-          <ListCard title="Monitoring Items" rows={arrayOf(data.monitoringItems)} />
-          <ListCard title="Search Term Highlights" rows={arrayOf(data.searchTermHighlights)} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ExperimentsPage() {
-  const summary = useApi<ExperimentSummary>(() => experimentsApi.summary(SELLER_ID));
-  const experiments = useApi<ApiRows<Experiment>>(() => experimentsApi.list(SELLER_ID));
-  const data = experimentSummaryOf(summary.data);
-  const rows = experimentRowsOf(experiments.data);
-  const [form, setForm] = useState({
-    name: "",
-    description: "",
-    experimentType: "PPC_KEYWORD_TEST",
-    sku: "",
-    asin: "",
-    hypothesis: "",
-    priority: "MEDIUM"
-  });
-  const [fromActionId, setFromActionId] = useState("");
-  const [completeForm, setCompleteForm] = useState({ id: "", resultStatus: "WON", resultSummary: "" });
-  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setActionState({ id: "create", message: "", error: "" });
-    try {
-      await experimentsApi.create({
-        sellerId: SELLER_ID,
-        ...form,
-        experimentName: form.name
-      });
-      setForm({ ...form, name: "", description: "", sku: "", asin: "", hypothesis: "" });
-      setActionState({ id: "", message: "Experiment created.", error: "" });
-      summary.reload();
-      experiments.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not create experiment." });
-    }
-  }
-
-  async function createFromAction(event: FormEvent) {
-    event.preventDefault();
-    const actionId = fromActionId.trim();
-    if (!actionId) return;
-    setActionState({ id: "from-action", message: "", error: "" });
-    try {
-      await experimentsApi.createFromAction(actionId);
-      setFromActionId("");
-      setActionState({ id: "", message: "Experiment created from approval action.", error: "" });
-      summary.reload();
-      experiments.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not create experiment from action." });
-    }
-  }
-
-  async function action(id: string, name: "start" | "checkpoint" | "cancel") {
-    if (name === "cancel" && !window.confirm("Cancel this experiment? This only changes tracking status.")) return;
-    setActionState({ id, message: "", error: "" });
-    try {
-      if (name === "start") await experimentsApi.start(id);
-      else if (name === "checkpoint") await experimentsApi.recordCheckpoint(id, { sellerId: SELLER_ID, note: "Checkpoint recorded from frontend.", metrics: {} });
-      else await experimentsApi.cancel(id);
-      setActionState({ id: "", message: name === "checkpoint" ? "Checkpoint recorded." : `Experiment ${name}ed.`, error: "" });
-      summary.reload();
-      experiments.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: `Could not ${name} experiment.` });
-    }
-  }
-
-  async function complete(event: FormEvent) {
-    event.preventDefault();
-    if (!completeForm.id) return;
-    setActionState({ id: completeForm.id, message: "", error: "" });
-    try {
-      await experimentsApi.complete(completeForm.id, {
-        sellerId: SELLER_ID,
-        resultStatus: completeForm.resultStatus,
-        resultSummary: completeForm.resultSummary
-      });
-      setCompleteForm({ id: "", resultStatus: "WON", resultSummary: "" });
-      setActionState({ id: "", message: "Experiment completed.", error: "" });
-      summary.reload();
-      experiments.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not complete experiment." });
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Experiments" subtitle="Track before/after outcomes for PPC, listing, pricing, image, and content changes." />
-      <SafetyBanner text="Experiments track results only. They do not execute marketplace changes." />
-      <p className="section-note">Tracking actions include Start, Record Checkpoint, Complete, and Cancel. They only update experiment status and outcomes.</p>
-      {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load experiment summary." /> : (
-        <div className="summary-strip command-summary">
-          <MetricTile label="Total Experiments" value={summaryNumber(data, ["totalExperiments", "total"], rows.length)} />
-          <MetricTile label="Draft Experiments" value={summaryNumber(data, ["draftExperiments", "draftCount"], rows.filter((row) => normalizeState(row.status).includes("DRAFT")).length)} />
-          <MetricTile label="Running Experiments" value={summaryNumber(data, ["runningExperiments", "runningCount", "activeExperiments"], rows.filter((row) => ["RUNNING", "ACTIVE"].includes(normalizeState(row.status))).length)} />
-          <MetricTile label="Completed Experiments" value={summaryNumber(data, ["completedExperiments", "completedCount"], rows.filter((row) => normalizeState(row.status) === "COMPLETED").length)} />
-          <MetricTile label="Cancelled Experiments" value={summaryNumber(data, ["cancelledExperiments", "cancelledCount"], rows.filter((row) => normalizeState(row.status) === "CANCELLED").length)} />
-          <MetricTile label="Won" value={summaryNumber(data, ["won", "wonCount"], rows.filter((row) => normalizeState(row.resultStatus) === "WON").length)} />
-          <MetricTile label="Lost" value={summaryNumber(data, ["lost", "lostCount"], rows.filter((row) => normalizeState(row.resultStatus) === "LOST").length)} />
-          <MetricTile label="Inconclusive" value={summaryNumber(data, ["inconclusive", "inconclusiveCount"], rows.filter((row) => normalizeState(row.resultStatus) === "INCONCLUSIVE").length)} />
-        </div>
-      )}
-      <div className="stack">
-        <Card title="Experiment List">
-          {experiments.loading ? <LoadingBlock /> : experiments.error ? <ErrorBlock text="Could not load experiments." /> : rows.length === 0 ? <EmptyBlock text="No experiments yet. Create one from a safe tracking hypothesis or an approval action. Record Checkpoint controls appear after an experiment exists." /> : (
-            <div className="card-list command-card-list">
-              {rows.map((row) => {
-                const rowName = row.name ?? row.experimentName;
-                return (
-                  <article className="item-card command-item-card" key={row.id}>
-                    <div className="item-top"><strong>{formatEmpty(rowName)}</strong><StatusBadge value={row.status} /></div>
-                    <div className="badge-row">
-                      <StatusBadge value={row.experimentType ?? "OTHER"} />
-                      {row.resultStatus ? <StatusBadge value={row.resultStatus} /> : null}
-                      {row.priority ? <StatusBadge value={row.priority} /> : null}
-                    </div>
-                    <p className="long-text">{formatEmpty(row.hypothesis)}</p>
-                    <div className="detail-grid">
-                      <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                      <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                      <MetricRow label="Result Summary" value={formatEmpty(row.resultSummary)} />
-                      <MetricRow label="Started At" value={formatLocalDateTime(row.startedAt ?? row.startDate)} />
-                      <MetricRow label="Ended At" value={formatLocalDateTime(row.endedAt ?? row.endDate)} />
-                    </div>
-                    {completeForm.id === row.id ? (
-                      <form className="form-grid compact-form" onSubmit={complete}>
-                        <SelectField label="Result Status" value={completeForm.resultStatus} options={["WON", "LOST", "INCONCLUSIVE"]} onChange={(value) => setCompleteForm({ ...completeForm, resultStatus: value })} />
-                        <TextArea label="Result Summary" value={completeForm.resultSummary} onChange={(value) => setCompleteForm({ ...completeForm, resultSummary: value })} />
-                        <div className="button-row">
-                          <button type="submit" disabled={actionState.id === row.id}>Complete</button>
-                          <button type="button" className="secondary" onClick={() => setCompleteForm({ id: "", resultStatus: "WON", resultSummary: "" })}>Cancel Form</button>
-                        </div>
-                      </form>
-                    ) : null}
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => action(row.id, "start")} disabled={actionState.id === row.id}>Start</button>
-                      <button type="button" className="secondary" onClick={() => action(row.id, "checkpoint")} disabled={actionState.id === row.id}>Record Checkpoint</button>
-                      <button type="button" className="secondary" onClick={() => setCompleteForm({ id: row.id, resultStatus: "WON", resultSummary: "" })}>Complete</button>
-                      <button type="button" className="danger-button secondary" onClick={() => action(row.id, "cancel")} disabled={actionState.id === row.id}>Cancel</button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-        {actionState.message ? <div className="soft-state success-state">{actionState.message}</div> : null}
-        {actionState.error ? <div className="soft-state error-state">{actionState.error}</div> : null}
-      </div>
-      <Card title="Create Experiment">
-        <form className="form-grid" onSubmit={submit}>
-          <TextInput label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
-          <SelectField label="Experiment Type" value={form.experimentType} options={["PPC_BID_TEST", "PPC_KEYWORD_TEST", "LISTING_TITLE_TEST", "LISTING_IMAGE_TEST", "PRICING_TEST", "COUPON_TEST", "CONTENT_A_PLUS_TEST", "INVENTORY_REPLENISHMENT_TEST", "OTHER"]} onChange={(value) => setForm({ ...form, experimentType: value })} />
-          <TextInput label="SKU Optional" value={form.sku} onChange={(value) => setForm({ ...form, sku: value })} />
-          <TextInput label="ASIN Optional" value={form.asin} onChange={(value) => setForm({ ...form, asin: value })} />
-          <SelectField label="Priority Optional" value={form.priority} options={["LOW", "MEDIUM", "HIGH"]} onChange={(value) => setForm({ ...form, priority: value })} />
-          <TextArea label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
-          <TextArea label="Hypothesis" value={form.hypothesis} onChange={(value) => setForm({ ...form, hypothesis: value })} />
-          <div className="button-row"><button type="submit" disabled={actionState.id === "create"}>Create Experiment</button></div>
-        </form>
       </Card>
-      <Card title="Create From Action">
-        <form className="form-grid" onSubmit={createFromAction}>
-          <TextInput label="Action ID" value={fromActionId} onChange={setFromActionId} />
-          <div className="button-row"><button type="submit" disabled={actionState.id === "from-action"}>Create Experiment From Action</button></div>
-        </form>
-      </Card>
-    </div>
-  );
-}
 
-function DataFreshnessPage() {
-  const summary = useApi<DataFreshnessSummary>(() => dataFreshnessApi.summary(SELLER_ID));
-  const data = dataFreshnessSummaryOf(summary.data);
-  const rows = dataFreshnessRowsOf(summary.data);
-  const warnings = dailyList(readFirst(data, ["warnings"]));
-  const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
-
-  async function runCheck() {
-    setActionState({ loading: true, message: "", error: "" });
-    try {
-      await dataFreshnessApi.check(SELLER_ID);
-      setActionState({ loading: false, message: "Freshness check completed.", error: "" });
-      summary.reload();
-    } catch {
-      setActionState({ loading: false, message: "", error: "Could not run freshness check." });
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Data Freshness Guardrails" subtitle="Check whether Amazon, Ads, Product Passport, Economics, Engines, and AI-CGO data are fresh." />
-      <SafetyBanner text="No external sync is triggered here. This only checks freshness status." />
-      <div className="stack">
-        <div className="button-row">
-          <button type="button" onClick={runCheck} disabled={actionState.loading}>Run Freshness Check</button>
-          <button type="button" className="secondary" onClick={summary.reload}>Refresh Summary</button>
-          {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
-          {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
-        </div>
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load data freshness summary." /> : (
-          <>
-            <div className="summary-strip command-summary">
-              <MetricTile label="Total Sources" value={summaryNumber(data, ["totalSources", "total"], rows.length)} />
-              <MetricTile label="Fresh Sources" value={summaryNumber(data, ["freshSources", "fresh"], rows.filter((row) => normalizeState(row.status) === "FRESH").length)} />
-              <MetricTile label="Stale Sources" value={summaryNumber(data, ["staleSources", "stale"], rows.filter((row) => normalizeState(row.status) === "STALE").length)} />
-              <MetricTile label="Unknown Sources" value={summaryNumber(data, ["unknownSources", "unknown"], rows.filter((row) => normalizeState(row.status) === "UNKNOWN").length)} />
-              <MetricTile label="Error Sources" value={summaryNumber(data, ["errorSources", "errors"], rows.filter((row) => normalizeState(row.status) === "ERROR").length)} />
-            </div>
-            <Card title="Freshness Rows">
-              {rows.length === 0 ? <EmptyBlock text="No data freshness rows returned yet." /> : (
-                <div className="table-wrap command-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Data Source</th>
-                        <th>Status</th>
-                        <th>Last Success At</th>
-                        <th>Last Attempt At</th>
-                        <th>Freshness Minutes</th>
-                        <th>Stale After Minutes</th>
-                        <th>Last Error</th>
-                        <th>Updated At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row, index) => (
-                        <tr key={String(row.id ?? row.dataSource ?? index)}>
-                          <td>{formatEmpty(row.dataSource)}</td>
-                          <td><StatusBadge value={row.status ?? "UNKNOWN"} /></td>
-                          <td>{formatLocalDateTime(row.lastSuccessAt)}</td>
-                          <td>{formatLocalDateTime(row.lastAttemptAt)}</td>
-                          <td>{formatEmpty(row.freshnessMinutes)}</td>
-                          <td>{formatEmpty(row.staleAfterMinutes)}</td>
-                          <td className="wrap-cell">{formatEmpty(row.lastError)}</td>
-                          <td>{formatLocalDateTime(row.updatedAt)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
-            <Card title="Warnings">
-              {warnings.length === 0 ? <EmptyBlock text="No freshness warnings returned." /> : (
-                <ul className="clean-list">
-                  {warnings.map((warning, index) => <li key={index}>{formatDailyListItem(warning)}</li>)}
-                </ul>
-              )}
-            </Card>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AiGatewayPage() {
-  const status = useApi<AiGatewayStatus>(() => aiGatewayApi.status(SELLER_ID));
-  const costSummary = useApi<AiCostSummary>(() => aiGatewayApi.costSummary(SELLER_ID));
-  const ledger = useApi<ApiRows<AiLedgerRow>>(() => aiGatewayApi.ledger(SELLER_ID));
-  const statusData = aiGatewayStatusOf(status.data);
-  const costData = aiCostSummaryOf(costSummary.data);
-  const ledgerRows = aiLedgerRowsOf(ledger.data);
-  const [estimateForm, setEstimateForm] = useState({
-    moduleName: "",
-    purpose: "",
-    estimatedInputTokens: "0",
-    estimatedOutputTokens: "0",
-    provider: "",
-    modelName: ""
-  });
-  const [blockedForm, setBlockedForm] = useState({ moduleName: "", purpose: "", blockedReason: "AI calls disabled in V1." });
-  const [generateForm, setGenerateForm] = useState({
-    moduleName: "",
-    purpose: "",
-    estimatedInputTokens: "",
-    estimatedOutputTokens: ""
-  });
-  const [estimateResult, setEstimateResult] = useState<AiCostEstimate | null>(null);
-  const [generateResult, setGenerateResult] = useState<AnyRecord | null>(null);
-  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
-
-  async function estimate(event: FormEvent) {
-    event.preventDefault();
-    setActionState({ id: "estimate", message: "", error: "" });
-    setEstimateResult(null);
-    try {
-      const result = await aiGatewayApi.estimate({
-        sellerId: SELLER_ID,
-        moduleName: estimateForm.moduleName,
-        purpose: estimateForm.purpose,
-        estimatedInputTokens: asInputNumber(estimateForm.estimatedInputTokens) ?? 0,
-        estimatedOutputTokens: asInputNumber(estimateForm.estimatedOutputTokens) ?? 0,
-        provider: estimateForm.provider || undefined,
-        modelName: estimateForm.modelName || undefined
-      });
-      setEstimateResult(aiCostEstimateOf(result));
-      setActionState({ id: "", message: "AI cost estimate calculated.", error: "" });
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not estimate AI cost." });
-    }
-  }
-
-  async function recordBlocked(event: FormEvent) {
-    event.preventDefault();
-    setActionState({ id: "blocked", message: "", error: "" });
-    try {
-      await aiGatewayApi.recordBlocked({ sellerId: SELLER_ID, ...blockedForm });
-      setBlockedForm({ moduleName: "", purpose: "", blockedReason: "AI calls disabled in V1." });
-      setActionState({ id: "", message: "Blocked AI attempt recorded.", error: "" });
-      status.reload();
-      costSummary.reload();
-      ledger.reload();
-    } catch {
-      setActionState({ id: "", message: "", error: "Could not record blocked AI attempt." });
-    }
-  }
-
-  async function testGenerateGuardrail(event: FormEvent) {
-    event.preventDefault();
-    setActionState({ id: "generate", message: "", error: "" });
-    setGenerateResult(null);
-    try {
-      const response = await aiGatewayApi.generate({
-        sellerId: SELLER_ID,
-        moduleName: generateForm.moduleName,
-        purpose: generateForm.purpose,
-        prompt: generateForm.purpose,
-        estimatedInputTokens: asInputNumber(generateForm.estimatedInputTokens),
-        estimatedOutputTokens: asInputNumber(generateForm.estimatedOutputTokens)
-      });
-      setGenerateResult(hardeningResultOf(response));
-      setActionState({
-        id: "",
-        message: responseWasBlocked(response) ? "AI generation blocked safely because AI calls are disabled." : "AI generate guardrail response received.",
-        error: ""
-      });
-      status.reload();
-      costSummary.reload();
-      ledger.reload();
-    } catch (requestError) {
-      const sanitized = sanitizeActionError(requestError);
-      const isDisabledBlock = normalizeState(sanitized).includes("AI_CALLS_DISABLED") || normalizeState(sanitized).includes("AI CALLS DISABLED");
-      setActionState({
-        id: "",
-        message: isDisabledBlock ? "AI generation blocked safely because AI calls are disabled." : "",
-        error: isDisabledBlock ? "" : sanitized
-      });
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="AI Gateway + Cost Ledger" subtitle="Cost-controlled AI usage foundation. AI calls are disabled in V1." />
-      <SafetyBanner text="AI calls are disabled in V1. This page only estimates and records cost-control events." />
-      <div className="stack">
-        {status.loading || costSummary.loading ? <LoadingBlock /> : status.error || costSummary.error ? <ErrorBlock text="Could not load AI gateway status." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="AI Calls Enabled" value={<StatusBadge value={safeBooleanLabel(readFirst(statusData, ["aiCallsEnabled"]), "WARNING", "DISABLED")} />} />
-            <MetricTile label="Daily Budget" value={formatMoney(readFirst(statusData, ["dailyBudget", "dailyAiBudget"]))} />
-            <MetricTile label="Monthly Budget" value={formatMoney(readFirst(statusData, ["monthlyBudget", "monthlyAiBudget"]))} />
-            <MetricTile label="Daily Cost" value={formatMoney(readFirst(costData, ["dailyCost", "costToday"]))} />
-            <MetricTile label="Monthly Cost" value={formatMoney(readFirst(costData, ["monthlyCost", "costThisMonth"]))} />
-            <MetricTile label="Requests Today" value={summaryNumber({ ...statusData, ...costData }, ["requestsToday"])} />
-            <MetricTile label="Requests This Month" value={summaryNumber({ ...statusData, ...costData }, ["requestsThisMonth"])} />
-          </div>
-        )}
-        <div className="dashboard-grid today">
-          <Card title="Estimate Cost">
-            <form className="form-grid" onSubmit={estimate}>
-              <TextInput label="Module Name" value={estimateForm.moduleName} onChange={(value) => setEstimateForm({ ...estimateForm, moduleName: value })} />
-              <TextInput label="Purpose" value={estimateForm.purpose} onChange={(value) => setEstimateForm({ ...estimateForm, purpose: value })} />
-              <TextInput label="Estimated Input Tokens" type="number" value={estimateForm.estimatedInputTokens} onChange={(value) => setEstimateForm({ ...estimateForm, estimatedInputTokens: value })} />
-              <TextInput label="Estimated Output Tokens" type="number" value={estimateForm.estimatedOutputTokens} onChange={(value) => setEstimateForm({ ...estimateForm, estimatedOutputTokens: value })} />
-              <TextInput label="Provider Optional" value={estimateForm.provider} onChange={(value) => setEstimateForm({ ...estimateForm, provider: value })} />
-              <TextInput label="Model Name Optional" value={estimateForm.modelName} onChange={(value) => setEstimateForm({ ...estimateForm, modelName: value })} />
-              <div className="button-row"><button type="submit" disabled={actionState.id === "estimate"}>Estimate Cost</button></div>
-            </form>
-            {estimateResult ? (
-              <div className="gateway-result">
-                <MetricRow label="Estimated Cost" value={formatMoney(estimateResult.estimatedCost)} />
-                <MetricRow label="Status" value={<StatusBadge value={estimateResult.status ?? "ESTIMATED"} />} />
-                <MetricRow label="Blocked Reason" value={formatEmpty(estimateResult.blockedReason)} />
-              </div>
-            ) : null}
-          </Card>
-          <Card title="Record Blocked Attempt">
-            <form className="form-grid" onSubmit={recordBlocked}>
-              <TextInput label="Module Name" value={blockedForm.moduleName} onChange={(value) => setBlockedForm({ ...blockedForm, moduleName: value })} />
-              <TextInput label="Purpose" value={blockedForm.purpose} onChange={(value) => setBlockedForm({ ...blockedForm, purpose: value })} />
-              <TextArea label="Blocked Reason" value={blockedForm.blockedReason} onChange={(value) => setBlockedForm({ ...blockedForm, blockedReason: value })} />
-              <div className="button-row"><button type="submit" disabled={actionState.id === "blocked"}>Record Blocked AI Attempt</button></div>
-            </form>
-          </Card>
-          <Card title="Generate Guardrail Test">
-            <form className="form-grid" onSubmit={testGenerateGuardrail}>
-              <TextInput label="Module Name" value={generateForm.moduleName} onChange={(value) => setGenerateForm({ ...generateForm, moduleName: value })} />
-              <TextArea label="Purpose / Prompt" value={generateForm.purpose} onChange={(value) => setGenerateForm({ ...generateForm, purpose: value })} />
-              <TextInput label="Estimated Input Tokens Optional" type="number" value={generateForm.estimatedInputTokens} onChange={(value) => setGenerateForm({ ...generateForm, estimatedInputTokens: value })} />
-              <TextInput label="Estimated Output Tokens Optional" type="number" value={generateForm.estimatedOutputTokens} onChange={(value) => setGenerateForm({ ...generateForm, estimatedOutputTokens: value })} />
-              <div className="button-row"><button type="submit" disabled={actionState.id === "generate"}>Test AI Generate Guardrail</button></div>
-            </form>
-            <p className="section-note">Expected safe default: blocked AI_CALLS_DISABLED. This control is a guardrail test, not a real generation shortcut.</p>
-            {generateResult ? <div className="gateway-result"><JsonSnippet value={generateResult} /></div> : null}
-          </Card>
-        </div>
-        {actionState.message ? <div className="soft-state success-state">{actionState.message}</div> : null}
-        {actionState.error ? <div className="soft-state error-state">{actionState.error}</div> : null}
-        <Card title="Cost Ledger">
-          {ledger.loading ? <LoadingBlock /> : ledger.error ? <ErrorBlock text="Could not load AI ledger." /> : ledgerRows.length === 0 ? <EmptyBlock text="No AI cost ledger rows yet." /> : (
-            <div className="table-wrap command-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Created At</th>
-                    <th>Module Name</th>
-                    <th>Purpose</th>
-                    <th>Provider</th>
-                    <th>Model Name</th>
-                    <th>Input Tokens</th>
-                    <th>Output Tokens</th>
-                    <th>Estimated Cost</th>
-                    <th>Status</th>
-                    <th>Blocked Reason</th>
+      <Card title="All Actions">
+        {approvals.loading ? <LoadingBlock /> : approvals.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Created</th></tr></thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.actionId}>
+                    <td>{formatShortId(row.actionId)}</td>
+                    <td>{formatEmpty(row.actionTitle)}</td>
+                    <td>{formatEmpty(row.actionType)}</td>
+                    <td><StatusBadge value={row.actionStatus} /></td>
+                    <td>{formatEmpty(row.createdAt)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {ledgerRows.map((row, index) => (
-                    <tr key={String(row.id ?? index)}>
-                      <td>{formatLocalDateTime(row.createdAt)}</td>
-                      <td>{formatEmpty(row.moduleName)}</td>
-                      <td className="wrap-cell">{formatEmpty(row.purpose)}</td>
-                      <td>{formatEmpty(row.provider)}</td>
-                      <td>{formatEmpty(row.modelName)}</td>
-                      <td>{formatEmpty(row.inputTokens)}</td>
-                      <td>{formatEmpty(row.outputTokens)}</td>
-                      <td>{formatMoney(row.estimatedCost)}</td>
-                      <td><StatusBadge value={row.status ?? "UNKNOWN"} /></td>
-                      <td className="wrap-cell">{formatEmpty(row.blockedReason)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function ProductionHealthPage() {
-  const summary = useApi<ProductionHealthSummary>(() => productionHealthApi.summary(SELLER_ID));
-  const data = productionHealthSummaryOf(summary.data);
-  const modules = productionHealthModulesOf(summary.data);
-  const blockers = dailyList(readFirst(data, ["blockers"]));
-  const warnings = dailyList(readFirst(data, ["warnings"]));
-  const nextChecks = dailyList(readFirst(data, ["nextChecks"]));
-  const overallStatus = readFirst(data, ["overallStatus", "status"]) ?? "UNKNOWN";
-  const passModules = summaryNumber(data, ["modulesPassing", "passingModules", "passModules"], modules.filter((row) => normalizeState(row.status) === "PASS").length);
-  const warnModules = summaryNumber(data, ["modulesWarning", "warningModules", "warnModules"], modules.filter((row) => ["WARN", "WARNING"].includes(normalizeState(row.status))).length);
-  const failModules = summaryNumber(data, ["modulesFailing", "failingModules", "failModules"], modules.filter((row) => normalizeState(row.status) === "FAIL").length);
-  const criticalBlockers = summaryNumber(data, ["criticalBlockers", "blockersCount"], blockers.length);
-  const warningCount = summaryNumber(data, ["warningsCount"], warnings.length);
-  const safetyFlags = recordOf(readFirst(data, ["safetyFlags", "safety", "flags"]));
-  const moduleStatus = (keys: string[], fallback = "UNKNOWN") => {
-    const match = modules.find((module) => {
-      const normalizedKey = normalizeState(module.key ?? module.name).replace(/\s+/g, "_");
-      return keys.some((key) => normalizedKey.includes(normalizeState(key).replace(/\s+/g, "_")));
-    });
-    return match?.status ?? readFirst(data, keys) ?? fallback;
-  };
-  const finalHealthModules = [
-    { label: "Live Execution", value: moduleStatus(["liveExecution", "live_execution"], readBoolean(readFirst(data, ["liveExecutionEnabled"])) ? "WARN" : "SAFE") },
-    { label: "Launch Gate", value: moduleStatus(["launchGate", "launch_gate"]) },
-    { label: "Scheduler Control", value: moduleStatus(["schedulerControl", "scheduler_control", "scheduler"]) },
-    { label: "Notification Outbox", value: moduleStatus(["notificationOutbox", "notification_outbox"]) },
-    { label: "Security Guardrails", value: moduleStatus(["securityGuardrails", "security_guardrails"]) },
-    { label: "Launch Checklist", value: moduleStatus(["launchChecklist", "launch_checklist"]) },
-    { label: "AI Gateway Generate", value: readBoolean(readFirst(data, ["aiCallsEnabled", "aiGateway.aiCallsEnabled"])) ? moduleStatus(["aiGatewayGenerate", "ai_generate"], "WARN") : "DISABLED" },
-    { label: "PPC Live Adapter", value: moduleStatus(["ppcLiveAdapter", "ppc_live_adapter"], readBoolean(readFirst(data, ["ppcLiveExecutionEnabled", "ppcLiveAdapterEnabled"])) ? "WARN" : "SAFE") },
-    { label: "Listing Live Adapter", value: moduleStatus(["listingLiveAdapter", "listing_live_adapter"], readBoolean(readFirst(data, ["listingLiveExecutionEnabled", "listingLiveAdapterEnabled"])) ? "WARN" : "SAFE") }
-  ];
-
-  return (
-    <div className="page">
-      <PageHeader title="Production Health" subtitle="One health check across backend, data, engines, approvals, safety, and shadow execution." />
-      <SafetyBanner text="Production Health does not execute changes. It only checks readiness." />
-      <div className="stack">
-        <div className="button-row"><button type="button" onClick={summary.reload}>Refresh Health</button></div>
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load production health." /> : (
-          <>
-            <div className="summary-strip command-summary">
-              <MetricTile label="Overall Status" value={<StatusBadge value={overallStatus} />} />
-              <MetricTile label="PASS Modules" value={passModules} />
-              <MetricTile label="WARN Modules" value={warnModules} />
-              <MetricTile label="FAIL Modules" value={failModules} />
-              <MetricTile label="Critical Blockers" value={criticalBlockers} />
-              <MetricTile label="Warnings" value={warningCount} />
-              <MetricTile label="Live Execution Enabled" value={<StatusBadge value={safeBooleanLabel(readFirst(data, ["liveExecutionEnabled"]), "WARNING", "BLOCKED")} />} />
-              <MetricTile label="AI Calls Enabled" value={<StatusBadge value={safeBooleanLabel(readFirst(data, ["aiCallsEnabled"]), "WARNING", "DISABLED")} />} />
-            </div>
-            {normalizeState(overallStatus) === "WARN" ? (
-              <div className="soft-state compact-state">Warnings need attention, but system is reachable.</div>
-            ) : null}
-            <Card title="Safety State">
-              <div className="readiness-grid">
-                <div className="readiness-item"><span>Mode</span><StatusBadge value={readFirst(data, ["mode"]) ?? "SHADOW"} /></div>
-                <div className="readiness-item"><span>Shadow Mode</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["shadowMode"]), "SHADOW", "UNKNOWN")} /></div>
-                <div className="readiness-item"><span>External Execution</span><StatusBadge value={readFirst(data, ["externalExecution"]) ?? "BLOCKED"} /></div>
-                <div className="readiness-item"><span>Live Execution Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["liveExecutionEnabled"]), "WARNING", "BLOCKED")} /></div>
-                <div className="readiness-item"><span>AI Calls Enabled</span><StatusBadge value={safeBooleanLabel(readFirst(data, ["aiCallsEnabled"]), "WARNING", "DISABLED")} /></div>
-                {Object.entries(safetyFlags).map(([key, value]) => (
-                  <div className="readiness-item" key={key}>
-                    <span>{labelize(key)}</span>
-                    <StatusBadge value={typeof value === "boolean" ? safeBooleanLabel(value, "WARNING", "SAFE") : value} />
-                  </div>
                 ))}
-              </div>
-            </Card>
-            <Card title="Module Health">
-              {modules.length === 0 ? <EmptyBlock text="No production health modules returned." /> : (
-                <div className="card-list command-card-list">
-                  {modules.map((module, index) => (
-                    <article className="item-card command-item-card" key={String(module.key ?? module.name ?? index)}>
-                      <div className="item-top">
-                        <strong>{formatEmpty(module.name ?? module.key)}</strong>
-                        <StatusBadge value={module.status ?? "UNKNOWN"} />
-                      </div>
-                      <p className="long-text">{formatEmpty(module.message)}</p>
-                      <div className="detail-grid">
-                        <MetricRow label="Key" value={formatEmpty(module.key)} />
-                        <MetricRow label="Critical" value={readBoolean(module.critical) ? "Yes" : "No"} />
-                        <MetricRow label="Counts" value={<JsonSnippet value={module.counts} />} />
-                        <MetricRow label="Last Checked At" value={formatLocalDateTime(module.lastCheckedAt)} />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </Card>
-            <div className="dashboard-grid today">
-              <ListTextCard title="Blockers" rows={blockers} emptyText="No production blockers found." />
-              <ListTextCard title="Warnings" rows={warnings} emptyText="No production warnings returned." />
-            </div>
-            <ListTextCard title="Next Checks" rows={nextChecks} emptyText="No next checks returned." />
-          </>
-        )}
-        <Card title="Launch Control Health">
-          <div className="readiness-grid">
-            {finalHealthModules.map((item) => (
-              <div className="readiness-item" key={item.label}>
-                <span>{item.label}</span>
-                <StatusBadge value={item.value} />
-              </div>
-            ))}
+              </tbody>
+            </table>
           </div>
-          <p className="section-note">Disabled live execution is SAFE unless the launch objective explicitly requires live eligibility.</p>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function LearningPage() {
-  const summary = useApi<LearningSummary>(() => getJson(`/api/learning-loop/summary?sellerId=${SELLER_ID}`));
-  const events = useApi<ApiRows<LearningEvent>>(() => getJson(`/api/learning-loop/events?sellerId=${SELLER_ID}&limit=100`));
-  const [eventType, setEventType] = useState("ALL");
-  const [engineQuery, setEngineQuery] = useState("");
-  const [skuQuery, setSkuQuery] = useState("");
-  const [noteForm, setNoteForm] = useState({ actionId: "", engineKey: "", note: "" });
-  const [actionState, setActionState] = useState<{ loading: boolean; message: string; error: string }>({ loading: false, message: "", error: "" });
-  const data = learningSummaryOf(summary.data);
-  const eventRows = learningEventsOf(events.data);
-  const filteredEvents = eventRows.filter((row) => {
-    const matchesType = eventType === "ALL" || String(row.eventType ?? "") === eventType;
-    const matchesEngine = String(row.engineKey ?? "").toLowerCase().includes(engineQuery.trim().toLowerCase());
-    const skuText = `${row.sku ?? ""} ${row.asin ?? ""}`.toLowerCase();
-    const matchesSku = skuText.includes(skuQuery.trim().toLowerCase());
-    return matchesType && matchesEngine && matchesSku;
-  });
-  const eventTypes = ["ALL", ...uniqueTextValues(eventRows.map((row) => row.eventType))];
-
-  async function rebuild() {
-    setActionState({ loading: true, message: "", error: "" });
-    try {
-      await postJson(`/api/learning-loop/rebuild?sellerId=${SELLER_ID}`, {});
-      setActionState({ loading: false, message: "Learning summary rebuilt.", error: "" });
-      summary.reload();
-      events.reload();
-    } catch {
-      setActionState({ loading: false, message: "", error: "Could not rebuild learning summary." });
-    }
-  }
-
-  async function addNote(event: FormEvent) {
-    event.preventDefault();
-    if (!noteForm.note.trim()) {
-      setActionState({ loading: false, message: "", error: "Learning note is required." });
-      return;
-    }
-    setActionState({ loading: true, message: "", error: "" });
-    try {
-      await postJson("/api/learning-loop/manual-note", {
-        sellerId: SELLER_ID,
-        actionId: noteForm.actionId.trim() || undefined,
-        engineKey: noteForm.engineKey.trim() || undefined,
-        note: noteForm.note.trim()
-      });
-      setNoteForm({ actionId: "", engineKey: "", note: "" });
-      setActionState({ loading: false, message: "Learning note added.", error: "" });
-      summary.reload();
-      events.reload();
-    } catch {
-      setActionState({ loading: false, message: "", error: "Could not add learning note." });
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Learning Loop" subtitle="Track how engines learn from approvals, rejections, completions, and outcomes." />
-      <SafetyBanner text="Learning only records outcomes. It does not execute external actions." />
-      {summary.error ? <ErrorBlock text="Could not load learning summary." /> : null}
-      {events.error ? <ErrorBlock text="Could not load learning events." /> : null}
-      <div className="stack">
-        {summary.loading ? <LoadingBlock /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Total Learning Events" value={readNumber(readFirst(data, ["totalLearningEvents", "eventCount"]))} />
-            <MetricTile label="Engines Tracked" value={readNumber(readFirst(data, ["enginesTracked", "trackedEngines"]))} />
-            <MetricTile label="Approved Count" value={readNumber(readFirst(data, ["approvedCount", "approved"]))} />
-            <MetricTile label="Rejected Count" value={readNumber(readFirst(data, ["rejectedCount", "rejected"]))} />
-            <MetricTile label="Monitoring Count" value={readNumber(readFirst(data, ["monitoringCount", "monitoring"]))} />
-            <MetricTile label="Completed Count" value={readNumber(readFirst(data, ["completedCount", "completed"]))} />
-            <MetricTile label="No Action Count" value={readNumber(readFirst(data, ["noActionCount", "noAction"]))} />
-            <MetricTile label="Failed Count" value={readNumber(readFirst(data, ["failedCount", "failed"]))} />
-          </div>
-        )}
-        <div className="button-row">
-          <button type="button" onClick={rebuild} disabled={actionState.loading}>Rebuild Learning Summary</button>
-          {actionState.message ? <span className="save-message">{actionState.message}</span> : null}
-          {actionState.error ? <span className="save-error">{actionState.error}</span> : null}
-        </div>
-        <LearningEngineSection title="Top Useful Engines" rows={learningEngineRows(data.topUsefulEngines)} mode="useful" />
-        <LearningEngineSection title="Weakest Engines" rows={learningEngineRows(data.weakestEngines)} mode="weak" />
-        <Card title="Recent Learning Events">
-          <div className="form-grid filters-grid">
-            <SelectField label="Event Type" value={eventType} options={eventTypes} onChange={setEventType} />
-            <TextInput label="Engine Key Search" value={engineQuery} onChange={setEngineQuery} />
-            <TextInput label="SKU Search" value={skuQuery} onChange={setSkuQuery} />
-          </div>
-          {events.loading ? <LoadingBlock /> : filteredEvents.length === 0 ? <EmptyBlock text="No learning events match these filters." /> : (
-            <div className="table-wrap command-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Created At</th>
-                    <th>Event Type</th>
-                    <th>Engine Key</th>
-                    <th>Action Type</th>
-                    <th>SKU</th>
-                    <th>ASIN</th>
-                    <th>Actor</th>
-                    <th>Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredEvents.map((row, index) => (
-                    <tr key={String(row.id ?? `${row.createdAt}-${index}`)}>
-                      <td>{formatEmpty(row.createdAt)}</td>
-                      <td><StatusBadge value={row.eventType} /></td>
-                      <td>{formatEmpty(row.engineKey)}</td>
-                      <td>{formatEmpty(row.actionType)}</td>
-                      <td>{formatEmpty(row.sku)}</td>
-                      <td>{formatEmpty(row.asin)}</td>
-                      <td>{formatEmpty(row.actor)}</td>
-                      <td className="wrap-cell">{formatEmpty(row.note)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-        <Card title="Manual Note">
-          <form className="form-grid" onSubmit={addNote}>
-            <TextInput label="Action ID Optional" value={noteForm.actionId} onChange={(value) => setNoteForm({ ...noteForm, actionId: value })} />
-            <TextInput label="Engine Key Optional" value={noteForm.engineKey} onChange={(value) => setNoteForm({ ...noteForm, engineKey: value })} />
-            <TextArea label="Note Required" value={noteForm.note} onChange={(value) => setNoteForm({ ...noteForm, note: value })} />
-            <button type="submit" disabled={actionState.loading}>Add Learning Note</button>
-          </form>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function ExecutionGatewayPage() {
-  const status = useApi<ExecutionGatewayStatus>(() => getJson(`/api/execution-gateway/status?sellerId=${SELLER_ID}`));
-  const attempts = useApi<ApiRows<ExecutionAttempt>>(() => getJson(`/api/execution-gateway/attempts?sellerId=${SELLER_ID}&limit=50`));
-  const [actionId, setActionId] = useState("");
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [processing, setProcessing] = useState(false);
-  const data = gatewayStatusOf(status.data);
-  const rows = executionAttemptsOf(attempts.data);
-
-  async function runGatewayAction(kind: "preview" | "shadow" | "live") {
-    const trimmedId = actionId.trim();
-    if (!trimmedId) {
-      setError("Action ID is required.");
-      setMessage("");
-      return;
-    }
-    if (kind === "shadow" && !window.confirm("Run shadow execution? No external action will be executed.")) return;
-    if (kind === "live" && !window.confirm("Live execution is blocked in V1. This will only test the block.")) return;
-    setProcessing(true);
-    setError("");
-    setMessage("");
-    try {
-      const endpoint = kind === "preview" ? "preview" : kind === "shadow" ? "execute-shadow" : "execute-live";
-      const response = await postJson<AnyRecord>(`/api/execution-gateway/${endpoint}/${encodeURIComponent(trimmedId)}`, {});
-      const nextResult = gatewayActionResultOf(response);
-      setResult(nextResult);
-      const ok = response.ok !== false;
-      setMessage(kind === "live" && !ok ? "Live execution safety block confirmed." : "Execution gateway response received.");
-      attempts.reload();
-      status.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing(false);
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Execution Gateway" subtitle="Preview and shadow-execute approved actions safely. Live execution is blocked in V1." />
-      <SafetyBanner text="Live execution is disabled. Shadow execution only. No external Amazon or Ads changes are made." />
-      {status.error ? <ErrorBlock text="Could not load execution gateway status." /> : null}
-      {attempts.error ? <ErrorBlock text="Could not load execution attempts." /> : null}
-      <div className="stack">
-        {status.loading ? <LoadingBlock /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Mode" value={formatEmpty(data.mode ?? "SHADOW")} />
-            <MetricTile label="Live Execution Enabled" value={<StatusBadge value={readBoolean(data.liveExecutionEnabled) ? "ENABLED" : "BLOCKED"} />} />
-            <MetricTile label="Message" value={formatEmpty(data.message ?? "Live execution blocked in V1")} />
-            <MetricTile label="Total Attempts" value={readNumber(readFirst(data, ["totalAttempts", "attemptCount"]))} />
-            <MetricTile label="Shadow Completed" value={readNumber(readFirst(data, ["shadowCompleted", "shadowExecutions"]))} />
-            <MetricTile label="Live Blocked" value={readNumber(readFirst(data, ["liveBlocked", "liveBlockedCount"]))} />
-            <MetricTile label="Failed Attempts" value={readNumber(readFirst(data, ["failedAttempts", "failedCount"]))} />
-          </div>
-        )}
-        <Card title="Action Execution Test">
-          <div className="form-grid">
-            <TextInput label="Action ID" value={actionId} onChange={setActionId} />
-            <div className="button-row gateway-buttons">
-              <button type="button" onClick={() => runGatewayAction("preview")} disabled={processing}>Preview Action</button>
-              <button type="button" onClick={() => runGatewayAction("shadow")} disabled={processing}>Execute Shadow</button>
-              <button type="button" className="danger-button live-block-button" onClick={() => runGatewayAction("live")} disabled={processing}>Try Live Execution</button>
-            </div>
-          </div>
-          <p className="section-note">Live execution remains blocked. The live test only confirms the safety block.</p>
-          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-          {result ? (
-            <div className="detail-grid gateway-result">
-              <MetricRow label="Execution Mode" value={formatObjectValue(result.executionMode)} />
-              <MetricRow label="External Execution" value={formatObjectValue(result.externalExecution)} />
-              <MetricRow label="Message" value={formatObjectValue(result.message)} />
-              <MetricRow label="Planned Change" value={formatObjectValue(result.plannedChange)} />
-              <MetricRow label="Safety Checks" value={formatObjectValue(result.safetyChecks)} />
-              <MetricRow label="Blocked Reason" value={formatObjectValue(result.blockedReason)} />
-              <MetricRow label="Result Message" value={formatObjectValue(result.resultMessage)} />
-            </div>
-          ) : null}
-        </Card>
-        <Card title="Recent Execution Attempts">
-          {attempts.loading ? <LoadingBlock /> : rows.length === 0 ? <EmptyBlock text="No execution attempts yet." /> : (
-            <div className="table-wrap command-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Created At</th>
-                    <th>Action ID</th>
-                    <th>Action Type</th>
-                    <th>Execution Mode</th>
-                    <th>Execution Status</th>
-                    <th>Actor</th>
-                    <th>Blocked Reason</th>
-                    <th>Result Message</th>
-                    <th>Error Message</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={String(row.id ?? `${row.actionId}-${index}`)}>
-                      <td>{formatEmpty(row.createdAt)}</td>
-                      <td>{formatShortId(row.actionId)}</td>
-                      <td>{formatEmpty(row.actionType)}</td>
-                      <td><StatusBadge value={row.executionMode} /></td>
-                      <td><StatusBadge value={row.executionStatus} /></td>
-                      <td>{formatEmpty(row.actor)}</td>
-                      <td className="wrap-cell">{formatEmpty(row.blockedReason)}</td>
-                      <td className="wrap-cell">{formatEmpty(row.resultMessage)}</td>
-                      <td className="wrap-cell">{formatEmpty(row.errorMessage)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function ListingDraftsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
-  const summary = useApi<ListingDraftSummary>(() => getJson(`/api/listing-drafts/summary?sellerId=${SELLER_ID}`));
-  const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}&limit=100`));
-  const [draftType, setDraftType] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [query, setQuery] = useState("");
-  const [processingId, setProcessingId] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const data = listingDraftSummaryOf(summary.data);
-  const rows = listingDraftRowsOf(drafts.data);
-  const filteredRows = rows.filter((row) => {
-    const matchesType = draftType === "ALL" || String(row.draftType ?? "") === draftType;
-    const matchesStatus = statusFilter === "ALL" || String(row.status ?? "") === statusFilter;
-    const searchText = `${row.sku ?? ""} ${row.asin ?? ""} ${row.productName ?? ""}`.toLowerCase();
-    return matchesType && matchesStatus && searchText.includes(query.trim().toLowerCase());
-  });
-  const draftTypeOptions = ["ALL", ...uniqueTextValues(rows.map((row) => row.draftType))];
-  const statusOptions = ["ALL", ...uniqueTextValues(rows.map((row) => row.status))];
-
-  async function generate() {
-    setProcessingId("generate");
-    setMessage("");
-    setError("");
-    try {
-      await postJson(`/api/listing-drafts/generate?sellerId=${SELLER_ID}`, {});
-      setMessage("Listing drafts generated.");
-      summary.reload();
-      drafts.reload();
-    } catch {
-      setError("Could not generate listing drafts.");
-    } finally {
-      setProcessingId("");
-    }
-  }
-
-  async function createAction(id: string) {
-    setProcessingId(id);
-    setMessage("");
-    setError("");
-    try {
-      await postJson(`/api/listing-drafts/${encodeURIComponent(id)}/create-action`, {});
-      setMessage("Approval action created for listing draft.");
-      summary.reload();
-      drafts.reload();
-    } catch {
-      setError("Could not create approval action.");
-    } finally {
-      setProcessingId("");
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Listing Optimization Drafts" subtitle="Review deterministic title, bullet, backend keyword, and description drafts before approval." />
-      <SafetyBanner text="Drafts only. No Amazon listing update is executed." />
-      {summary.error ? <ErrorBlock text="Could not load listing draft summary." /> : null}
-      {drafts.error ? <ErrorBlock text="Could not load listing drafts." /> : null}
-      <div className="stack">
-        {summary.loading ? <LoadingBlock /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Total Drafts" value={readNumber(readFirst(data, ["totalDrafts", "total"]))} />
-            <MetricTile label="Drafted" value={readNumber(readFirst(data, ["drafted", "draftedCount"]))} />
-            <MetricTile label="Action Created" value={readNumber(readFirst(data, ["actionCreated", "actionCreatedCount"]))} />
-            <MetricTile label="Approved" value={readNumber(readFirst(data, ["approved", "approvedCount"]))} />
-            <MetricTile label="Rejected" value={readNumber(readFirst(data, ["rejected", "rejectedCount"]))} />
-            <MetricTile label="Title Drafts" value={readNumber(readFirst(data, ["titleDrafts", "titleCount"]))} />
-            <MetricTile label="Bullet Drafts" value={readNumber(readFirst(data, ["bulletDrafts", "bulletCount"]))} />
-            <MetricTile label="Backend Keyword Drafts" value={readNumber(readFirst(data, ["backendKeywordDrafts", "backendKeywordCount"]))} />
-            <MetricTile label="Description Drafts" value={readNumber(readFirst(data, ["descriptionDrafts", "descriptionCount"]))} />
-          </div>
-        )}
-        <div className="button-row">
-          <button type="button" onClick={generate} disabled={processingId !== ""}>Generate Listing Drafts</button>
-          <button type="button" className="secondary" onClick={() => { summary.reload(); drafts.reload(); }}>Refresh Drafts</button>
-          {message ? <span className="save-message">{message}</span> : null}
-          {error ? <span className="save-error">{error}</span> : null}
-        </div>
-        <Card title="Drafts">
-          <div className="form-grid filters-grid">
-            <SelectField label="Draft Type" value={draftType} options={draftTypeOptions} onChange={setDraftType} />
-            <SelectField label="Status" value={statusFilter} options={statusOptions} onChange={setStatusFilter} />
-            <TextInput label="SKU or ASIN Search" value={query} onChange={setQuery} />
-          </div>
-          {drafts.loading ? <LoadingBlock /> : filteredRows.length === 0 ? <EmptyBlock text="No listing drafts match these filters." /> : (
-            <div className="card-list command-card-list">
-              {filteredRows.map((row) => (
-                <article className="item-card command-item-card" key={row.id}>
-                  <div className="item-top">
-                    <strong>{formatEmpty(row.productName ?? row.sku ?? row.asin)}</strong>
-                    <StatusBadge value={row.status ?? "DRAFTED"} />
-                  </div>
-                  <div className="badge-row">
-                    <StatusBadge value={row.draftType} />
-                    <StatusBadge value={row.confidenceLabel} />
-                    <StatusBadge value={row.riskLevel} />
-                  </div>
-                  <div className="detail-grid">
-                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                    <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
-                  </div>
-                  <TextDiffBlock current={row.currentValue} proposed={row.proposedValue} reason={row.reason} />
-                  <div className="button-row compact">
-                    {row.actionId ? (
-                      <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
-                    ) : (
-                      <button type="button" onClick={() => createAction(row.id)} disabled={processingId === row.id}>Create Approval Action</button>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function CreativeRecommendationsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
-  const summary = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
-  const recommendations = useApi<ApiRows<CreativeRecommendation>>(() => getJson(`/api/creative-recommendations?sellerId=${SELLER_ID}&limit=100`));
-  const [recommendationType, setRecommendationType] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [query, setQuery] = useState("");
-  const [processingId, setProcessingId] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const data = creativeSummaryOf(summary.data);
-  const rows = creativeRecommendationRowsOf(recommendations.data);
-  const filteredRows = rows.filter((row) => {
-    const matchesType = recommendationType === "ALL" || String(row.recommendationType ?? "") === recommendationType;
-    const matchesStatus = statusFilter === "ALL" || String(row.status ?? "") === statusFilter;
-    const searchText = `${row.sku ?? ""} ${row.asin ?? ""} ${row.productName ?? ""}`.toLowerCase();
-    return matchesType && matchesStatus && searchText.includes(query.trim().toLowerCase());
-  });
-  const typeOptions = ["ALL", ...uniqueTextValues(rows.map((row) => row.recommendationType))];
-  const statusOptions = ["ALL", ...uniqueTextValues(rows.map((row) => row.status))];
-
-  async function generate() {
-    setProcessingId("generate");
-    setMessage("");
-    setError("");
-    try {
-      await postJson(`/api/creative-recommendations/generate?sellerId=${SELLER_ID}`, {});
-      setMessage("Image + A+ recommendations generated.");
-      summary.reload();
-      recommendations.reload();
-    } catch {
-      setError("Could not generate creative recommendations.");
-    } finally {
-      setProcessingId("");
-    }
-  }
-
-  async function createAction(id: string) {
-    setProcessingId(id);
-    setMessage("");
-    setError("");
-    try {
-      await postJson(`/api/creative-recommendations/${encodeURIComponent(id)}/create-action`, {});
-      setMessage("Approval action created for recommendation.");
-      summary.reload();
-      recommendations.reload();
-    } catch {
-      setError("Could not create approval action.");
-    } finally {
-      setProcessingId("");
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Image + A+ Recommendations" subtitle="Review image, infographic, lifestyle, size chart, A+, and brand story recommendations." />
-      <SafetyBanner text="Recommendations only. No image upload or A+ content update is executed." />
-      {summary.error ? <ErrorBlock text="Could not load creative recommendation summary." /> : null}
-      {recommendations.error ? <ErrorBlock text="Could not load creative recommendations." /> : null}
-      <div className="stack">
-        {summary.loading ? <LoadingBlock /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Total Recommendations" value={readNumber(readFirst(data, ["totalRecommendations", "total"]))} />
-            <MetricTile label="Drafted" value={readNumber(readFirst(data, ["drafted", "draftedCount"]))} />
-            <MetricTile label="Action Created" value={readNumber(readFirst(data, ["actionCreated", "actionCreatedCount"]))} />
-            <MetricTile label="Main Image Reviews" value={readNumber(readFirst(data, ["mainImageReviews", "mainImageCount"]))} />
-            <MetricTile label="Infographic Reviews" value={readNumber(readFirst(data, ["infographicReviews", "infographicCount"]))} />
-            <MetricTile label="Lifestyle Reviews" value={readNumber(readFirst(data, ["lifestyleReviews", "lifestyleCount"]))} />
-            <MetricTile label="Size Chart Reviews" value={readNumber(readFirst(data, ["sizeChartReviews", "sizeChartCount"]))} />
-            <MetricTile label="A+ Content Reviews" value={readNumber(readFirst(data, ["aplusContentReviews", "aPlusContentReviews", "aplusCount"]))} />
-            <MetricTile label="Brand Story Reviews" value={readNumber(readFirst(data, ["brandStoryReviews", "brandStoryCount"]))} />
-          </div>
-        )}
-        <div className="button-row">
-          <button type="button" onClick={generate} disabled={processingId !== ""}>Generate Image + A+ Recommendations</button>
-          <button type="button" className="secondary" onClick={() => { summary.reload(); recommendations.reload(); }}>Refresh Recommendations</button>
-          {message ? <span className="save-message">{message}</span> : null}
-          {error ? <span className="save-error">{error}</span> : null}
-        </div>
-        <Card title="Recommendations">
-          <div className="form-grid filters-grid">
-            <SelectField label="Recommendation Type" value={recommendationType} options={typeOptions} onChange={setRecommendationType} />
-            <SelectField label="Status" value={statusFilter} options={statusOptions} onChange={setStatusFilter} />
-            <TextInput label="SKU or ASIN Search" value={query} onChange={setQuery} />
-          </div>
-          {recommendations.loading ? <LoadingBlock /> : filteredRows.length === 0 ? <EmptyBlock text="No creative recommendations match these filters." /> : (
-            <div className="card-list command-card-list">
-              {filteredRows.map((row) => (
-                <article className="item-card command-item-card" key={row.id}>
-                  <div className="item-top">
-                    <strong>{formatEmpty(row.title ?? row.productName ?? row.sku ?? row.asin)}</strong>
-                    <StatusBadge value={row.status ?? "DRAFTED"} />
-                  </div>
-                  <div className="badge-row">
-                    <StatusBadge value={row.recommendationType} />
-                    <StatusBadge value={row.confidenceLabel} />
-                    <StatusBadge value={row.riskLevel} />
-                  </div>
-                  <div className="detail-grid">
-                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                    <MetricRow label="Product" value={formatEmpty(row.productName)} />
-                    <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
-                  </div>
-                  <p className="long-text">{formatEmpty(row.summary)}</p>
-                  <MetricRow label="Recommended Action" value={formatEmpty(row.recommendedAction)} />
-                  <div className="button-row compact">
-                    {row.actionId ? (
-                      <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
-                    ) : (
-                      <button type="button" onClick={() => createAction(row.id)} disabled={processingId === row.id}>Create Approval Action</button>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function learningSummaryOf(value: unknown): LearningSummary {
-  const root = recordOf(value);
-  return recordOf(root.summary ?? root.data ?? root.result ?? root) as LearningSummary;
-}
-
-function learningEventsOf(value: unknown): LearningEvent[] {
-  return firstRecordRows<LearningEvent>(value, recordOf(value).events, recordOf(value).learningEvents);
-}
-
-function learningEngineRows(value: unknown): LearningEngineSummary[] {
-  return firstRecordRows<LearningEngineSummary>(value);
-}
-
-function LearningEngineSection({ title, rows, mode }: { title: string; rows: LearningEngineSummary[]; mode: "useful" | "weak" }) {
-  return (
-    <Card title={title}>
-      {rows.length === 0 ? <EmptyBlock text={`No ${title.toLowerCase()} yet.`} /> : (
-        <div className="card-list command-card-list">
-          {rows.map((row, index) => (
-            <article className="item-card compact-card" key={String(row.engineKey ?? index)}>
-              <div className="item-top">
-                <strong>{formatEmpty(row.engineKey)}</strong>
-                <StatusBadge value={mode === "useful" ? "USEFUL" : "WATCH"} />
-              </div>
-              <div className="detail-grid">
-                <MetricRow label="Usefulness Score" value={formatEmpty(row.usefulnessScore)} />
-                <MetricRow label="Confidence Score" value={formatEmpty(row.confidenceScore)} />
-                {mode === "useful" ? (
-                  <>
-                    <MetricRow label="Approved" value={formatEmpty(row.approvedCount)} />
-                    <MetricRow label="Completed" value={formatEmpty(row.completedCount)} />
-                    <MetricRow label="Rejected" value={formatEmpty(row.rejectedCount)} />
-                  </>
-                ) : (
-                  <>
-                    <MetricRow label="Failed Count" value={formatEmpty(row.failedCount)} />
-                    <MetricRow label="Rejected Count" value={formatEmpty(row.rejectedCount)} />
-                    <MetricRow label="No Action Count" value={formatEmpty(row.noActionCount)} />
-                  </>
-                )}
-                <MetricRow label="Last Event At" value={formatEmpty(row.lastEventAt)} />
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function gatewayStatusOf(value: unknown): ExecutionGatewayStatus {
-  const root = recordOf(value);
-  return recordOf(root.status ?? root.summary ?? root.data ?? root.result ?? root) as ExecutionGatewayStatus;
-}
-
-function executionAttemptsOf(value: unknown): ExecutionAttempt[] {
-  return firstRecordRows<ExecutionAttempt>(value, recordOf(value).attempts, recordOf(value).executionAttempts);
-}
-
-function gatewayActionResultOf(value: unknown): AnyRecord {
-  const root = recordOf(value);
-  return recordOf(root.result ?? root.execution ?? root.preview ?? root.data ?? root);
-}
-
-function listingDraftSummaryOf(value: unknown): ListingDraftSummary {
-  const root = recordOf(value);
-  return recordOf(root.summary ?? root.data ?? root.result ?? root) as ListingDraftSummary;
-}
-
-function listingDraftRowsOf(value: unknown): ListingDraft[] {
-  return firstRecordRows<ListingDraft>(value, recordOf(value).drafts, recordOf(value).listingDrafts);
-}
-
-function creativeSummaryOf(value: unknown): CreativeRecommendationSummary {
-  const root = recordOf(value);
-  return recordOf(root.summary ?? root.data ?? root.result ?? root) as CreativeRecommendationSummary;
-}
-
-function creativeRecommendationRowsOf(value: unknown): CreativeRecommendation[] {
-  return firstRecordRows<CreativeRecommendation>(value, recordOf(value).recommendations, recordOf(value).creativeRecommendations);
-}
-
-function safetyControlStatusOf(value: unknown): SafetyControlStatus {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.safetyControl ?? root.safety ?? data.safetyControl ?? result.safetyControl ?? data.status ?? result.status ?? root) as SafetyControlStatus;
-}
-
-function safetyAuditRowsOf(value: unknown): SafetyAuditEvent[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  return firstRecordRows<SafetyAuditEvent>(value, root.auditEvents, root.events, data.auditEvents, data.events);
-}
-
-function alertSummaryOf(value: unknown): AlertSummary {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.summary ?? root.alertSummary ?? data.summary ?? result.summary ?? root) as AlertSummary;
-}
-
-function alertRowsOf(value: unknown): AlertEvent[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<AlertEvent>(value, root.events, root.alerts, data.events, data.alerts, result.events, result.alerts);
-}
-
-function experimentSummaryOf(value: unknown): ExperimentSummary {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.summary ?? root.experimentSummary ?? data.summary ?? result.summary ?? root) as ExperimentSummary;
-}
-
-function experimentRowsOf(value: unknown): Experiment[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<Experiment>(value, root.experiments, root.items, data.experiments, data.items, result.experiments, result.items);
-}
-
-function dataFreshnessSummaryOf(value: unknown): DataFreshnessSummary {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.summary ?? root.dataFreshness ?? data.summary ?? result.summary ?? root) as DataFreshnessSummary;
-}
-
-function dataFreshnessRowsOf(value: unknown): DataFreshnessRow[] {
-  const root = recordOf(value);
-  const summary = recordOf(root.summary);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<DataFreshnessRow>(
-    value,
-    root.rows,
-    root.sources,
-    root.dataSources,
-    summary.rows,
-    summary.sources,
-    data.rows,
-    data.sources,
-    data.dataSources,
-    result.rows,
-    result.sources
-  );
-}
-
-function aiGatewayStatusOf(value: unknown): AiGatewayStatus {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.status ?? root.aiGatewayStatus ?? data.status ?? result.status ?? root) as AiGatewayStatus;
-}
-
-function aiCostSummaryOf(value: unknown): AiCostSummary {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.summary ?? root.costSummary ?? data.summary ?? result.summary ?? root) as AiCostSummary;
-}
-
-function aiCostEstimateOf(value: unknown): AiCostEstimate {
-  const root = recordOf(value);
-  return recordOf(root.estimate ?? root.result ?? root.data ?? root) as AiCostEstimate;
-}
-
-function aiLedgerRowsOf(value: unknown): AiLedgerRow[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<AiLedgerRow>(value, root.ledger, root.rows, data.ledger, data.rows, result.ledger, result.rows);
-}
-
-function productionHealthSummaryOf(value: unknown): ProductionHealthSummary {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.summary ?? root.health ?? data.summary ?? result.summary ?? root) as ProductionHealthSummary;
-}
-
-function productionHealthModulesOf(value: unknown): ProductionHealthModule[] {
-  const root = recordOf(value);
-  const summary = recordOf(root.summary);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<ProductionHealthModule>(root.modules, summary.modules, data.modules, result.modules);
-}
-
-function ListTextCard({ title, rows, emptyText }: { title: string; rows: unknown[]; emptyText: string }) {
-  return (
-    <Card title={title}>
-      {rows.length === 0 ? <EmptyBlock text={emptyText} /> : (
-        <ul className="clean-list">
-          {rows.map((row, index) => <li key={index}>{formatDailyListItem(row)}</li>)}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
-function uniqueTextValues(values: unknown[]): string[] {
-  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-}
-
-function TextDiffBlock({ current, proposed, reason }: { current: unknown; proposed: unknown; reason: unknown }) {
-  return (
-    <div className="text-diff">
-      <div>
-        <span>Current Value</span>
-        <p>{formatEmpty(current)}</p>
-      </div>
-      <div>
-        <span>Proposed Value</span>
-        <p>{formatEmpty(proposed)}</p>
-      </div>
-      <div>
-        <span>Reason</span>
-        <p>{formatEmpty(reason)}</p>
-      </div>
-    </div>
-  );
-}
-
-function SettingsPage() {
-  const settings = useApi<AnyRecord>(() => getJson(`/api/automation-settings?sellerId=${SELLER_ID}`));
-  const current = recordOf(settings.data?.settings);
-  const [form, setForm] = useState({
-    mode: "SHADOW",
-    maxDailyRecommendations: "10",
-    targetAcosDefault: "35",
-    minProfitLowPrice: "60",
-    minProfitMidPrice: "110",
-    shadowModeDays: "60",
-    notes: ""
-  });
-
-  useEffect(() => {
-    if (!settings.data) return;
-    const next = recordOf(settings.data.settings);
-    setForm({
-      mode: String(next.mode ?? "SHADOW"),
-      maxDailyRecommendations: String(next.maxDailyRecommendations ?? 10),
-      targetAcosDefault: String(next.targetAcosDefault ?? 35),
-      minProfitLowPrice: String(next.minProfitLowPrice ?? 60),
-      minProfitMidPrice: String(next.minProfitMidPrice ?? 110),
-      shadowModeDays: String(next.shadowModeDays ?? 60),
-      notes: String(next.notes ?? "")
-    });
-  }, [settings.data]);
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    await putJson("/api/automation-settings", {
-      sellerId: SELLER_ID,
-      mode: form.mode,
-      maxDailyRecommendations: asInputNumber(form.maxDailyRecommendations),
-      targetAcosDefault: asInputNumber(form.targetAcosDefault),
-      minProfitLowPrice: asInputNumber(form.minProfitLowPrice),
-      minProfitMidPrice: asInputNumber(form.minProfitMidPrice),
-      shadowModeDays: asInputNumber(form.shadowModeDays),
-      notes: form.notes
-    });
-    settings.reload();
-  }
-
-  async function reset() {
-    await postJson(`/api/automation-settings/reset?sellerId=${SELLER_ID}`, {});
-    settings.reload();
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Settings" subtitle="V1 keeps risky Amazon execution disabled." />
-      {settings.loading ? <LoadingBlock /> : settings.error ? <ErrorBlock /> : (
-        <>
-          <Card title="Current Safety Settings">
-            <div className="detail-grid">
-              <MetricRow label="Mode" value={<StatusBadge value={current.mode} />} />
-              <MetricRow label="Max Daily Recommendations" value={formatEmpty(current.maxDailyRecommendations)} />
-              <MetricRow label="Target ACOS Default" value={formatPercent(current.targetAcosDefault)} />
-              <MetricRow label="Min Profit Low Price" value={formatMoney(current.minProfitLowPrice)} />
-              <MetricRow label="Min Profit Mid Price" value={formatMoney(current.minProfitMidPrice)} />
-              <MetricRow label="Approval Required For Tier 2" value={current.approvalRequiredForTier2 ? "Required" : "—"} />
-              <MetricRow label="Approval Required For Tier 3" value={current.approvalRequiredForTier3 ? "Required" : "—"} />
-              <MetricRow label="Shadow Mode Days" value={formatEmpty(current.shadowModeDays)} />
-              {["allowAutoNegative", "allowAutoBidChange", "allowAutoBudgetChange", "allowAutoKeywordAdd", "allowAutoProductTargetAdd", "allowAutoListingChange", "allowAutoPriceChange"].map((key) => (
-                <MetricRow key={key} label={labelize(key)} value={<StatusBadge value="OFF" />} />
-              ))}
-            </div>
-          </Card>
-          <Card title="Edit Safe Settings">
-            <form className="form-grid" onSubmit={save}>
-              <SelectField label="Mode" value={form.mode} options={["SHADOW", "APPROVAL", "AUTO_LATER"]} onChange={(value) => setForm({ ...form, mode: value })} />
-              <TextInput label="Max Daily Recommendations" type="number" value={form.maxDailyRecommendations} onChange={(value) => setForm({ ...form, maxDailyRecommendations: value })} />
-              <TextInput label="Target ACOS Default" type="number" value={form.targetAcosDefault} onChange={(value) => setForm({ ...form, targetAcosDefault: value })} />
-              <TextInput label="Min Profit Low Price" type="number" value={form.minProfitLowPrice} onChange={(value) => setForm({ ...form, minProfitLowPrice: value })} />
-              <TextInput label="Min Profit Mid Price" type="number" value={form.minProfitMidPrice} onChange={(value) => setForm({ ...form, minProfitMidPrice: value })} />
-              <TextInput label="Shadow Mode Days" type="number" value={form.shadowModeDays} onChange={(value) => setForm({ ...form, shadowModeDays: value })} />
-              <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
-              <div className="button-row">
-                <button type="submit">Save Settings</button>
-                <button type="button" className="secondary" onClick={reset}>Reset</button>
-              </div>
-            </form>
-          </Card>
-        </>
-      )}
-    </div>
-  );
-}
-
-function hardeningSummaryOf<T extends AnyRecord>(value: unknown): T {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.summary ?? data.summary ?? result.summary ?? root.health ?? root.latest ?? root.data ?? root.result ?? root) as T;
-}
-
-function qaSmokeLatestOf(value: unknown): QaSmokeLatest {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(root.latestRun ?? data.latestRun ?? result.latestRun ?? root.latest ?? data.latest ?? result.latest ?? root) as QaSmokeLatest;
-}
-
-function hardeningResultOf(value: unknown): AnyRecord {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return recordOf(
-    root.preview ??
-      root.execution ??
-      root.rollback ??
-      root.run ??
-      root.latestRun ??
-      data.preview ??
-      result.preview ??
-      data.execution ??
-      result.execution ??
-      data.rollback ??
-      result.rollback ??
-      data.run ??
-      result.run ??
-      data.latestRun ??
-      result.latestRun ??
-      root.result ??
-      root.data ??
-      root
-  );
-}
-
-function hardeningRowsOf<T extends AnyRecord>(value: unknown, ...sources: unknown[]): T[] {
-  const root = recordOf(value);
-  const data = recordOf(root.data);
-  const result = recordOf(root.result);
-  return firstRecordRows<T>(
-    ...sources,
-    root.events,
-    root.latestEvents,
-    root.snapshots,
-    root.latestSnapshots,
-    root.actions,
-    root.readyActions,
-    root.latestReadyActions,
-    root.runs,
-    root.latestRuns,
-    root.checks,
-    root.rows,
-    root.items,
-    data.events,
-    data.latestEvents,
-    data.snapshots,
-    data.latestSnapshots,
-    data.actions,
-    data.readyActions,
-    data.latestReadyActions,
-    data.runs,
-    data.latestRuns,
-    data.checks,
-    data.rows,
-    result.events,
-    result.latestEvents,
-    result.snapshots,
-    result.latestSnapshots,
-    result.actions,
-    result.readyActions,
-    result.latestReadyActions,
-    result.runs,
-    result.latestRuns,
-    result.checks,
-    result.rows,
-    value
-  );
-}
-
-function responseWasBlocked(value: unknown): boolean {
-  const root = recordOf(value);
-  const result = hardeningResultOf(value);
-  return root.ok === false || result.ok === false || normalizeState(result.status).includes("BLOCK");
-}
-
-function actionIdOf(row: AnyRecord): string {
-  return String(row.actionId ?? row.id ?? "").trim();
-}
-
-function snapshotIdOf(row: RollbackSnapshot): string {
-  return String(row.snapshotId ?? row.id ?? "").trim();
-}
-
-function SeverityBadge({ value }: { value: unknown }) {
-  const label = normalizeState(value || "INFO");
-  const tone = label === "INFO" ? "good" : label === "WARNING" || label === "WARN" ? "watch" : label === "ERROR" || label === "CRITICAL" ? "risk" : "neutral";
-  return <Badge tone={tone}>{label}</Badge>;
-}
-
-function ResultPanel({ title, result }: { title: string; result: AnyRecord | null }) {
-  if (!result) return null;
-  return (
-    <Card title={title}>
-      <div className="detail-grid">
-        {Object.entries(result).slice(0, 12).map(([key, value]) => (
-          <MetricRow key={key} label={labelize(key)} value={typeof value === "object" ? <JsonSnippet value={value} /> : formatObjectValue(value)} />
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function ActivityLogsPage() {
-  const summary = useApi<ActivityLogSummary>(() => activityLogsApi.summary(SELLER_ID));
-  const events = useApi<ApiRows<ActivityLogEvent>>(() => activityLogsApi.events(SELLER_ID, 100));
-  const data = hardeningSummaryOf<ActivityLogSummary>(summary.data);
-  const rows = hardeningRowsOf<ActivityLogEvent>(events.data);
-  const [severity, setSeverity] = useState("All");
-  const [category, setCategory] = useState("All");
-  const [module, setModule] = useState("All");
-  const [eventType, setEventType] = useState("All");
-  const [search, setSearch] = useState("");
-  const filteredRows = rows.filter((row) => {
-    const haystack = [row.title, row.message, row.sku, row.asin, row.actionId].map((value) => String(value ?? "").toLowerCase()).join(" ");
-    return (severity === "All" || normalizeState(row.severity) === severity) &&
-      (category === "All" || String(row.eventCategory ?? "") === category) &&
-      (module === "All" || String(row.sourceModule ?? "") === module) &&
-      (eventType === "All" || String(row.eventType ?? "") === eventType) &&
-      (!search.trim() || haystack.includes(search.trim().toLowerCase()));
-  });
-  const refresh = () => {
-    summary.reload();
-    events.reload();
-  };
-
-  return (
-    <div className="page">
-      <PageHeader title="Activity Logs" subtitle="Founder-visible system timeline for approvals, engines, execution, alerts, maintenance, and QA." />
-      <SafetyBanner text="Activity logs are internal only. No external action is executed." />
-      <div className="stack">
-        <div className="button-row"><button type="button" onClick={refresh}>Refresh</button></div>
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load activity log summary." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Total Events" value={summaryNumber(data, ["totalEvents", "total"], rows.length)} />
-            <MetricTile label="Info Count" value={summaryNumber(data, ["infoCount"], rows.filter((row) => normalizeState(row.severity) === "INFO").length)} />
-            <MetricTile label="Warning Count" value={summaryNumber(data, ["warningCount", "warnCount"], rows.filter((row) => ["WARNING", "WARN"].includes(normalizeState(row.severity))).length)} />
-            <MetricTile label="Error Count" value={summaryNumber(data, ["errorCount"], rows.filter((row) => normalizeState(row.severity) === "ERROR").length)} />
-            <MetricTile label="Critical Count" value={summaryNumber(data, ["criticalCount"], rows.filter((row) => normalizeState(row.severity) === "CRITICAL").length)} />
-            <MetricTile label="Today Events" value={summaryNumber(data, ["todayEvents", "eventsToday"], 0)} />
-          </div>
-        )}
-        <Card title="Latest Events">
-          <div className="form-grid filters-grid">
-            <SelectField label="Severity" value={severity} options={["All", ...uniqueTextValues(rows.map((row) => normalizeState(row.severity || "INFO")))]} onChange={setSeverity} />
-            <SelectField label="Event Category" value={category} options={["All", ...uniqueTextValues(rows.map((row) => row.eventCategory))]} onChange={setCategory} />
-            <SelectField label="Source Module" value={module} options={["All", ...uniqueTextValues(rows.map((row) => row.sourceModule))]} onChange={setModule} />
-            <SelectField label="Event Type" value={eventType} options={["All", ...uniqueTextValues(rows.map((row) => row.eventType))]} onChange={setEventType} />
-            <TextInput label="Search" value={search} onChange={setSearch} />
-          </div>
-          {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock text="Could not load activity log events." /> : filteredRows.length === 0 ? <EmptyBlock text="No activity events match these filters." /> : (
-            <div className="card-list command-card-list">
-              {filteredRows.map((row, index) => (
-                <article className="item-card command-item-card" key={String(row.id ?? `${row.eventType}-${index}`)}>
-                  <div className="item-top">
-                    <strong>{formatEmpty(row.title ?? row.eventType)}</strong>
-                    <SeverityBadge value={row.severity} />
-                  </div>
-                  <p className="long-text">{formatEmpty(row.message)}</p>
-                  <div className="detail-grid">
-                    <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
-                    <MetricRow label="Category" value={formatEmpty(row.eventCategory)} />
-                    <MetricRow label="Event Type" value={formatEmpty(row.eventType)} />
-                    <MetricRow label="Actor" value={formatEmpty(row.actor)} />
-                    <MetricRow label="Source Module" value={formatEmpty(row.sourceModule)} />
-                    <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
-                    <MetricRow label="Entity ID" value={formatEmpty(row.entityId)} />
-                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                    <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-const LIVE_EXECUTE_CONFIRM_TEXT = "EXECUTE LIVE APPROVED ACTION";
-const guardrailActions = [
-  "LIVE_PPC_EXECUTION",
-  "LIVE_LISTING_EXECUTION",
-  "LIVE_ROLLBACK_EXECUTION",
-  "AI_GENERATE",
-  "NOTIFICATION_SEND",
-  "SAFETY_SETTING_UPDATE"
-];
-
-function liveExecutionStatusOf(value: unknown): LiveExecutionStatus {
-  return hardeningSummaryOf<LiveExecutionStatus>(value);
-}
-
-function liveExecutionRunsOf(value: unknown): LiveExecutionRun[] {
-  return hardeningRowsOf<LiveExecutionRun>(value);
-}
-
-function launchGateSummaryOf(value: unknown): LaunchGateSummary {
-  return hardeningSummaryOf<LaunchGateSummary>(value);
-}
-
-function launchGateChecksOf(value: unknown): LaunchGateCheck[] {
-  const data = launchGateSummaryOf(value);
-  return hardeningRowsOf<LaunchGateCheck>(value, data.checks);
-}
-
-function launchChecklistSummaryOf(value: unknown): LaunchChecklistSummary {
-  return hardeningSummaryOf<LaunchChecklistSummary>(value);
-}
-
-function launchChecklistItemsOf(value: unknown): LaunchChecklistItem[] {
-  const data = launchChecklistSummaryOf(value);
-  return hardeningRowsOf<LaunchChecklistItem>(value, data.items, data.checklist);
-}
-
-function schedulerSummaryOf(value: unknown): SchedulerSummary {
-  return hardeningSummaryOf<SchedulerSummary>(value);
-}
-
-function schedulerJobsOf(value: unknown): SchedulerJob[] {
-  return hardeningRowsOf<SchedulerJob>(value);
-}
-
-function notificationSummaryOf(value: unknown): NotificationSummary {
-  return hardeningSummaryOf<NotificationSummary>(value);
-}
-
-function notificationSettingsOf(value: unknown): NotificationSettings {
-  return hardeningSummaryOf<NotificationSettings>(value);
-}
-
-function notificationMessagesOf(value: unknown): NotificationMessage[] {
-  return hardeningRowsOf<NotificationMessage>(value);
-}
-
-function securityGuardrailSummaryOf(value: unknown): SecurityGuardrailSummary {
-  return hardeningSummaryOf<SecurityGuardrailSummary>(value);
-}
-
-function securityAuditEventsOf(value: unknown): SecurityAuditEvent[] {
-  return hardeningRowsOf<SecurityAuditEvent>(value);
-}
-
-function blockedOutcomeMessage(value: unknown, fallback: string): string {
-  return responseWasBlocked(value) ? fallback : "Backend response received.";
-}
-
-function LiveExecutionPage() {
-  const status = useApi<LiveExecutionStatus>(() => liveExecutionApi.status(SELLER_ID));
-  const runs = useApi<ApiRows<LiveExecutionRun>>(() => liveExecutionApi.runs(SELLER_ID, 100));
-  const data = liveExecutionStatusOf(status.data);
-  const rows = liveExecutionRunsOf(runs.data);
-  const [actionId, setActionId] = useState("");
-  const [confirmText, setConfirmText] = useState("");
-  const [domainFilter, setDomainFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [actionTypeFilter, setActionTypeFilter] = useState("All");
-  const [search, setSearch] = useState("");
-  const [processing, setProcessing] = useState("");
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const liveEligible = readBoolean(readFirst(data, ["liveExecutionEnabled", "settings.liveExecutionEnabled"]));
-  const filteredRows = rows.filter((row) => {
-    const rowStatus = String(row.liveStatus ?? row.dryRunStatus ?? "UNKNOWN");
-    const haystack = `${row.sku ?? ""} ${row.asin ?? ""}`.toLowerCase();
-    return (domainFilter === "All" || String(row.executionDomain ?? "UNKNOWN") === domainFilter) &&
-      (statusFilter === "All" || rowStatus === statusFilter) &&
-      (actionTypeFilter === "All" || String(row.actionType ?? "UNKNOWN") === actionTypeFilter) &&
-      (!search.trim() || haystack.includes(search.trim().toLowerCase()));
-  });
-
-  async function runAction(kind: "preflight" | "dry-run" | "live") {
-    const id = actionId.trim();
-    if (!id) {
-      setError("Action ID is required.");
-      setMessage("");
-      return;
-    }
-    if (kind === "live") {
-      if (confirmText.trim() !== LIVE_EXECUTE_CONFIRM_TEXT) {
-        setError(`Exact confirm text required: ${LIVE_EXECUTE_CONFIRM_TEXT}`);
-        setMessage("");
-        return;
-      }
-      if (!window.confirm("This can change the Amazon account if all gates pass. Continue only for an approved controlled test.")) return;
-    }
-    setProcessing(kind);
-    setError("");
-    setMessage("");
-    try {
-      const response = kind === "preflight"
-        ? await liveExecutionApi.preflight(id)
-        : kind === "dry-run"
-          ? await liveExecutionApi.dryRun(id)
-          : await liveExecutionApi.executeLive(id, { sellerId: SELLER_ID, actor: "founder", confirmText: LIVE_EXECUTE_CONFIRM_TEXT });
-      setResult(hardeningResultOf(response));
-      setMessage(kind === "live" ? blockedOutcomeMessage(response, "Live execution blocked safely.") : "Live execution check response received.");
-      status.reload();
-      runs.reload();
-    } catch (requestError) {
-      const sanitized = sanitizeActionError(requestError);
-      const safeBlock = kind === "live" && ["BLOCK", "LOCK", "DISABLED", "NOT ELIGIBLE", "GATE"].some((term) => normalizeState(sanitized).includes(term));
-      if (safeBlock) {
-        setMessage("Live execution blocked safely.");
-        setError("");
-      } else {
-        setError(sanitized);
-      }
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Controlled Live Execution Center" subtitle="Run preflight, dry-run, and tightly gated live execution for approved Amazon PPC/listing actions." />
-      <SafetyBanner text="Live execution is locked unless Safety Control, QA Smoke, Production Health, Rollback, Dry Run, and explicit founder confirmation all pass." />
-      <div className="stack">
-        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock text="Could not load live execution status." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Mode" value={<StatusBadge value={readFirst(data, ["mode"]) ?? "LOCKED"} />} />
-            <MetricTile label="Live Execution Enabled" value={<StatusBadge value={liveEligible ? "ELIGIBLE" : "LOCKED"} />} />
-            <MetricTile label="PPC Live Execution Enabled" value={<StatusBadge value={readBoolean(readFirst(data, ["ppcLiveExecutionEnabled", "ppcLiveExecution"])) ? "ELIGIBLE" : "LOCKED"} />} />
-            <MetricTile label="Listing Live Execution Enabled" value={<StatusBadge value={readBoolean(readFirst(data, ["listingLiveExecutionEnabled", "listingLiveExecution"])) ? "ELIGIBLE" : "LOCKED"} />} />
-            <MetricTile label="AI Calls Enabled" value={<StatusBadge value={readBoolean(readFirst(data, ["aiCallsEnabled"])) ? "ENABLED" : "DISABLED"} />} />
-            <MetricTile label="Message" value={formatEmpty(readFirst(data, ["message"]) ?? "Live execution is locked.")} />
-            <MetricTile label="Total Live Runs" value={summaryNumber(data, ["totalLiveRuns"], rows.length)} />
-            <MetricTile label="Dry Runs" value={summaryNumber(data, ["dryRuns", "dryRunCount"], rows.filter((row) => row.dryRunStatus).length)} />
-            <MetricTile label="Blocked Runs" value={summaryNumber(data, ["blockedRuns", "blockedCount"], rows.filter((row) => normalizeState(row.liveStatus).includes("BLOCK")).length)} />
-            <MetricTile label="Successful Live Runs" value={summaryNumber(data, ["successfulLiveRuns", "successLiveRuns"], rows.filter((row) => normalizeState(row.liveStatus) === "SUCCESS").length)} />
-            <MetricTile label="Failed Runs" value={summaryNumber(data, ["failedRuns", "failedCount"], rows.filter((row) => normalizeState(row.liveStatus) === "FAILED").length)} />
-          </div>
-        )}
-        <Card title="Action Controls">
-          <div className="form-grid">
-            <TextInput label="Action ID" value={actionId} onChange={setActionId} />
-            <TextInput label="Confirm Text" value={confirmText} onChange={setConfirmText} />
-            <div className="button-row gateway-buttons">
-              <button type="button" onClick={() => runAction("preflight")} disabled={processing !== ""}>Run Preflight</button>
-              <button type="button" onClick={() => runAction("dry-run")} disabled={processing !== ""}>Run Dry-Run</button>
-              <button type="button" className="danger-button live-block-button" onClick={() => runAction("live")} disabled={processing !== "" || confirmText.trim() !== LIVE_EXECUTE_CONFIRM_TEXT}>
-                Execute Live Locked
-              </button>
-            </div>
-          </div>
-          <p className="section-note">Execute Live requires exact founder confirmation and remains locked unless the backend returns eligibility.</p>
-          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        </Card>
-        <ResultPanel title="Result" result={result} />
-        <Card title="Runs">
-          <div className="form-grid filters-grid">
-            <SelectField label="Domain" value={domainFilter} options={["All", ...uniqueTextValues(rows.map((row) => row.executionDomain ?? "UNKNOWN"))]} onChange={setDomainFilter} />
-            <SelectField label="Status" value={statusFilter} options={["All", ...uniqueTextValues(rows.map((row) => row.liveStatus ?? row.dryRunStatus ?? "UNKNOWN"))]} onChange={setStatusFilter} />
-            <SelectField label="Action Type" value={actionTypeFilter} options={["All", ...uniqueTextValues(rows.map((row) => row.actionType ?? "UNKNOWN"))]} onChange={setActionTypeFilter} />
-            <TextInput label="SKU/ASIN Search" value={search} onChange={setSearch} />
-          </div>
-          {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock text="Could not load live execution runs." /> : filteredRows.length === 0 ? <EmptyBlock text="No live execution runs match these filters." /> : (
-            <div className="card-list command-card-list">
-              {filteredRows.map((row, index) => (
-                <article className="item-card command-item-card" key={String(row.id ?? `${row.actionId}-${index}`)}>
-                  <div className="item-top">
-                    <strong>{formatShortId(row.actionId)}</strong>
-                    <StatusBadge value={row.liveStatus ?? row.dryRunStatus ?? "UNKNOWN"} />
-                  </div>
-                  <div className="detail-grid">
-                    <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
-                    <MetricRow label="Execution Domain" value={formatEmpty(row.executionDomain)} />
-                    <MetricRow label="Action Type" value={formatEmpty(row.actionType)} />
-                    <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                    <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                    <MetricRow label="Live Status" value={<StatusBadge value={row.liveStatus ?? "UNKNOWN"} />} />
-                    <MetricRow label="Dry Run Status" value={<StatusBadge value={row.dryRunStatus ?? "UNKNOWN"} />} />
-                    <MetricRow label="Blocked Reason" value={<span className="long-text">{formatEmpty(row.blockedReason)}</span>} />
-                    <MetricRow label="Error Message" value={<span className="long-text">{formatEmpty(row.errorMessage)}</span>} />
-                    <MetricRow label="Actor" value={formatEmpty(row.actor)} />
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function LaunchGatePage() {
-  const summary = useApi<LaunchGateSummary>(() => launchGateApi.summary(SELLER_ID));
-  const data = launchGateSummaryOf(summary.data);
-  const checks = launchGateChecksOf(summary.data);
-  const blockers = dailyList(readFirst(data, ["blockers"]));
-  const warnings = dailyList(readFirst(data, ["warnings"]));
-  const nextSteps = dailyList(readFirst(data, ["nextSteps"]));
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [error, setError] = useState("");
-
-  async function runGate() {
-    setRunning(true);
-    setError("");
-    try {
-      const response = await launchGateApi.run(SELLER_ID);
-      setResult(hardeningResultOf(response));
-      summary.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Launch Gate" subtitle="Final gatekeeper before any limited live test." />
-      <SafetyBanner text="Launch Gate does not enable live execution. It only checks eligibility." />
-      <div className="stack">
-        <div className="button-row"><button type="button" onClick={runGate} disabled={running}>{running ? "Running Launch Gate..." : "Run Launch Gate"}</button></div>
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load launch gate summary." /> : (
-          <>
-            <div className="summary-strip command-summary">
-              <MetricTile label="Overall Status" value={<StatusBadge value={readFirst(data, ["overallStatus", "status"]) ?? "UNKNOWN"} />} />
-              <MetricTile label="Live Eligible" value={<StatusBadge value={readBoolean(readFirst(data, ["liveEligible"])) ? "PASS" : "LOCKED"} />} />
-              <MetricTile label="PPC Live Eligible" value={<StatusBadge value={readBoolean(readFirst(data, ["ppcLiveEligible"])) ? "PASS" : "LOCKED"} />} />
-              <MetricTile label="Listing Live Eligible" value={<StatusBadge value={readBoolean(readFirst(data, ["listingLiveEligible"])) ? "PASS" : "LOCKED"} />} />
-              <MetricTile label="Blockers Count" value={summaryNumber(data, ["blockersCount"], blockers.length)} />
-              <MetricTile label="Warnings Count" value={summaryNumber(data, ["warningsCount"], warnings.length)} />
-            </div>
-            <ResultPanel title="Launch Gate Result" result={result} />
-            <Card title="Checks">
-              {checks.length === 0 ? <EmptyBlock text="No Launch Gate checks returned yet." /> : (
-                <div className="card-list command-card-list">
-                  {checks.map((check, index) => (
-                    <article className="item-card command-item-card" key={String(check.checkKey ?? index)}>
-                      <div className="item-top">
-                        <strong>{formatEmpty(check.checkName ?? check.checkKey)}</strong>
-                        <StatusBadge value={check.status ?? "UNKNOWN"} />
-                      </div>
-                      <p className="long-text">{formatEmpty(check.message)}</p>
-                      <div className="detail-grid">
-                        <MetricRow label="Check Key" value={formatEmpty(check.checkKey)} />
-                        <MetricRow label="Severity" value={<StatusBadge value={check.severity ?? "UNKNOWN"} />} />
-                        <MetricRow label="Last Checked At" value={formatLocalDateTime(check.lastCheckedAt)} />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </Card>
-            <div className="dashboard-grid today">
-              <ListTextCard title="Blockers" rows={blockers} emptyText="No launch blockers returned." />
-              <ListTextCard title="Warnings" rows={warnings} emptyText="No launch warnings returned." />
-            </div>
-            <ListTextCard title="Next Steps" rows={nextSteps} emptyText="No launch next steps returned." />
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function LaunchChecklistPage() {
-  const summary = useApi<LaunchChecklistSummary>(() => launchChecklistApi.summary(SELLER_ID));
-  const data = launchChecklistSummaryOf(summary.data);
-  const items = launchChecklistItemsOf(summary.data);
-  const nextSteps = dailyList(readFirst(data, ["nextSteps"]));
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [error, setError] = useState("");
-
-  async function runChecklist() {
-    setRunning(true);
-    setError("");
-    try {
-      const response = await launchChecklistApi.run(SELLER_ID);
-      setResult(hardeningResultOf(response));
-      summary.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Production Launch Checklist" subtitle="Complete readiness checklist for shadow launch and limited live test." />
-      <SafetyBanner text="Checklist statuses: NOT_READY, READY_FOR_SHADOW_LAUNCH, READY_FOR_LIMITED_LIVE_TEST." />
-      <div className="stack">
-        <div className="button-row"><button type="button" onClick={runChecklist} disabled={running}>{running ? "Running Launch Checklist..." : "Run Launch Checklist"}</button></div>
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load launch checklist summary." /> : (
-          <>
-            <div className="summary-strip command-summary">
-              <MetricTile label="Overall Launch Status" value={<StatusBadge value={readFirst(data, ["overallLaunchStatus", "status"]) ?? "UNKNOWN"} />} />
-              <MetricTile label="Ready Items" value={summaryNumber(data, ["readyItems"], items.filter((item) => normalizeState(item.status).includes("READY")).length)} />
-              <MetricTile label="Warning Items" value={summaryNumber(data, ["warningItems"], items.filter((item) => ["WARN", "WARNING"].includes(normalizeState(item.status))).length)} />
-              <MetricTile label="Failed Items" value={summaryNumber(data, ["failedItems"], items.filter((item) => ["FAIL", "FAILED", "NOT_READY"].includes(normalizeState(item.status))).length)} />
-              <MetricTile label="Ready For Shadow Launch" value={<StatusBadge value={readBoolean(readFirst(data, ["readyForShadowLaunch"])) ? "READY" : "NOT_READY"} />} />
-              <MetricTile label="Ready For Limited Live Test" value={<StatusBadge value={readBoolean(readFirst(data, ["readyForLimitedLiveTest"])) ? "READY" : "NOT_READY"} />} />
-            </div>
-            <ResultPanel title="Launch Checklist Result" result={result} />
-            <Card title="Checklist">
-              {items.length === 0 ? <EmptyBlock text="No launch checklist items returned yet." /> : (
-                <div className="card-list command-card-list">
-                  {items.map((item, index) => (
-                    <article className="item-card command-item-card" key={String(item.key ?? index)}>
-                      <div className="item-top">
-                        <strong>{formatEmpty(item.label ?? item.key)}</strong>
-                        <StatusBadge value={item.status ?? "UNKNOWN"} />
-                      </div>
-                      <p className="long-text">{formatEmpty(item.message)}</p>
-                      <div className="detail-grid">
-                        <MetricRow label="Key" value={formatEmpty(item.key)} />
-                        <MetricRow label="Critical" value={readBoolean(item.critical) ? "Yes" : "No"} />
-                        <MetricRow label="Updated At" value={formatLocalDateTime(item.updatedAt)} />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </Card>
-            <ListTextCard title="Next Steps" rows={nextSteps} emptyText="No checklist next steps returned." />
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SchedulerControlPage() {
-  const summary = useApi<SchedulerSummary>(() => schedulerControlApi.summary(SELLER_ID));
-  const jobs = useApi<ApiRows<SchedulerJob>>(() => schedulerControlApi.jobs(SELLER_ID));
-  const data = schedulerSummaryOf(summary.data);
-  const rows = schedulerJobsOf(jobs.data);
-  const [processing, setProcessing] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  function refresh() {
-    summary.reload();
-    jobs.reload();
-  }
-
-  async function seedJobs() {
-    setProcessing("seed");
-    setMessage("");
-    setError("");
-    try {
-      await schedulerControlApi.seedJobs(SELLER_ID);
-      setMessage("Default scheduler jobs seeded.");
-      refresh();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  async function runJob(jobKey: string) {
-    setProcessing(`run:${jobKey}`);
-    setMessage("");
-    setError("");
-    try {
-      await schedulerControlApi.runJob(jobKey, SELLER_ID);
-      setMessage(`Scheduler job ${formatShortId(jobKey)} run requested.`);
-      refresh();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  async function toggleJob(row: SchedulerJob) {
-    const jobKey = String(row.jobKey ?? row.id ?? "").trim();
-    if (!jobKey) return;
-    setProcessing(`toggle:${jobKey}`);
-    setMessage("");
-    setError("");
-    try {
-      await schedulerControlApi.updateJob(jobKey, SELLER_ID, { enabled: !readBoolean(row.enabled) });
-      setMessage(`Scheduler job ${formatShortId(jobKey)} updated.`);
-      refresh();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Scheduler Control" subtitle="Manage safe recurring internal jobs for sync, AI-CGO, maintenance, QA, alerts, and freshness." />
-      <SafetyBanner text="Scheduler jobs run internal checks/orchestrations. They do not execute live marketplace mutations." />
-      <div className="stack">
-        <div className="button-row">
-          <button type="button" onClick={seedJobs} disabled={processing !== ""}>Seed Default Jobs</button>
-          <button type="button" className="secondary" onClick={refresh}>Refresh Jobs</button>
-        </div>
-        {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load scheduler summary." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Total Jobs" value={summaryNumber(data, ["totalJobs"], rows.length)} />
-            <MetricTile label="Enabled Jobs" value={summaryNumber(data, ["enabledJobs"], rows.filter((row) => readBoolean(row.enabled)).length)} />
-            <MetricTile label="Disabled Jobs" value={summaryNumber(data, ["disabledJobs"], rows.filter((row) => !readBoolean(row.enabled)).length)} />
-            <MetricTile label="Last Run Status" value={<StatusBadge value={readFirst(data, ["lastRunStatus"]) ?? "UNKNOWN"} />} />
-            <MetricTile label="Failed Runs" value={summaryNumber(data, ["failedRuns"], 0)} />
-            <MetricTile label="Successful Runs" value={summaryNumber(data, ["successfulRuns"], 0)} />
-          </div>
-        )}
-        <Card title="Jobs">
-          {jobs.loading ? <LoadingBlock /> : jobs.error ? <ErrorBlock text="Could not load scheduler jobs." /> : rows.length === 0 ? <EmptyBlock text="No scheduler jobs returned. Seed default jobs when the backend is ready." /> : (
-            <div className="card-list command-card-list">
-              {rows.map((row, index) => {
-                const jobKey = String(row.jobKey ?? row.id ?? "").trim();
-                return (
-                  <article className="item-card command-item-card" key={String(jobKey || index)}>
-                    <div className="item-top">
-                      <strong>{formatEmpty(row.jobName ?? row.jobKey)}</strong>
-                      <StatusBadge value={readBoolean(row.enabled) ? "ENABLED" : "DISABLED"} />
-                    </div>
-                    <div className="detail-grid">
-                      <MetricRow label="Job Key" value={formatEmpty(jobKey)} />
-                      <MetricRow label="Job Type" value={formatEmpty(row.jobType)} />
-                      <MetricRow label="Schedule Hint" value={formatEmpty(row.scheduleHint)} />
-                      <MetricRow label="Last Run At" value={formatLocalDateTime(row.lastRunAt)} />
-                      <MetricRow label="Last Run Status" value={<StatusBadge value={row.lastRunStatus ?? "UNKNOWN"} />} />
-                    </div>
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => runJob(jobKey)} disabled={!jobKey || processing !== ""}>Run Now</button>
-                      <button type="button" className="secondary" onClick={() => toggleJob(row)} disabled={!jobKey || processing !== ""}>{readBoolean(row.enabled) ? "Disable" : "Enable"}</button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function NotificationOutboxPage() {
-  const summary = useApi<NotificationSummary>(() => notificationOutboxApi.summary(SELLER_ID));
-  const messages = useApi<ApiRows<NotificationMessage>>(() => notificationOutboxApi.messages(SELLER_ID, 100));
-  const settings = useApi<NotificationSettings>(() => notificationOutboxApi.settings(SELLER_ID));
-  const data = notificationSummaryOf(summary.data);
-  const settingsData = notificationSettingsOf(settings.data);
-  const rows = notificationMessagesOf(messages.data);
-  const settingsMissing = !settings.loading && (settings.error || Object.keys(settingsData).length === 0);
-  const [processing, setProcessing] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  function refresh() {
-    summary.reload();
-    messages.reload();
-    settings.reload();
-  }
-
-  async function initialize() {
-    setProcessing("initialize");
-    setMessage("");
-    setError("");
-    try {
-      await notificationOutboxApi.initialize(SELLER_ID);
-      setMessage("Notification settings initialized.");
-      refresh();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  async function sendMessage(id: string) {
-    setProcessing(`send:${id}`);
-    setMessage("");
-    setError("");
-    try {
-      const response = await notificationOutboxApi.send(id);
-      setMessage(blockedOutcomeMessage(response, "Notification sending blocked safely."));
-      refresh();
-    } catch (requestError) {
-      const sanitized = sanitizeActionError(requestError);
-      const safeBlock = ["BLOCK", "DISABLED", "PROVIDER", "MISSING", "NOT CONFIGURED"].some((term) => normalizeState(sanitized).includes(term));
-      if (safeBlock) {
-        setMessage("Notification sending blocked safely.");
-        setError("");
-      } else {
-        setError(sanitized);
-      }
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Notification Outbox" subtitle="Queued founder notifications. External sending is disabled unless explicitly configured." />
-      <SafetyBanner text="No email, WhatsApp, or Slack is sent unless settings and provider are configured." />
-      <div className="stack">
-        {settingsMissing ? <div className="button-row"><button type="button" onClick={initialize} disabled={processing !== ""}>Initialize Notification Settings</button></div> : null}
-        {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load notification summary." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Queued" value={summaryNumber(data, ["queued", "queuedCount"], rows.filter((row) => normalizeState(row.status) === "QUEUED").length)} />
-            <MetricTile label="Sent" value={summaryNumber(data, ["sent", "sentCount"], rows.filter((row) => normalizeState(row.status) === "SENT").length)} />
-            <MetricTile label="Blocked" value={summaryNumber(data, ["blocked", "blockedCount"], rows.filter((row) => normalizeState(row.status).includes("BLOCK")).length)} />
-            <MetricTile label="Failed" value={summaryNumber(data, ["failed", "failedCount"], rows.filter((row) => normalizeState(row.status) === "FAILED").length)} />
-            <MetricTile label="External Notifications Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["externalNotificationsEnabled"]) ?? readFirst(data, ["externalNotificationsEnabled"])) ? "ENABLED" : "DISABLED"} />} />
-            <MetricTile label="Email Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["emailEnabled"]) ?? readFirst(data, ["emailEnabled"])) ? "ENABLED" : "DISABLED"} />} />
-            <MetricTile label="WhatsApp Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["whatsappEnabled"]) ?? readFirst(data, ["whatsAppEnabled"])) ? "ENABLED" : "DISABLED"} />} />
-            <MetricTile label="Slack Enabled" value={<StatusBadge value={readBoolean(readFirst(settingsData, ["slackEnabled"]) ?? readFirst(data, ["slackEnabled"])) ? "ENABLED" : "DISABLED"} />} />
-          </div>
-        )}
-        <Card title="Messages">
-          {messages.loading ? <LoadingBlock /> : messages.error ? <ErrorBlock text="Could not load notification messages." /> : rows.length === 0 ? <EmptyBlock text="No queued founder notifications yet." /> : (
-            <div className="card-list command-card-list">
-              {rows.map((row, index) => {
-                const id = String(row.id ?? "").trim();
-                return (
-                  <article className="item-card command-item-card" key={String(id || index)}>
-                    <div className="item-top">
-                      <strong>{formatEmpty(row.subject ?? row.sourceModule ?? row.channel)}</strong>
-                      <StatusBadge value={row.status ?? "UNKNOWN"} />
-                    </div>
-                    <p className="long-text">{formatEmpty(row.message)}</p>
-                    <div className="detail-grid">
-                      <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
-                      <MetricRow label="Channel" value={formatEmpty(row.channel)} />
-                      <MetricRow label="Recipient" value={formatEmpty(row.recipient)} />
-                      <MetricRow label="Severity" value={<SeverityBadge value={row.severity} />} />
-                      <MetricRow label="Source Module" value={formatEmpty(row.sourceModule)} />
-                      <MetricRow label="Send Attempts" value={formatEmpty(row.sendAttempts)} />
-                      <MetricRow label="Last Error" value={<span className="long-text">{formatEmpty(row.lastError)}</span>} />
-                    </div>
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => sendMessage(id)} disabled={!id || processing !== ""}>Send/Test Block</button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function SecurityGuardrailsPage() {
-  const summary = useApi<SecurityGuardrailSummary>(() => securityGuardrailsApi.summary(SELLER_ID));
-  const audit = useApi<ApiRows<SecurityAuditEvent>>(() => securityGuardrailsApi.audit(SELLER_ID, 100));
-  const data = securityGuardrailSummaryOf(summary.data);
-  const rows = securityAuditEventsOf(audit.data);
-  const [form, setForm] = useState({ action: "LIVE_PPC_EXECUTION", actor: "founder", confirmText: "" });
-  const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  async function runCheck(event: FormEvent) {
-    event.preventDefault();
-    setProcessing(true);
-    setMessage("");
-    setError("");
-    try {
-      const response = await securityGuardrailsApi.check({ sellerId: SELLER_ID, ...form });
-      setResult(hardeningResultOf(response));
-      setMessage(responseWasBlocked(response) ? "Security guardrail blocked this action safely." : "Security guardrail check completed.");
-      summary.reload();
-      audit.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing(false);
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Security Guardrails" subtitle="Audit and block dangerous actions unless founder, confirmation, and safety checks pass." />
-      <SafetyBanner text="Security guardrails do not replace authentication, but they provide backend safety auditing." />
-      <div className="stack">
-        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock text="Could not load security guardrail summary." /> : (
-          <div className="summary-strip command-summary">
-            <MetricTile label="Total Checks" value={summaryNumber(data, ["totalChecks"], rows.length)} />
-            <MetricTile label="Allowed" value={summaryNumber(data, ["allowed", "allowedCount"], rows.filter((row) => readBoolean(row.allowed)).length)} />
-            <MetricTile label="Blocked" value={summaryNumber(data, ["blocked", "blockedCount"], rows.filter((row) => !readBoolean(row.allowed)).length)} />
-            <MetricTile label="Dangerous Blocks" value={summaryNumber(data, ["dangerousBlocks"], 0)} />
-            <MetricTile label="Latest Blocked Action" value={formatEmpty(readFirst(data, ["latestBlockedAction"]) ?? rows.find((row) => !readBoolean(row.allowed))?.action)} />
-          </div>
-        )}
-        <Card title="Manual Check">
-          <form className="form-grid" onSubmit={runCheck}>
-            <SelectField label="Action" value={form.action} options={guardrailActions} onChange={(value) => setForm({ ...form, action: value })} />
-            <TextInput label="Actor" value={form.actor} onChange={(value) => setForm({ ...form, actor: value })} />
-            <TextInput label="Confirm Text" value={form.confirmText} onChange={(value) => setForm({ ...form, confirmText: value })} />
-            <div className="button-row"><button type="submit" disabled={processing}>Run Guardrail Check</button></div>
-          </form>
-          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        </Card>
-        <ResultPanel title="Guardrail Result" result={result} />
-        <Card title="Audit">
-          {audit.loading ? <LoadingBlock /> : audit.error ? <ErrorBlock text="Could not load security audit events." /> : rows.length === 0 ? <EmptyBlock text="No security guardrail events yet." /> : (
-            <div className="table-wrap command-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Created At</th>
-                    <th>Actor</th>
-                    <th>Event Type</th>
-                    <th>Route</th>
-                    <th>Action</th>
-                    <th>Allowed</th>
-                    <th>Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={String(row.id ?? `${row.action}-${index}`)}>
-                      <td>{formatLocalDateTime(row.createdAt)}</td>
-                      <td>{formatEmpty(row.actor)}</td>
-                      <td>{formatEmpty(row.eventType)}</td>
-                      <td className="wrap-cell">{formatEmpty(row.route)}</td>
-                      <td>{formatEmpty(row.action)}</td>
-                      <td><StatusBadge value={readBoolean(row.allowed) ? "ALLOWED" : "BLOCKED"} /></td>
-                      <td className="wrap-cell">{formatEmpty(row.reason)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function RollbackCenterPage() {
-  const summary = useApi<RollbackSummary>(() => rollbackApi.summary(SELLER_ID));
-  const snapshots = useApi<ApiRows<RollbackSnapshot>>(() => rollbackApi.snapshots(SELLER_ID, 100));
-  const data = hardeningSummaryOf<RollbackSummary>(summary.data);
-  const rows = hardeningRowsOf<RollbackSnapshot>(snapshots.data);
-  const [actionId, setActionId] = useState("");
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [processing, setProcessing] = useState("");
-
-  const refresh = () => {
-    summary.reload();
-    snapshots.reload();
-  };
-
-  async function captureSnapshot() {
-    const trimmed = actionId.trim();
-    if (!trimmed) {
-      setError("Action ID is required.");
-      return;
-    }
-    setProcessing("capture");
-    setError("");
-    setMessage("");
-    try {
-      setResult(hardeningResultOf(await rollbackApi.capture(trimmed)));
-      setMessage("Rollback snapshot captured.");
-      refresh();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  async function runSnapshot(snapshotId: string, mode: "preview" | "execute") {
-    if (!snapshotId) return;
-    if (mode === "execute" && !window.confirm("Rollback execution is blocked in V1. This will only test the safety block.")) return;
-    setProcessing(`${mode}:${snapshotId}`);
-    setError("");
-    setMessage("");
-    try {
-      const response = mode === "preview" ? await rollbackApi.preview(snapshotId) : await rollbackApi.execute(snapshotId);
-      setResult(hardeningResultOf(response));
-      setMessage(mode === "execute" && responseWasBlocked(response) ? "Safety block working. Rollback execution is disabled." : "Rollback preview response received.");
-      refresh();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
-
-  return (
-    <div className="page">
-      <PageHeader title="Rollback Center" subtitle="Capture and preview rollback snapshots before any future live execution. Rollback execution is blocked in V1." />
-      <SafetyBanner text="Rollback execution is blocked in V1. Preview only. No marketplace changes are made." />
-      <div className="stack">
-        <div className="summary-strip command-summary">
-          <MetricTile label="Total Snapshots" value={summaryNumber(data, ["totalSnapshots", "total"], rows.length)} />
-          <MetricTile label="Captured Snapshots" value={summaryNumber(data, ["capturedSnapshots", "capturedCount"], rows.filter((row) => normalizeState(row.snapshotStatus).includes("CAPTURE")).length)} />
-          <MetricTile label="Previewed Snapshots" value={summaryNumber(data, ["previewedSnapshots", "previewedCount"], rows.filter((row) => normalizeState(row.snapshotStatus).includes("PREVIEW")).length)} />
-          <MetricTile label="Executed Rollbacks" value={summaryNumber(data, ["executedRollbacks", "executedCount"], 0)} />
-          <MetricTile label="Blocked Rollbacks" value={summaryNumber(data, ["blockedRollbacks", "blockedCount", "notExecutedCount"], rows.filter((row) => normalizeState(row.rollbackStatus).includes("BLOCK")).length)} />
-          <MetricTile label="Latest Snapshot At" value={formatLocalDateTime(readFirst(data, ["latestSnapshotAt"]))} />
-        </div>
-        <Card title="Capture Snapshot">
-          <div className="form-grid">
-            <TextInput label="Action ID" value={actionId} onChange={setActionId} />
-            <div className="button-row gateway-buttons">
-              <button type="button" onClick={captureSnapshot} disabled={processing === "capture"}>Capture Snapshot</button>
-              <button type="button" className="secondary" onClick={refresh}>Refresh</button>
-            </div>
-          </div>
-          {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-          {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        </Card>
-        <ResultPanel title="Rollback Result" result={result} />
-        <Card title="Snapshots">
-          {snapshots.loading || summary.loading ? <LoadingBlock /> : snapshots.error || summary.error ? <ErrorBlock text="Could not load rollback snapshots." /> : rows.length === 0 ? (
-            <div className="soft-state">
-              <p>No rollback snapshots yet. Capture a snapshot by action ID before previewing a rollback plan.</p>
-              <div className="button-row compact">
-                <button type="button" disabled>Preview Rollback</button>
-                <button type="button" className="danger-button live-block-button" disabled>Execute Rollback Block Test</button>
-              </div>
-              <p className="section-note">Rollback execution is blocked in V1. Disabled controls are shown here as a safety cue until a snapshot exists.</p>
-            </div>
-          ) : (
-            <div className="card-list command-card-list">
-              {rows.map((row, index) => {
-                const snapshotId = snapshotIdOf(row);
-                return (
-                  <article className="item-card command-item-card" key={String(snapshotId || index)}>
-                    <div className="item-top">
-                      <strong>{formatShortId(snapshotId)}</strong>
-                      <StatusBadge value={row.rollbackStatus ?? row.snapshotStatus ?? "CAPTURED"} />
-                    </div>
-                    <div className="detail-grid">
-                      <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
-                      <MetricRow label="Action ID" value={formatShortId(row.actionId)} />
-                      <MetricRow label="Source Module" value={formatEmpty(row.sourceModule)} />
-                      <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
-                      <MetricRow label="Entity ID" value={formatEmpty(row.entityId)} />
-                      <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                      <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                      <MetricRow label="Snapshot Type" value={formatEmpty(row.snapshotType)} />
-                      <MetricRow label="Snapshot Status" value={<StatusBadge value={row.snapshotStatus ?? "UNKNOWN"} />} />
-                      <MetricRow label="Rollback Status" value={<StatusBadge value={row.rollbackStatus ?? "BLOCKED"} />} />
-                      <MetricRow label="Captured By" value={formatEmpty(row.capturedBy)} />
-                      <MetricRow label="Notes" value={<span className="long-text">{formatEmpty(row.notes)}</span>} />
-                    </div>
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => runSnapshot(snapshotId, "preview")} disabled={!snapshotId || processing === `preview:${snapshotId}`}>Preview Rollback</button>
-                      <button type="button" className="danger-button live-block-button" onClick={() => runSnapshot(snapshotId, "execute")} disabled={!snapshotId || processing === `execute:${snapshotId}`}>Execute Rollback Block Test</button>
-                    </div>
-                    <p className="section-note">Rollback execution is blocked in V1. This button only tests the safety block.</p>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
 }
 
 function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
   const summary = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
-  const actions = useApi<ApiRows<ApprovalReadyAction>>(() => approvalExecutionApi.readyActions(SELLER_ID, 100));
-  const data = hardeningSummaryOf<ApprovalExecutionSummary>(summary.data);
-  const rows = hardeningRowsOf<ApprovalReadyAction>(actions.data);
-  const [actionType, setActionType] = useState("All");
-  const [riskLevel, setRiskLevel] = useState("All");
-  const [source, setSource] = useState("All");
-  const [search, setSearch] = useState("");
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [processing, setProcessing] = useState("");
-  const filteredRows = rows.filter((row) => {
-    const haystack = [row.sku, row.asin].map((value) => String(value ?? "").toLowerCase()).join(" ");
-    return (actionType === "All" || String(row.actionType ?? "") === actionType) &&
-      (riskLevel === "All" || normalizeState(row.riskLevel) === riskLevel) &&
-      (source === "All" || String(row.source ?? "") === source) &&
-      (!search.trim() || haystack.includes(search.trim().toLowerCase()));
-  });
-
-  async function runAction(row: ApprovalReadyAction, mode: "preview" | "shadow" | "live") {
-    const id = actionIdOf(row);
-    if (!id) return;
-    if (mode === "shadow" && !window.confirm("Run shadow execution? No external action will be executed.")) return;
-    if (mode === "live" && !window.confirm("Live execution is blocked in V1. This only tests the block.")) return;
-    setProcessing(`${mode}:${id}`);
-    setError("");
-    setMessage("");
-    try {
-      const response = mode === "preview" ? await approvalExecutionApi.preview(id) : mode === "shadow" ? await approvalExecutionApi.executeShadow(id) : await approvalExecutionApi.executeLive(id);
-      setResult(hardeningResultOf(response));
-      setMessage(mode === "live" && responseWasBlocked(response) ? "Safety block working. Live execution remains disabled." : "Approval execution response received.");
-      summary.reload();
-      actions.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setProcessing("");
-    }
-  }
+  const rows = actionLedgerRowsOf(summary.data);
 
   return (
     <div className="page">
-      <PageHeader title="Approval Execution Bridge" subtitle="Approved actions ready for preview or shadow execution. Live execution is blocked." />
-      <SafetyBanner text="Only approved actions can be previewed or shadow-executed. Live execution is blocked." />
-      <div className="stack">
-        <div className="button-row">
-          <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
-          <button type="button" className="secondary" onClick={() => { summary.reload(); actions.reload(); }}>Refresh</button>
-        </div>
-        <div className="summary-strip command-summary">
-          <MetricTile label="Ready Actions" value={summaryNumber(data, ["readyActions", "readyActionCount", "readyCount"], rows.length)} />
-          <MetricTile label="Previewed Actions" value={summaryNumber(data, ["previewedActions", "previewedCount"], 0)} />
-          <MetricTile label="Shadow Executions" value={summaryNumber(data, ["shadowExecutions", "shadowExecutionCount"], 0)} />
-          <MetricTile label="Live Blocked Attempts" value={summaryNumber(data, ["liveBlockedAttempts", "liveBlockedCount"], 0)} />
-          <MetricTile label="Unsupported Actions" value={summaryNumber(data, ["unsupportedActions", "unsupportedCount"], 0)} />
-          <MetricTile label="High Risk Ready Actions" value={summaryNumber(data, ["highRiskReadyActions", "highRiskCount", "highRiskReadyCount"], rows.filter((row) => normalizeState(row.riskLevel).includes("HIGH")).length)} />
-        </div>
-        {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        <ResultPanel title="Execution Result" result={result} />
-        <Card title="Ready Actions">
-          <div className="form-grid filters-grid">
-            <SelectField label="Action Type" value={actionType} options={["All", ...uniqueTextValues(rows.map((row) => row.actionType))]} onChange={setActionType} />
-            <SelectField label="Risk Level" value={riskLevel} options={["All", ...uniqueTextValues(rows.map((row) => normalizeState(row.riskLevel || "UNKNOWN")))]} onChange={setRiskLevel} />
-            <SelectField label="Source" value={source} options={["All", ...uniqueTextValues(rows.map((row) => row.source))]} onChange={setSource} />
-            <TextInput label="SKU/ASIN Search" value={search} onChange={setSearch} />
+      <PageHeader title="Approval Execution" subtitle="Detailed view of approval and execution pipeline." />
+
+      <Card title="Execution Pipeline">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Risk</th><th>Created</th></tr></thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.actionId}>
+                    <td>{formatShortId(row.actionId)}</td>
+                    <td>{formatEmpty(row.actionTitle)}</td>
+                    <td>{formatEmpty(row.actionType)}</td>
+                    <td><StatusBadge value={row.actionStatus} /></td>
+                    <td><StatusBadge value={row.riskLevel ?? "LOW"} /></td>
+                    <td>{formatEmpty(row.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          {actions.loading || summary.loading ? <LoadingBlock /> : actions.error || summary.error ? <ErrorBlock text="Could not load approval execution data." /> : filteredRows.length === 0 ? <EmptyBlock text="No approved actions are ready for execution bridge review." /> : (
-            <div className="card-list command-card-list">
-              {filteredRows.map((row, index) => {
-                const id = actionIdOf(row);
-                return (
-                  <article className="item-card command-item-card" key={String(id || index)}>
-                    <div className="item-top">
-                      <strong>{formatEmpty(row.title ?? row.actionType)}</strong>
-                      <StatusBadge value={row.riskLevel ?? "UNKNOWN"} />
-                    </div>
-                    <p className="long-text">{formatEmpty(row.summary)}</p>
-                    <div className="detail-grid">
-                      <MetricRow label="Action ID" value={formatShortId(id)} />
-                      <MetricRow label="Action Type" value={formatEmpty(row.actionType)} />
-                      <MetricRow label="Entity Type" value={formatEmpty(row.entityType)} />
-                      <MetricRow label="Entity ID" value={formatEmpty(row.entityId)} />
-                      <MetricRow label="SKU" value={formatEmpty(row.sku)} />
-                      <MetricRow label="ASIN" value={formatEmpty(row.asin)} />
-                      <MetricRow label="Approval Status" value={<StatusBadge value={row.approvalStatus ?? "APPROVED"} />} />
-                      <MetricRow label="State" value={<StatusBadge value={row.state ?? "READY"} />} />
-                      <MetricRow label="Source" value={formatEmpty(row.source)} />
-                      <MetricRow label="Created At" value={formatLocalDateTime(row.createdAt)} />
-                    </div>
-                    <div className="button-row compact">
-                      <button type="button" onClick={() => runAction(row, "preview")} disabled={!id || processing === `preview:${id}`}>Preview</button>
-                      <button type="button" onClick={() => runAction(row, "shadow")} disabled={!id || processing === `shadow:${id}`}>Execute Shadow</button>
-                      <button type="button" className="danger-button live-block-button" onClick={() => runAction(row, "live")} disabled={!id || processing === `live:${id}`}>Try Live Block</button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
 }
 
-function MaintenancePage() {
-  const summary = useApi<MaintenanceSummary>(() => maintenanceApi.summary(SELLER_ID));
-  const runs = useApi<ApiRows<MaintenanceRun>>(() => maintenanceApi.runs(SELLER_ID, 50));
-  const data = hardeningSummaryOf<MaintenanceSummary>(summary.data);
-  const latestRun = recordOf(readFirst(data, ["latestRun"]));
-  const rows = hardeningRowsOf<MaintenanceRun>(runs.data);
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<AnyRecord | null>(null);
-  const [error, setError] = useState("");
+function ExecutionGatewayPage() {
+  const status = useApi<ExecutionGatewayStatus>(() => getJson(`/api/execution-gateway/status?sellerId=${SELLER_ID}`));
+  const attempts = useApi<ExecutionAttempt[]>(() => getJson(`/api/execution-gateway/attempts?sellerId=${SELLER_ID}`));
 
-  async function runMaintenance() {
-    if (!window.confirm("Run safe maintenance now? No external action will be executed.")) return;
-    setRunning(true);
-    setError("");
-    try {
-      setResult(hardeningResultOf(await maintenanceApi.run(SELLER_ID)));
-      summary.reload();
-      runs.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setRunning(false);
-    }
+  return (
+    <div className="page">
+      <PageHeader title="Execution Gateway" subtitle="Monitor execution attempts and gateway health." />
+
+      <Card title="Gateway Status">
+        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Status" value={<StatusBadge value={status.data?.status} />} />
+            <MetricRow label="Queue Depth" value={readNumber(status.data?.queueDepth)} />
+            <MetricRow label="Success Rate" value={formatPercent(status.data?.successRate)} />
+            <MetricRow label="Last Check" value={formatEmpty(status.data?.lastCheckDate)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Attempts">
+        {attempts.loading ? <LoadingBlock /> : attempts.error ? <ErrorBlock /> : attempts.data && attempts.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Action</th><th>Date</th><th>Status</th><th>Error</th></tr></thead>
+              <tbody>
+                {attempts.data.map((attempt) => (
+                  <tr key={attempt.attemptId}>
+                    <td>{formatShortId(attempt.attemptId)}</td>
+                    <td>{formatEmpty(attempt.actionTitle)}</td>
+                    <td>{formatEmpty(attempt.attemptDate)}</td>
+                    <td><StatusBadge value={attempt.status} /></td>
+                    <td>{formatEmpty(attempt.errorMessage)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function LiveExecutionPage() {
+  const status = useApi<LiveExecutionStatus>(() => getJson(`/api/live-execution/status?sellerId=${SELLER_ID}`));
+  const runs = useApi<LiveExecutionRun[]>(() => getJson(`/api/live-execution/runs?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Live Execution" subtitle="Real-time execution monitoring and run history." />
+
+      <Card title="Live Status">
+        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Status" value={<StatusBadge value={status.data?.status} />} />
+            <MetricRow label="Active Runs" value={readNumber(status.data?.activeRuns)} />
+            <MetricRow label="Completed Today" value={readNumber(status.data?.completedToday)} />
+            <MetricRow label="Failed Today" value={readNumber(status.data?.failedToday)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Runs">
+        {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock /> : runs.data && runs.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Actions</th><th>Duration</th></tr></thead>
+              <tbody>
+                {runs.data.map((run) => (
+                  <tr key={run.runId}>
+                    <td>{formatShortId(run.runId)}</td>
+                    <td>{formatEmpty(run.runDate)}</td>
+                    <td><StatusBadge value={run.status} /></td>
+                    <td>{readNumber(run.actionCount)}</td>
+                    <td>{readNumber(run.durationMs)}ms</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function RollbackCenterPage() {
+  const snapshots = useApi<RollbackSnapshot[]>(() => getJson(`/api/rollback/snapshots?sellerId=${SELLER_ID}`));
+  const summary = useApi<RollbackSummary>(() => getJson(`/api/rollback/summary?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Rollback Center" subtitle="Manage snapshots and rollback operations." />
+
+      <Card title="Rollback Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Snapshots" value={readNumber(summary.data?.totalSnapshots)} />
+            <MetricRow label="Available Rollbacks" value={readNumber(summary.data?.availableRollbacks)} />
+            <MetricRow label="Last Snapshot" value={formatEmpty(summary.data?.lastSnapshotDate)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Snapshots">
+        {snapshots.loading ? <LoadingBlock /> : snapshots.error ? <ErrorBlock /> : snapshots.data && snapshots.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Date</th><th>Type</th><th>Status</th></tr></thead>
+              <tbody>
+                {snapshots.data.map((snapshot) => (
+                  <tr key={snapshot.snapshotId}>
+                    <td>{formatShortId(snapshot.snapshotId)}</td>
+                    <td>{formatEmpty(snapshot.createdAt)}</td>
+                    <td>{formatEmpty(snapshot.snapshotType)}</td>
+                    <td><StatusBadge value={snapshot.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function ListingDraftsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+  const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}`));
+  const rows = rowsOf<ListingDraft>(drafts.data);
+
+  return (
+    <div className="page">
+      <PageHeader title="Listing Drafts" subtitle="Create and manage listing content drafts." />
+
+      <Card title="Drafts">
+        {drafts.loading ? <LoadingBlock /> : drafts.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>SKU</th><th>Title</th><th>Status</th><th>Created</th></tr></thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={index}>
+                    <td>{formatShortId(row.draftId ?? row.id)}</td>
+                    <td>{formatEmpty(row.sku)}</td>
+                    <td>{formatEmpty(row.title ?? row.productName)}</td>
+                    <td><StatusBadge value={row.status} /></td>
+                    <td>{formatEmpty(row.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function ImageAplusPage() {
+  const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  const recommendations = useApi<ApiRows<CreativeRecommendation>>(() => getJson(`/api/creative-recommendations?sellerId=${SELLER_ID}`));
+  const rows = rowsOf<CreativeRecommendation>(recommendations.data);
+
+  return (
+    <div className="page">
+      <PageHeader title="Image + A+" subtitle="Manage product images, A+ content, and creative assets." />
+
+      <div className="metric-grid">
+        <FounderMetric label="Total Recommendations" value={readNumber(readFirst(creative.data, ["totalRecommendations", "total"]))} icon="growth" trend="AI-generated suggestions" tone="green" />
+        <FounderMetric label="A+ Content Reviews" value={readNumber(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"]))} icon="report" trend="Needs founder review" tone="gold" />
+        <FounderMetric label="Image Reviews" value={readNumber(readFirst(creative.data, ["imageReviews", "image_reviews"]))} icon="growth" trend="Image optimization suggestions" tone="green" />
+      </div>
+
+      <Card title="Creative Recommendations">
+        {recommendations.loading ? <LoadingBlock /> : recommendations.error ? <ErrorBlock /> : rows.length > 0 ? (
+          <div className="item-list">
+            {rows.map((row, index) => (
+              <RecommendationCard key={index} item={row as AnyRecord} />
+            ))}
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function CeoReportPage() {
+  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today?sellerId=${SELLER_ID}`));
+  const approvals = useApi<ApprovalExecutionSummary>(() => approvalExecutionApi.summary(SELLER_ID));
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const products = mergeFounderProducts(passports.data, economics.data);
+
+  return (
+    <div className="page">
+      <PageHeader title="CEO Report" subtitle="Executive summary of business health and AI-CGO performance." />
+
+      <div className="metric-grid">
+        <FounderMetric label="Total Products" value={products.length} icon="box" trend="Product catalog" tone="green" />
+        <FounderMetric label="Pending Approvals" value={actionLedgerRowsOf(approvals.data).filter((r) => r.actionStatus === "APPROVAL_REQUIRED").length} icon="approval" trend="Needs founder review" tone="gold" />
+        <FounderMetric label="Ready to Execute" value={actionLedgerRowsOf(approvals.data).filter((r) => r.actionStatus === "READY").length} icon="check" trend="Approved and queued" tone="green" />
+        <FounderMetric label="Today's Status" value={cleanFounderText(recordOf(today.data).status, "Not available")} icon="spark" trend="AI-CGO daily run" tone="green" />
+      </div>
+
+      <Card title="Product Health Summary">
+        <div className="detail-grid">
+          <MetricRow label="Products Needing Cost" value={products.filter(productNeedsCost).length} />
+          <MetricRow label="Low Profit Products" value={products.filter(productLowProfit).length} />
+          <MetricRow label="Ready Products" value={products.filter((p) => normalizeState(p.readiness).includes("READY")).length} />
+          <MetricRow label="Avg Margin" value={formatPercent(products.length > 0 ? products.reduce((sum, p) => sum + Number(p.margin ?? 0), 0) / products.length : 0)} />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function SettingsPage() {
+  const [settings, setSettings] = useState<AnyRecord>({});
+  const current = useApi<AnyRecord>(() => getJson(`/api/settings?sellerId=${SELLER_ID}`));
+
+  useEffect(() => {
+    if (current.data) setSettings(recordOf(current.data));
+  }, [current.data]);
+
+  function updateSetting(key: string, value: unknown) {
+    setSettings((prev) => ({ ...prev, [key]: value }));
   }
 
   return (
     <div className="page">
-      <PageHeader title="Maintenance Runner" subtitle="Run safe internal housekeeping: safety setup, alert generation, data freshness, learning rebuild, and health check." />
-      <SafetyBanner text="Maintenance runs internal checks only. No Amazon, Ads, listing, image, A+, social, notification, or AI action is executed." />
-      <div className="stack">
-        <div className="button-row"><button type="button" onClick={runMaintenance} disabled={running}>{running ? "Running maintenance..." : "Run Maintenance"}</button></div>
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        <div className="summary-strip command-summary">
-          <MetricTile label="Latest Run Status" value={<StatusBadge value={readFirst(latestRun, ["runStatus"]) ?? readFirst(data, ["latestRunStatus", "runStatus"]) ?? "UNKNOWN"} />} />
-          <MetricTile label="Runs Today" value={summaryNumber(data, ["runsToday", "todayRuns", "totalRuns"], 0)} />
-          <MetricTile label="Alerts Generated" value={summaryNumber(latestRun, ["alertsGenerated"], summaryNumber(data, ["alertsGenerated"], 0))} />
-          <MetricTile label="Data Sources Checked" value={summaryNumber(latestRun, ["dataSourcesChecked"], summaryNumber(data, ["dataSourcesChecked"], 0))} />
-          <MetricTile label="Learning Rebuilt" value={<StatusBadge value={safeBooleanLabel(readFirst(latestRun, ["learningRebuilt"]) ?? readFirst(data, ["learningRebuilt"]), "YES", "NO")} />} />
-          <MetricTile label="Health Status" value={<StatusBadge value={readFirst(latestRun, ["healthStatus"]) ?? readFirst(data, ["healthStatus"]) ?? "UNKNOWN"} />} />
-        </div>
-        <ResultPanel title="Maintenance Result" result={result} />
-        <Card title="Runs">
-          {runs.loading || summary.loading ? <LoadingBlock text={running ? "Running maintenance..." : "Loading maintenance runs..."} /> : runs.error || summary.error ? <ErrorBlock text="Could not load maintenance runs." /> : rows.length === 0 ? <EmptyBlock text="No maintenance runs yet." /> : (
-            <div className="card-list command-card-list">
-              {rows.map((row, index) => (
-                <article className="item-card command-item-card" key={String(row.runId ?? row.id ?? index)}>
-                  <div className="item-top">
-                    <strong>{formatShortId(row.runId ?? row.id)}</strong>
-                    <StatusBadge value={row.runStatus ?? "UNKNOWN"} />
-                  </div>
-                  <div className="detail-grid">
-                    <MetricRow label="Started At" value={formatLocalDateTime(row.startedAt)} />
-                    <MetricRow label="Finished At" value={formatLocalDateTime(row.finishedAt)} />
-                    <MetricRow label="Run Type" value={formatEmpty(row.runType)} />
-                    <MetricRow label="Safety Initialized" value={readBoolean(row.safetyInitialized) ? "Yes" : "No"} />
-                    <MetricRow label="Alert Rules Seeded" value={readBoolean(row.alertRulesSeeded) ? "Yes" : "No"} />
-                    <MetricRow label="Alerts Generated" value={formatEmpty(row.alertsGenerated)} />
-                    <MetricRow label="Data Sources Checked" value={formatEmpty(row.dataSourcesChecked)} />
-                    <MetricRow label="Learning Rebuilt" value={readBoolean(row.learningRebuilt) ? "Yes" : "No"} />
-                    <MetricRow label="Health Status" value={<StatusBadge value={row.healthStatus ?? "UNKNOWN"} />} />
-                    <MetricRow label="Warnings" value={<JsonSnippet value={row.warnings ?? []} />} />
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
+      <PageHeader title="Settings" subtitle="Configure AI-CGO behavior and integrations." />
+
+      <Card title="General Settings">
+        {current.loading ? <LoadingBlock /> : current.error ? <ErrorBlock /> : (
+          <div className="form-grid">
+            <TextInput label="Seller ID" value={String(settings.sellerId ?? SELLER_ID)} onChange={(value) => updateSetting("sellerId", value)} />
+            <SelectField label="Safe Mode" value={String(settings.safeMode ?? "ON")} options={["ON", "OFF"]} onChange={(value) => updateSetting("safeMode", value)} />
+            <SelectField label="Auto-Approve" value={String(settings.autoApprove ?? "OFF")} options={["ON", "OFF"]} onChange={(value) => updateSetting("autoApprove", value)} />
+            <TextInput label="Notification Email" value={String(settings.notificationEmail ?? "")} onChange={(value) => updateSetting("notificationEmail", value)} />
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function LaunchGatePage() {
+  const checks = useApi<LaunchGateSummary>(() => getJson(`/api/launch-gate/summary?sellerId=${SELLER_ID}`));
+  const items = useApi<LaunchGateCheck[]>(() => getJson(`/api/launch-gate/checks?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Launch Gate" subtitle="Pre-launch safety checks and validation." />
+
+      <Card title="Launch Gate Summary">
+        {checks.loading ? <LoadingBlock /> : checks.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Checks" value={readNumber(checks.data?.totalChecks)} />
+            <MetricRow label="Passed" value={readNumber(checks.data?.passedChecks)} />
+            <MetricRow label="Failed" value={readNumber(checks.data?.failedChecks)} />
+            <MetricRow label="Status" value={<StatusBadge value={checks.data?.status} />} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Check Details">
+        {items.loading ? <LoadingBlock /> : items.error ? <ErrorBlock /> : items.data && items.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Check</th><th>Status</th><th>Message</th></tr></thead>
+              <tbody>
+                {items.data.map((check) => (
+                  <tr key={check.checkId}>
+                    <td>{formatEmpty(check.checkName)}</td>
+                    <td><StatusBadge value={check.status} /></td>
+                    <td>{formatEmpty(check.message)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function LaunchChecklistPage() {
+  const checklist = useApi<LaunchChecklistSummary>(() => getJson(`/api/launch-checklist/summary?sellerId=${SELLER_ID}`));
+  const items = useApi<LaunchChecklistItem[]>(() => getJson(`/api/launch-checklist/items?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Launch Checklist" subtitle="Pre-launch checklist and task tracking." />
+
+      <Card title="Checklist Summary">
+        {checklist.loading ? <LoadingBlock /> : checklist.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Items" value={readNumber(checklist.data?.totalItems)} />
+            <MetricRow label="Completed" value={readNumber(checklist.data?.completedItems)} />
+            <MetricRow label="Pending" value={readNumber(checklist.data?.pendingItems)} />
+            <MetricRow label="Status" value={<StatusBadge value={checklist.data?.status} />} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Checklist Items">
+        {items.loading ? <LoadingBlock /> : items.error ? <ErrorBlock /> : items.data && items.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Item</th><th>Status</th><th>Priority</th></tr></thead>
+              <tbody>
+                {items.data.map((item) => (
+                  <tr key={item.itemId}>
+                    <td>{formatEmpty(item.itemName)}</td>
+                    <td><StatusBadge value={item.status} /></td>
+                    <td><StatusBadge value={item.priority} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function SchedulerPage() {
+  const summary = useApi<SchedulerSummary>(() => getJson(`/api/scheduler/summary?sellerId=${SELLER_ID}`));
+  const jobs = useApi<SchedulerJob[]>(() => getJson(`/api/scheduler/jobs?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Scheduler" subtitle="Job scheduling and cron management." />
+
+      <Card title="Scheduler Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Jobs" value={readNumber(summary.data?.totalJobs)} />
+            <MetricRow label="Active" value={readNumber(summary.data?.activeJobs)} />
+            <MetricRow label="Failed (24h)" value={readNumber(summary.data?.failedJobs24h)} />
+            <MetricRow label="Status" value={<StatusBadge value={summary.data?.status} />} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Scheduled Jobs">
+        {jobs.loading ? <LoadingBlock /> : jobs.error ? <ErrorBlock /> : jobs.data && jobs.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Job</th><th>Schedule</th><th>Status</th><th>Last Run</th></tr></thead>
+              <tbody>
+                {jobs.data.map((job) => (
+                  <tr key={job.jobId}>
+                    <td>{formatEmpty(job.jobName)}</td>
+                    <td>{formatEmpty(job.schedule)}</td>
+                    <td><StatusBadge value={job.status} /></td>
+                    <td>{formatEmpty(job.lastRunDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function NotificationOutboxPage() {
+  const summary = useApi<NotificationSummary>(() => getJson(`/api/notifications/summary?sellerId=${SELLER_ID}`));
+  const messages = useApi<NotificationMessage[]>(() => getJson(`/api/notifications/messages?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Notification Outbox" subtitle="Notification history and delivery status." />
+
+      <Card title="Notification Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Sent" value={readNumber(summary.data?.totalSent)} />
+            <MetricRow label="Pending" value={readNumber(summary.data?.pending)} />
+            <MetricRow label="Failed" value={readNumber(summary.data?.failed)} />
+            <MetricRow label="Last Sent" value={formatEmpty(summary.data?.lastSentDate)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Messages">
+        {messages.loading ? <LoadingBlock /> : messages.error ? <ErrorBlock /> : messages.data && messages.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Sent</th></tr></thead>
+              <tbody>
+                {messages.data.map((msg) => (
+                  <tr key={msg.messageId}>
+                    <td>{formatShortId(msg.messageId)}</td>
+                    <td>{formatEmpty(msg.messageType)}</td>
+                    <td><StatusBadge value={msg.status} /></td>
+                    <td>{formatEmpty(msg.sentAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function SecurityGuardrailsPage() {
+  const summary = useApi<SecurityGuardrailSummary>(() => getJson(`/api/security-guardrails/summary?sellerId=${SELLER_ID}`));
+  const events = useApi<SecurityAuditEvent[]>(() => getJson(`/api/security-guardrails/events?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Security Guardrails" subtitle="Security monitoring and audit logs." />
+
+      <Card title="Security Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Events" value={readNumber(summary.data?.totalEvents)} />
+            <MetricRow label="Violations" value={readNumber(summary.data?.violations)} />
+            <MetricRow label="Blocked Actions" value={readNumber(summary.data?.blockedActions)} />
+            <MetricRow label="Status" value={<StatusBadge value={summary.data?.status} />} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Events">
+        {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock /> : events.data && events.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Date</th></tr></thead>
+              <tbody>
+                {events.data.map((event) => (
+                  <tr key={event.eventId}>
+                    <td>{formatShortId(event.eventId)}</td>
+                    <td>{formatEmpty(event.eventType)}</td>
+                    <td><StatusBadge value={event.severity} /></td>
+                    <td>{formatEmpty(event.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function ProductionHealthPage() {
+  const summary = useApi<ProductionHealthSummary>(() => getJson(`/api/production-health/summary?sellerId=${SELLER_ID}`));
+  const modules = useApi<ProductionHealthModule[]>(() => getJson(`/api/production-health/modules?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Production Health" subtitle="System health and module status monitoring." />
+
+      <Card title="Health Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Overall Status" value={<StatusBadge value={summary.data?.overallStatus} />} />
+            <MetricRow label="Healthy Modules" value={readNumber(summary.data?.healthyModules)} />
+            <MetricRow label="Degraded Modules" value={readNumber(summary.data?.degradedModules)} />
+            <MetricRow label="Failed Modules" value={readNumber(summary.data?.failedModules)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Module Status">
+        {modules.loading ? <LoadingBlock /> : modules.error ? <ErrorBlock /> : modules.data && modules.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Module</th><th>Status</th><th>Latency</th><th>Last Check</th></tr></thead>
+              <tbody>
+                {modules.data.map((module) => (
+                  <tr key={module.moduleId}>
+                    <td>{formatEmpty(module.moduleName)}</td>
+                    <td><StatusBadge value={module.status} /></td>
+                    <td>{readNumber(module.latencyMs)}ms</td>
+                    <td>{formatEmpty(module.lastCheckDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
 }
 
 function QaSmokePage() {
-  const latest = useApi<QaSmokeLatest>(() => qaSmokeApi.latest(SELLER_ID));
-  const runs = useApi<ApiRows<QaSmokeRun>>(() => qaSmokeApi.runs(SELLER_ID, 20));
-  const latestData = qaSmokeLatestOf(latest.data);
-  const runRows = hardeningRowsOf<QaSmokeRun>(runs.data);
-  const checks = hardeningRowsOf<QaSmokeCheck>(latest.data, latestData.checks);
-  const blockers = dailyList(readFirst(latestData, ["blockers"]));
-  const warnings = dailyList(readFirst(latestData, ["warnings"]));
-  const totalChecks = summaryNumber(latestData, ["totalChecks"], checks.length);
-  const failCount = summaryNumber(latestData, ["failCount"], checks.filter((row) => normalizeState(row.status) === "FAIL").length);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState("");
-
-  async function runSmoke() {
-    if (!window.confirm("Run QA smoke test now? This checks internal APIs only.")) return;
-    setRunning(true);
-    setError("");
-    try {
-      await qaSmokeApi.run(SELLER_ID);
-      latest.reload();
-      runs.reload();
-    } catch (requestError) {
-      setError(sanitizeActionError(requestError));
-    } finally {
-      setRunning(false);
-    }
-  }
+  const latest = useApi<QaSmokeLatest>(() => getJson(`/api/qa-smoke/latest?sellerId=${SELLER_ID}`));
+  const runs = useApi<QaSmokeRun[]>(() => getJson(`/api/qa-smoke/runs?sellerId=${SELLER_ID}`));
 
   return (
     <div className="page">
-      <PageHeader title="QA Smoke Test Center" subtitle="Run backend smoke tests across all critical modules before enabling future execution." />
-      <SafetyBanner text="QA Smoke only checks system readiness. It does not execute marketplace changes." />
-      <div className="stack">
-        <div className="button-row"><button type="button" onClick={runSmoke} disabled={running}>{running ? "Running QA smoke..." : "Run QA Smoke Test"}</button></div>
-        {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
-        {totalChecks === 23 && failCount === 0 ? <div className="soft-state success-state compact-state">QA Smoke PASS</div> : null}
-        {latest.loading ? <LoadingBlock /> : latest.error ? <ErrorBlock text="Could not load latest QA smoke result." /> : (
-          <>
-            <div className="summary-strip command-summary">
-              <MetricTile label="Run Status" value={<StatusBadge value={readFirst(latestData, ["runStatus"]) ?? "UNKNOWN"} />} />
-              <MetricTile label="Total Checks" value={totalChecks} />
-              <MetricTile label="Pass Count" value={summaryNumber(latestData, ["passCount"], checks.filter((row) => normalizeState(row.status) === "PASS").length)} />
-              <MetricTile label="Warn Count" value={summaryNumber(latestData, ["warnCount"], checks.filter((row) => ["WARN", "WARNING"].includes(normalizeState(row.status))).length)} />
-              <MetricTile label="Fail Count" value={failCount} />
-              <MetricTile label="Blockers Count" value={summaryNumber(latestData, ["blockersCount"], blockers.length)} />
-              <MetricTile label="Warnings Count" value={summaryNumber(latestData, ["warningsCount"], warnings.length)} />
-            </div>
-            <Card title="Checks">
-              {checks.length === 0 ? <EmptyBlock text="No QA smoke checks returned yet." /> : (
-                <div className="card-list command-card-list">
-                  {checks.map((row, index) => (
-                    <article className="item-card command-item-card" key={String(row.key ?? index)}>
-                      <div className="item-top">
-                        <strong>{formatEmpty(row.name ?? row.key)}</strong>
-                        <StatusBadge value={row.status ?? "UNKNOWN"} />
-                      </div>
-                      <p className="long-text">{formatEmpty(row.message)}</p>
-                      <div className="detail-grid">
-                        <MetricRow label="Key" value={formatEmpty(row.key)} />
-                        <MetricRow label="Critical" value={readBoolean(row.critical) ? "Yes" : "No"} />
-                        <MetricRow label="Duration Ms" value={formatEmpty(row.durationMs)} />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </Card>
-            <div className="dashboard-grid today">
-              <ListTextCard title="Blockers" rows={blockers} emptyText="No QA blockers returned." />
-              <ListTextCard title="Warnings" rows={warnings} emptyText="No QA warnings returned." />
-            </div>
-          </>
+      <PageHeader title="QA Smoke" subtitle="Smoke test results and validation." />
+
+      <Card title="Latest Run">
+        {latest.loading ? <LoadingBlock /> : latest.error ? <ErrorBlock /> : latest.data ? (
+          <div className="detail-grid">
+            <MetricRow label="Run ID" value={formatShortId(latest.data.runId)} />
+            <MetricRow label="Date" value={formatEmpty(latest.data.runDate)} />
+            <MetricRow label="Status" value={<StatusBadge value={latest.data.status} />} />
+            <MetricRow label="Passed" value={readNumber(latest.data.passedChecks)} />
+            <MetricRow label="Failed" value={readNumber(latest.data.failedChecks)} />
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+
+      <Card title="Run History">
+        {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock /> : runs.data && runs.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Passed</th><th>Failed</th></tr></thead>
+              <tbody>
+                {runs.data.map((run) => (
+                  <tr key={run.runId}>
+                    <td>{formatShortId(run.runId)}</td>
+                    <td>{formatEmpty(run.runDate)}</td>
+                    <td><StatusBadge value={run.status} /></td>
+                    <td>{readNumber(run.passedChecks)}</td>
+                    <td>{readNumber(run.failedChecks)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function MaintenancePage() {
+  const summary = useApi<MaintenanceSummary>(() => getJson(`/api/maintenance/summary?sellerId=${SELLER_ID}`));
+  const runs = useApi<MaintenanceRun[]>(() => getJson(`/api/maintenance/runs?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Maintenance" subtitle="Maintenance runs and system upkeep." />
+
+      <Card title="Maintenance Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Runs" value={readNumber(summary.data?.totalRuns)} />
+            <MetricRow label="Successful" value={readNumber(summary.data?.successfulRuns)} />
+            <MetricRow label="Failed" value={readNumber(summary.data?.failedRuns)} />
+            <MetricRow label="Last Run" value={formatEmpty(summary.data?.lastRunDate)} />
+          </div>
         )}
-        <Card title="Previous Runs">
-          {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock text="Could not load previous QA smoke runs." /> : runRows.length === 0 ? <EmptyBlock text="No previous QA smoke runs yet." /> : (
-            <div className="card-list command-card-list">
-              {runRows.map((row, index) => (
-                <article className="item-card command-item-card" key={String(row.runId ?? row.id ?? index)}>
-                  <div className="item-top">
-                    <strong>{formatShortId(row.runId ?? row.id)}</strong>
-                    <StatusBadge value={row.runStatus ?? "UNKNOWN"} />
-                  </div>
-                  <div className="detail-grid">
-                    <MetricRow label="Started At" value={formatLocalDateTime(row.startedAt)} />
-                    <MetricRow label="Finished At" value={formatLocalDateTime(row.finishedAt)} />
-                    <MetricRow label="Total Checks" value={formatEmpty(row.totalChecks)} />
-                    <MetricRow label="Pass Count" value={formatEmpty(row.passCount)} />
-                    <MetricRow label="Warn Count" value={formatEmpty(row.warnCount)} />
-                    <MetricRow label="Fail Count" value={formatEmpty(row.failCount)} />
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
+      </Card>
+
+      <Card title="Recent Runs">
+        {runs.loading ? <LoadingBlock /> : runs.error ? <ErrorBlock /> : runs.data && runs.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Run ID</th><th>Date</th><th>Status</th><th>Duration</th></tr></thead>
+              <tbody>
+                {runs.data.map((run) => (
+                  <tr key={run.runId}>
+                    <td>{formatShortId(run.runId)}</td>
+                    <td>{formatEmpty(run.runDate)}</td>
+                    <td><StatusBadge value={run.status} /></td>
+                    <td>{readNumber(run.durationMs)}ms</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
 }
 
-function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
+function ActivityLogsPage() {
+  const summary = useApi<ActivityLogSummary>(() => getJson(`/api/activity-logs/summary?sellerId=${SELLER_ID}`));
+  const events = useApi<ActivityLogEvent[]>(() => getJson(`/api/activity-logs/events?sellerId=${SELLER_ID}`));
+
   return (
-    <div className="page-title">
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
+    <div className="page">
+      <PageHeader title="Activity Logs" subtitle="System activity and event tracking." />
+
+      <Card title="Activity Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Events" value={readNumber(summary.data?.totalEvents)} />
+            <MetricRow label="Today" value={readNumber(summary.data?.eventsToday)} />
+            <MetricRow label="Errors" value={readNumber(summary.data?.errorEvents)} />
+            <MetricRow label="Last Event" value={formatEmpty(summary.data?.lastEventDate)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Events">
+        {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock /> : events.data && events.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Level</th><th>Date</th></tr></thead>
+              <tbody>
+                {events.data.map((event) => (
+                  <tr key={event.eventId}>
+                    <td>{formatShortId(event.eventId)}</td>
+                    <td>{formatEmpty(event.eventType)}</td>
+                    <td><StatusBadge value={event.level} /></td>
+                    <td>{formatEmpty(event.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
 }
 
-function MetricTile({ label, value }: { label: string; value: ReactNode }) {
+function DataFreshnessPage() {
+  const summary = useApi<DataFreshnessSummary>(() => getJson(`/api/data-freshness/summary?sellerId=${SELLER_ID}`));
+  const rows = useApi<DataFreshnessRow[]>(() => getJson(`/api/data-freshness/rows?sellerId=${SELLER_ID}`));
+
   return (
-    <div className="metric-tile">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className="page">
+      <PageHeader title="Data Freshness" subtitle="Data freshness and staleness monitoring." />
+
+      <Card title="Freshness Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Sources" value={readNumber(summary.data?.totalSources)} />
+            <MetricRow label="Fresh" value={readNumber(summary.data?.freshSources)} />
+            <MetricRow label="Stale" value={readNumber(summary.data?.staleSources)} />
+            <MetricRow label="Unknown" value={readNumber(summary.data?.unknownSources)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Data Sources">
+        {rows.loading ? <LoadingBlock /> : rows.error ? <ErrorBlock /> : rows.data && rows.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Source</th><th>Status</th><th>Last Update</th><th>Age</th></tr></thead>
+              <tbody>
+                {rows.data.map((row) => (
+                  <tr key={row.sourceId}>
+                    <td>{formatEmpty(row.sourceName)}</td>
+                    <td><StatusBadge value={row.status} /></td>
+                    <td>{formatEmpty(row.lastUpdateDate)}</td>
+                    <td>{readNumber(row.ageMinutes)}m</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
     </div>
   );
 }
 
-function ObjectCard({
-  title,
-  data,
-  moneyKeys = [],
-  percentKeys = []
-}: {
-  title: string;
-  data: AnyRecord;
-  moneyKeys?: string[];
-  percentKeys?: string[];
-}) {
-  const entries = Object.entries(data);
+function AiGatewayPage() {
+  const status = useApi<AiGatewayStatus>(() => getJson(`/api/ai-gateway/status?sellerId=${SELLER_ID}`));
+  const costs = useApi<AiCostSummary>(() => getJson(`/api/ai-gateway/costs?sellerId=${SELLER_ID}`));
+  const estimates = useApi<AiCostEstimate[]>(() => getJson(`/api/ai-gateway/estimates?sellerId=${SELLER_ID}`));
+
   return (
-    <Card title={title}>
-      {entries.length === 0 ? <EmptyBlock /> : (
-        <div className="detail-grid">
-          {entries.map(([key, value]) => (
-            <MetricRow
-              key={key}
-              label={labelize(key)}
-              value={moneyKeys.includes(key) ? formatMoney(value) : percentKeys.includes(key) ? formatPercent(value) : formatObjectValue(value)}
-            />
-          ))}
-        </div>
-      )}
-    </Card>
+    <div className="page">
+      <PageHeader title="AI Gateway" subtitle="AI service status, costs, and usage monitoring." />
+
+      <Card title="Gateway Status">
+        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Status" value={<StatusBadge value={status.data?.status} />} />
+            <MetricRow label="Active Models" value={readNumber(status.data?.activeModels)} />
+            <MetricRow label="Requests Today" value={readNumber(status.data?.requestsToday)} />
+            <MetricRow label="Avg Latency" value={`${readNumber(status.data?.avgLatencyMs)}ms`} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Cost Summary">
+        {costs.loading ? <LoadingBlock /> : costs.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Today" value={formatMoney(costs.data?.todayCost)} />
+            <MetricRow label="This Month" value={formatMoney(costs.data?.monthCost)} />
+            <MetricRow label="Total" value={formatMoney(costs.data?.totalCost)} />
+            <MetricRow label="Budget" value={formatMoney(costs.data?.budget)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Cost Estimates">
+        {estimates.loading ? <LoadingBlock /> : estimates.error ? <ErrorBlock /> : estimates.data && estimates.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Model</th><th>Estimated Cost</th><th>Confidence</th></tr></thead>
+              <tbody>
+                {estimates.data.map((estimate) => (
+                  <tr key={estimate.estimateId}>
+                    <td>{formatEmpty(estimate.modelName)}</td>
+                    <td>{formatMoney(estimate.estimatedCost)}</td>
+                    <td>{formatPercent(estimate.confidence)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
   );
 }
 
-function ListCard({ title, rows }: { title: string; rows: AnyRecord[] }) {
+function AlertCenterPage() {
+  const summary = useApi<AlertSummary>(() => getJson(`/api/alert-center/summary?sellerId=${SELLER_ID}`));
+  const events = useApi<AlertEvent[]>(() => getJson(`/api/alert-center/events?sellerId=${SELLER_ID}`));
+
   return (
-    <Card title={title}>
-      {rows.length === 0 ? <EmptyBlock /> : (
-        <div className="card-list">
-          {rows.slice(0, 10).map((row, index) => (
-            <article className="item-card compact-card" key={String(row.id ?? row.title ?? index)}>
-              {Object.entries(row).slice(0, 8).map(([key, value]) => (
-                <MetricRow key={key} label={labelize(key)} value={formatObjectValue(value)} />
-              ))}
-            </article>
-          ))}
-        </div>
-      )}
-    </Card>
+    <div className="page">
+      <PageHeader title="Alert Center" subtitle="Alert monitoring and event management." />
+
+      <Card title="Alert Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Alerts" value={readNumber(summary.data?.totalAlerts)} />
+            <MetricRow label="Active" value={readNumber(summary.data?.activeAlerts)} />
+            <MetricRow label="Resolved" value={readNumber(summary.data?.resolvedAlerts)} />
+            <MetricRow label="Critical" value={readNumber(summary.data?.criticalAlerts)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Alerts">
+        {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock /> : events.data && events.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Status</th><th>Date</th></tr></thead>
+              <tbody>
+                {events.data.map((event) => (
+                  <tr key={event.alertId}>
+                    <td>{formatShortId(event.alertId)}</td>
+                    <td>{formatEmpty(event.alertType)}</td>
+                    <td><StatusBadge value={event.severity} /></td>
+                    <td><StatusBadge value={event.status} /></td>
+                    <td>{formatEmpty(event.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
   );
 }
 
-function formatObjectValue(value: unknown): ReactNode {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "number") return Number.isInteger(value) ? value : value.toFixed(2);
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+function LearningPage() {
+  const summary = useApi<LearningSummary>(() => getJson(`/api/learning/summary?sellerId=${SELLER_ID}`));
+  const events = useApi<LearningEvent[]>(() => getJson(`/api/learning/events?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Learning" subtitle="AI learning events and model improvement tracking." />
+
+      <Card title="Learning Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total Events" value={readNumber(summary.data?.totalEvents)} />
+            <MetricRow label="Model Updates" value={readNumber(summary.data?.modelUpdates)} />
+            <MetricRow label="Accuracy" value={formatPercent(summary.data?.accuracy)} />
+            <MetricRow label="Last Update" value={formatEmpty(summary.data?.lastUpdateDate)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Events">
+        {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock /> : events.data && events.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Impact</th><th>Date</th></tr></thead>
+              <tbody>
+                {events.data.map((event) => (
+                  <tr key={event.eventId}>
+                    <td>{formatShortId(event.eventId)}</td>
+                    <td>{formatEmpty(event.eventType)}</td>
+                    <td><StatusBadge value={event.impact} /></td>
+                    <td>{formatEmpty(event.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function ExperimentsPage() {
+  const summary = useApi<ExperimentSummary>(() => getJson(`/api/experiments/summary?sellerId=${SELLER_ID}`));
+  const experiments = useApi<Experiment[]>(() => getJson(`/api/experiments/list?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Experiments" subtitle="A/B tests and experiment tracking." />
+
+      <Card title="Experiment Summary">
+        {summary.loading ? <LoadingBlock /> : summary.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Total" value={readNumber(summary.data?.totalExperiments)} />
+            <MetricRow label="Active" value={readNumber(summary.data?.activeExperiments)} />
+            <MetricRow label="Completed" value={readNumber(summary.data?.completedExperiments)} />
+            <MetricRow label="Winners" value={readNumber(summary.data?.winners)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Experiments">
+        {experiments.loading ? <LoadingBlock /> : experiments.error ? <ErrorBlock /> : experiments.data && experiments.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Winner</th></tr></thead>
+              <tbody>
+                {experiments.data.map((exp) => (
+                  <tr key={exp.experimentId}>
+                    <td>{formatShortId(exp.experimentId)}</td>
+                    <td>{formatEmpty(exp.experimentName)}</td>
+                    <td><StatusBadge value={exp.status} /></td>
+                    <td>{formatEmpty(exp.winnerVariant)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+function SafetyControlPage() {
+  const status = useApi<SafetyControlStatus>(() => getJson(`/api/safety-control/status?sellerId=${SELLER_ID}`));
+  const events = useApi<SafetyAuditEvent[]>(() => getJson(`/api/safety-control/events?sellerId=${SELLER_ID}`));
+
+  return (
+    <div className="page">
+      <PageHeader title="Safety Control" subtitle="Safety controls and audit monitoring." />
+
+      <Card title="Safety Status">
+        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock /> : (
+          <div className="detail-grid">
+            <MetricRow label="Status" value={<StatusBadge value={status.data?.status} />} />
+            <MetricRow label="Total Checks" value={readNumber(status.data?.totalChecks)} />
+            <MetricRow label="Passed" value={readNumber(status.data?.passedChecks)} />
+            <MetricRow label="Blocked" value={readNumber(status.data?.blockedActions)} />
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent Events">
+        {events.loading ? <LoadingBlock /> : events.error ? <ErrorBlock /> : events.data && events.data.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Result</th><th>Date</th></tr></thead>
+              <tbody>
+                {events.data.map((event) => (
+                  <tr key={event.eventId}>
+                    <td>{formatShortId(event.eventId)}</td>
+                    <td>{formatEmpty(event.eventType)}</td>
+                    <td><StatusBadge value={event.result} /></td>
+                    <td>{formatEmpty(event.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyBlock />}
+      </Card>
+    </div>
+  );
+}
+
+// ====== HELPER FUNCTIONS ======
+
+function readFirst(value: unknown, keys: string[]): unknown {
+  for (const key of keys) {
+    const result = readImagePath(value, key);
+    if (result !== null && result !== undefined && result !== "") return result;
+  }
+  return undefined;
+}
+
+function recordsOf(value: unknown): AnyRecord[] {
+  if (Array.isArray(value)) return value as AnyRecord[];
+  const rows = (value as ApiRows<AnyRecord>)?.rows;
+  if (Array.isArray(rows)) return rows;
+  if (value && typeof value === "object") return [value as AnyRecord];
+  return [];
+}
+
+function normalizeState(value: unknown): string {
+  return String(value ?? "").toUpperCase().trim();
 }
 
 function labelize(value: string): string {
   return value
-    .replace(/([A-Z])/g, " $1")
     .replace(/_/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^./, (letter) => letter.toUpperCase());
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export default App;
-
