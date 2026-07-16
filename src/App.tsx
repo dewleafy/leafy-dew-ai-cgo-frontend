@@ -11,34 +11,19 @@ import {
   getJson,
   launchChecklistApi,
   launchGateApi,
-  liveExecutionApi,
-  maintenanceApi,
-  notificationOutboxApi,
-  postJson,
-  productionHealthApi,
-  putJson,
-  qaSmokeApi,
-  rollbackApi,
-  safetyControlApi,
-  schedulerControlApi,
-  securityGuardrailsApi
 } from "./api";
 import type {
   ActionLedgerRow,
-  ActionLedgerSummary,
   ActivityLogEvent,
   ActivityLogSummary,
   AnyRecord,
   ApiRows,
   ApprovalExecutionSummary,
-  ApprovalReadyAction,
   AiCostEstimate,
   AiCostSummary,
   AiGatewayStatus,
-  AiLedgerRow,
   AlertEvent,
   AlertSummary,
-  CostCompletionQueueItem,
   CreativeRecommendation,
   CreativeRecommendationSummary,
   DailyOrchestratorRun,
@@ -49,9 +34,7 @@ import type {
   EngineRunLog,
   ExecutionAttempt,
   ExecutionGatewayStatus,
-  Experiment,
   ExperimentSummary,
-  LearningEngineSummary,
   LearningEvent,
   LearningSummary,
   LaunchChecklistItem,
@@ -61,17 +44,14 @@ import type {
   LiveExecutionRun,
   LiveExecutionStatus,
   ListingDraft,
-  ListingDraftSummary,
   MaintenanceRun,
   MaintenanceSummary,
   NotificationMessage,
-  NotificationSettings,
   NotificationSummary,
   ProductionHealthModule,
   ProductionHealthSummary,
   ProductEconomics,
   ProductPassport,
-  QaSmokeCheck,
   QaSmokeLatest,
   QaSmokeRun,
   Recommendation,
@@ -167,10 +147,6 @@ function actionLedgerRowsOf(value: unknown): AnyRecord[] {
   return rowsOf<ActionLedgerRow>(value);
 }
 
-function arrayOf(value: unknown): AnyRecord[] {
-  return Array.isArray(value) ? (value as AnyRecord[]) : [];
-}
-
 function recordOf(value: unknown): AnyRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as AnyRecord) : {};
 }
@@ -192,18 +168,6 @@ function formatShortId(value: unknown): string {
   return `${id.slice(0, 8)}...${id.slice(-6)}`;
 }
 
-function sanitizeActionError(error: unknown): string {
-  const rawMessage = error instanceof Error ? error.message : String(error || "Unknown error.");
-  const redacted = rawMessage
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
-    .replace(/\b(?:sk|pk|rk)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]")
-    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[redacted]")
-    .replace(
-      /\b([A-Za-z_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASS|PWD|AUTH)[A-Za-z_]*)\s*([:=])\s*("[^"]+"|'[^']+'|[^,\s;]+)/gi,
-      "$1$2[redacted]"
-    )
-    .replace(
-      /(["']?[A-Za-z0-9_.-]*(?:TOKEN|SECRET|KEY|PASSWORD|PASS|PWD|AUTH)[A-Za-z0-9_.-]*["']?\s*:\s*)("[^"]+"|'[^']+'|[^,\s;}]+)/gi,
       "$1[redacted]"
     )
     .replace(/\b(access_token|refresh_token|api_key|client_secret|secret_key|auth_token)=([^&\s]+)/gi, "$1=[redacted]")
@@ -227,12 +191,6 @@ function formatPercent(value: unknown): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "—";
   return `${numeric.toFixed(2)}%`;
-}
-
-function asInputNumber(value: string): number | undefined {
-  if (value.trim() === "") return undefined;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : undefined;
 }
 
 function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: string }) {
@@ -303,7 +261,6 @@ function TextInput({
   );
 }
 
-function ReadOnlyField({ label, value }: { label: string; value: ReactNode }) {
   return (
     <label className="field readonly-field">
       <span>{label}</span>
@@ -312,11 +269,6 @@ function ReadOnlyField({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function TextArea({
-  label,
-  value,
-  onChange
-}: {
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -753,21 +705,6 @@ function ProductImageDebug({ product, compact = false }: { product: unknown; com
   );
 }
 
-function hasProductContext(value: unknown): boolean {
-  return Boolean(readFirst(value, [
-    "sku",
-    "asin",
-    "productName",
-    "product_name",
-    "product",
-    "productData",
-    "mainImageUrl",
-    "imageUrl",
-    "amazonImageUrl",
-    "productImageUrl"
-  ]));
-}
-
 function productKeyOf(row: AnyRecord, index = 0): string {
   const sku = cleanFounderText(readFirst(row, ["sku", "sellerSku"]), "");
   const asin = cleanFounderText(readFirst(row, ["asin"]), "");
@@ -980,10 +917,6 @@ function App() {
     setActivePage(page);
   }
 
-  function setTechnicalTab(tab: Tab) {
-    setActivePage(tab);
-  }
-
   const activeFounderTab: FounderTab = activePage === "Product Detail"
     ? "Products"
     : founderTabs.includes(activePage as FounderTab)
@@ -1095,7 +1028,6 @@ function PageHeader({ title, subtitle, badge }: { title: string; subtitle?: stri
   );
 }
 
-function PageHeaderAction({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
     <div className="page-header">
       <div>
