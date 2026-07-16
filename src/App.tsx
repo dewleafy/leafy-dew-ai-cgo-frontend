@@ -1,16 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import "./App.css";
 import {
-  activityLogsApi,
   approvalExecutionApi,
-  aiGatewayApi,
-  alertCenterApi,
-  dataFreshnessApi,
-  experimentsApi,
   getJson,
-  launchChecklistApi,
-  launchGateApi,
 } from "./api";
 import type {
   ActionLedgerRow,
@@ -937,7 +930,7 @@ function App() {
           {activePage === "Today" && <TodayDashboard navigate={navigate} />}
           {activePage === "Products" && <ProductsPage navigate={navigate} />}
           {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
-          {activePage === "Approvals" && <FounderApprovalsPage navigate={navigate} />}
+          {activePage === "Approvals" && <FounderApprovalsPage />}
           {activePage === "Growth" && <GrowthPage navigate={navigate} />}
           {activePage === "Brand" && <BrandPage navigate={navigate} />}
           {activePage === "Sales & Ads" && <SalesAdsPage />}
