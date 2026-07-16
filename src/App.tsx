@@ -168,13 +168,6 @@ function formatShortId(value: unknown): string {
   return `${id.slice(0, 8)}...${id.slice(-6)}`;
 }
 
-]+)/gi,
-      "$1[redacted]"
-    )
-    .replace(/\b(access_token|refresh_token|api_key|client_secret|secret_key|auth_token)=([^&\s]+)/gi, "$1=[redacted]")
-    .trim();
-  return redacted || "Unknown error.";
-}
 
 function formatMoney(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
