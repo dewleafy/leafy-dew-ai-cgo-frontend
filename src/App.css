@@ -2485,6 +2485,21 @@ textarea {
   justify-content: center;
 }
 
+.quick-actions-card .success-text,
+.quick-actions-card .error-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.quick-actions-card .success-text {
+  color: #1a7f4e;
+}
+
+.quick-actions-card .error-text {
+  color: #c0392b;
+}
+
 .bottom-tabs {
   display: flex;
   gap: 8px;
