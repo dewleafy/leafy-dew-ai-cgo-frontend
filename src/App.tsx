@@ -413,6 +413,11 @@ type FounderProduct = {
   status: unknown;
   bullets: string[];
   description: string;
+  dimensions: unknown;
+  weight: unknown;
+  material: unknown;
+  color: unknown;
+  supplierName: unknown;
   raw: AnyRecord;
 };
 
@@ -704,7 +709,7 @@ function productKeyOf(row: AnyRecord, index = 0): string {
 function normalizeFounderProduct(source: AnyRecord, index = 0): FounderProduct {
   const economics = recordOf(source.economics);
   const name = cleanFounderText(readFirst(source, ["productName", "product_name", "itemName", "title", "name"]) ?? readFirst(economics, ["productName", "product_name"]), "Unnamed product");
-  const rawBullets = readFirst(source, ["bullets", "bulletPoints", "features", "listingBullets"]);
+  const rawBullets = readFirst(source, ["bullets", "bulletPoints", "features", "listingBullets", "keyFeatures", "key_features"]);
   const bullets = Array.isArray(rawBullets)
     ? rawBullets.map((item) => cleanFounderText(item, "")).filter(Boolean).slice(0, 6)
     : [];
@@ -719,7 +724,7 @@ function normalizeFounderProduct(source: AnyRecord, index = 0): FounderProduct {
     category: cleanFounderText(readFirst(source, ["category", "subCategory", "subcategory", "sub_category", "productType"]) ?? readFirst(economics, ["category", "subCategory", "subcategory"]), "Not available yet"),
     price: readFirst(source, ["sellingPrice", "selling_price", "price"]) ?? readFirst(economics, ["sellingPrice", "selling_price", "price"]),
     netProfit: readFirst(source, ["netProfit", "net_profit"]) ?? readFirst(economics, ["netProfit", "net_profit", "netProfitBeforeAds"]),
-    margin: readFirst(source, ["profitMargin", "margin"]) ?? readFirst(economics, ["profitMargin", "margin"]),
+    margin: readFirst(source, ["profitMargin", "margin", "profitMarginPercent"]) ?? readFirst(economics, ["profitMargin", "margin", "profitMarginPercent"]),
     profitStatus: readFirst(source, ["profitStatus", "currentProfitStatus", "current_profit_status"]) ?? readFirst(economics, ["profitStatus", "currentProfitStatus"]),
     readiness: readFirst(source, ["readiness", "readinessStatus", "listingReadiness", "status"]),
     costStatus: readFirst(source, ["costStatus", "cost_status", "profitDataStatus"]) ?? readFirst(economics, ["costStatus", "profitDataStatus"]),
@@ -728,6 +733,11 @@ function normalizeFounderProduct(source: AnyRecord, index = 0): FounderProduct {
     status: readFirst(source, ["status", "listingStatus", "productStatus"]),
     bullets,
     description: cleanFounderText(readFirst(source, ["description", "productDescription", "listingDescription"]), "No description available yet."),
+    dimensions: readFirst(source, ["dimensions"]),
+    weight: readFirst(source, ["weight"]),
+    material: readFirst(source, ["material"]),
+    color: readFirst(source, ["color"]),
+    supplierName: readFirst(source, ["supplierName", "supplier_name"]),
     raw: source
   };
 }
@@ -1353,8 +1363,34 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const [activeTab, setActiveTab] = useState("Overview");
+  const [amazonSyncState, setAmazonSyncState] = useState<{ loading: boolean; message: string | null; isError: boolean }>({
+    loading: false,
+    message: null,
+    isError: false
+  });
   const products = mergeFounderProducts(passports.data, economics.data);
   const detailProduct = product ?? products[0] ?? null;
+
+  async function handleSyncFromAmazon() {
+    setAmazonSyncState({ loading: true, message: null, isError: false });
+    try {
+      const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; warnings: string[] }>(
+        `/api/amazon-sp/sync-listing-attributes?sellerId=${SELLER_ID}`
+      );
+      setAmazonSyncState({
+        loading: false,
+        isError: false,
+        message: `Checked ${result.checked} product(s), updated ${result.updatedCount}.${result.skippedCount ? ` ${result.skippedCount} had no new data from Amazon.` : ""}`
+      });
+      passports.reload();
+    } catch (error) {
+      setAmazonSyncState({
+        loading: false,
+        isError: true,
+        message: error instanceof Error ? error.message : "Could not sync with Amazon."
+      });
+    }
+  }
 
   if (passports.loading || economics.loading) {
     return (
@@ -1410,6 +1446,11 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <MetricRow label="SKU" value={detailProduct.sku} />
             <MetricRow label="Category" value={detailProduct.category} />
             <MetricRow label="Product Status" value={<FounderBadge value={detailProduct.status ?? "Not available yet"} />} />
+            <MetricRow label="Dimensions" value={cleanFounderText(detailProduct.dimensions, "Not available yet")} />
+            <MetricRow label="Weight" value={cleanFounderText(detailProduct.weight, "Not available yet")} />
+            <MetricRow label="Material" value={cleanFounderText(detailProduct.material, "Not available yet")} />
+            <MetricRow label="Color" value={cleanFounderText(detailProduct.color, "Not available yet")} />
+            <MetricRow label="Supplier" value={cleanFounderText(detailProduct.supplierName, "Not available yet")} />
           </div>
           <h2>About this item</h2>
           {bullets.length ? (
@@ -1437,6 +1478,12 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <button type="button" onClick={() => navigate("Growth Engine")}>Image & A+ Ideas</button>
             <button type="button" onClick={() => navigate("Products")}>Fix Cost</button>
             <button type="button" onClick={() => navigate("Product Economics")}>Profit Calculator</button>
+            <button type="button" onClick={handleSyncFromAmazon} disabled={amazonSyncState.loading}>
+              {amazonSyncState.loading ? "Syncing with Amazon..." : "Sync Dimensions/Weight from Amazon"}
+            </button>
+            {amazonSyncState.message ? (
+              <p className={amazonSyncState.isError ? "error-text" : "success-text"}>{amazonSyncState.message}</p>
+            ) : null}
           </div>
         </aside>
       </div>
@@ -3381,7 +3428,7 @@ export function CostCompletionQueuePage({ title = "Product Economics" }: { title
     ["Gross Profit", ["grossProfit", "gross_profit"], "money"],
     ["Net Profit", ["netProfit", "net_profit"], "money"],
     ["Net Profit Before Ads", ["netProfitBeforeAds", "net_profit_before_ads"], "money"],
-    ["Profit Margin %", ["profitMargin", "profit_margin"], "percent"],
+    ["Profit Margin %", ["profitMargin", "profit_margin", "profitMarginPercent", "profit_margin_percent"], "percent"],
     ["Max Allowable Ad Spend", ["maxAllowableAdSpend", "max_allowable_ad_spend"], "money"],
     ["Target ACOS", ["targetAcos", "target_acos"], "percent"],
     ["Break-even ACOS", ["breakEvenAcos", "break_even_acos"], "percent"],
