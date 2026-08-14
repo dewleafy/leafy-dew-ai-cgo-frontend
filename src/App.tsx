@@ -1363,16 +1363,17 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const [activeTab, setActiveTab] = useState("Overview");
-  const [amazonSyncState, setAmazonSyncState] = useState<{ loading: boolean; message: string | null; isError: boolean }>({
-    loading: false,
-    message: null,
-    isError: false
-  });
+  const [amazonSyncState, setAmazonSyncState] = useState<{
+    loading: boolean;
+    summary: string | null;
+    warnings: string[];
+    isError: boolean;
+  }>({ loading: false, summary: null, warnings: [], isError: false });
   const products = mergeFounderProducts(passports.data, economics.data);
   const detailProduct = product ?? products[0] ?? null;
 
   async function handleSyncFromAmazon() {
-    setAmazonSyncState({ loading: true, message: null, isError: false });
+    setAmazonSyncState({ loading: true, summary: null, warnings: [], isError: false });
     try {
       const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; warnings: string[] }>(
         `/api/amazon-sp/sync-listing-attributes?sellerId=${SELLER_ID}`
@@ -1380,14 +1381,16 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
       setAmazonSyncState({
         loading: false,
         isError: false,
-        message: `Checked ${result.checked} product(s), updated ${result.updatedCount}.${result.skippedCount ? ` ${result.skippedCount} had no new data from Amazon.` : ""}`
+        summary: `Checked ${result.checked} product(s), updated ${result.updatedCount}.${result.skippedCount ? ` ${result.skippedCount} had no new data from Amazon.` : ""}`,
+        warnings: result.warnings ?? []
       });
       passports.reload();
     } catch (error) {
       setAmazonSyncState({
         loading: false,
         isError: true,
-        message: error instanceof Error ? error.message : "Could not sync with Amazon."
+        summary: error instanceof Error ? error.message : "Could not sync with Amazon.",
+        warnings: []
       });
     }
   }
@@ -1481,8 +1484,15 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <button type="button" onClick={handleSyncFromAmazon} disabled={amazonSyncState.loading}>
               {amazonSyncState.loading ? "Syncing with Amazon..." : "Sync Dimensions/Weight from Amazon"}
             </button>
-            {amazonSyncState.message ? (
-              <p className={amazonSyncState.isError ? "error-text" : "success-text"}>{amazonSyncState.message}</p>
+            {amazonSyncState.summary ? (
+              <p className={amazonSyncState.isError ? "error-text" : "success-text"}>{amazonSyncState.summary}</p>
+            ) : null}
+            {amazonSyncState.warnings.length > 0 ? (
+              <ul className="sync-warning-list">
+                {amazonSyncState.warnings.slice(0, 5).map((warning, index) => (
+                  <li key={index}>{warning}</li>
+                ))}
+              </ul>
             ) : null}
           </div>
         </aside>
