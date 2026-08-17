@@ -64,7 +64,11 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
       data && typeof data === "object" && "message" in data && typeof data.message === "string"
         ? data.message
         : "Unable to load this section.";
-    throw new Error(message);
+    const error = new Error(message) as Error & { details?: unknown };
+    if (data && typeof data === "object" && "details" in data) {
+      error.details = (data as Record<string, unknown>).details;
+    }
+    throw error;
   }
 
   return data as T;
