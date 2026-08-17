@@ -111,6 +111,7 @@ const technicalTabs = [
   "Experiments",
   "Safety Control",
   "Product Passport",
+  "Listing Readiness",
   "Product Economics",
   "PPC Recommendations",
   "Approval Center",
@@ -1038,6 +1039,7 @@ function App() {
           {activePage === "Advanced Admin" && <MoreToolsPage navigate={navigate} />}
           {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
           {activePage === "Product Passport" && <ProductPassportPage />}
+          {activePage === "Listing Readiness" && <ListingReadinessPage navigate={navigate} />}
           {activePage === "Product Economics" && <ProductEconomicsPage />}
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
@@ -1363,6 +1365,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const [activeTab, setActiveTab] = useState("Overview");
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [amazonSyncState, setAmazonSyncState] = useState<{
     loading: boolean;
     summary: string | null;
@@ -1426,6 +1429,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const gallery = galleryImages.length ? galleryImages : [null, null, null];
   const bullets = detailProduct.bullets;
   const imageDebugFields = productImageDebugFields(detailImageSource);
+  const safeActiveImageIndex = activeImageIndex < gallery.length ? activeImageIndex : 0;
 
   return (
     <div className="page founder-page">
@@ -1437,13 +1441,20 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
         <section className="product-gallery">
           <div className="thumb-rail">
             {gallery.map((image, index) => (
-              <button type="button" key={index} className="gallery-thumb" aria-label={`Thumbnail ${index + 1}`}>
+              <button
+                type="button"
+                key={index}
+                className={`gallery-thumb${index === safeActiveImageIndex ? " gallery-thumb-active" : ""}`}
+                aria-label={`Thumbnail ${index + 1}`}
+                aria-pressed={index === safeActiveImageIndex}
+                onClick={() => setActiveImageIndex(index)}
+              >
                 <ProductThumbnail src={image} title={`${detailProduct.name} thumbnail ${index + 1}`} variant="small" className="product-thumb" />
               </button>
             ))}
           </div>
           <div className="main-product-image">
-            <ProductThumb product={detailProduct} className="product-main-img" />
+            <ProductThumbnail src={gallery[safeActiveImageIndex] ?? null} title={detailProduct.name} className="product-main-img" />
           </div>
         </section>
         <section className="product-info-panel">
@@ -1893,6 +1904,7 @@ function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
       { label: "Business Alerts", page: "Alert Center", note: "Business alerts" },
       { label: "Experiments", page: "Experiments", note: "Growth experiments" },
       { label: "Product Readiness", page: "Product Passport", note: "Product truth and cost queue" },
+      { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action per SKU" },
       { label: "Profit Calculator", page: "Product Economics", note: "Profit calculator" },
       { label: "Ads Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
       { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
@@ -3131,6 +3143,125 @@ function CostCompletionQueueSection() {
         )}
       </Card>
     </section>
+  );
+}
+
+type ListingReadinessRow = {
+  productPassportId: string;
+  sku: string | null;
+  asin: string | null;
+  productName: string;
+  category: string | null;
+  status: string;
+  overallScore: number;
+  readinessStatus: string;
+  profitStatus: unknown;
+  topMissingItems: string[];
+  nextBestAction: string;
+};
+
+type ListingReadinessSummary = {
+  ok: boolean;
+  sellerId: string;
+  count: number;
+  summary: { readyCount: number; needsFixCount: number; poorCount: number };
+  rows: ListingReadinessRow[];
+};
+
+function ListingReadinessPage({ navigate }: { navigate: FounderNavigate }) {
+  const readiness = useApi<ListingReadinessSummary>(() => getJson(`/api/listing-readiness?sellerId=${SELLER_ID}`));
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const [statusFilter, setStatusFilter] = useState("All");
+
+  const products = mergeFounderProducts(passports.data, economics.data);
+  const rows = readiness.data?.rows ?? [];
+  const summary = readiness.data?.summary;
+  const loading = readiness.loading || passports.loading || economics.loading;
+
+  const filteredRows = statusFilter === "All" ? rows : rows.filter((row) => row.readinessStatus === statusFilter);
+
+  function findMatchingProduct(row: ListingReadinessRow): FounderProduct | null {
+    if (row.sku) {
+      const bySku = products.find((product) => product.sku === row.sku);
+      if (bySku) return bySku;
+    }
+    if (row.asin) {
+      const byAsin = products.find((product) => product.asin === row.asin);
+      if (byAsin) return byAsin;
+    }
+    return null;
+  }
+
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Listing Readiness" subtitle="Per-SKU readiness score, what's missing, and the single next action." />
+      <div className="summary-strip">
+        <MetricTile label="Products scored" value={readiness.loading ? "..." : rows.length} />
+        <MetricTile label="Ready" value={readiness.loading ? "..." : summary?.readyCount ?? 0} />
+        <MetricTile label="Needs fix" value={readiness.loading ? "..." : summary?.needsFixCount ?? 0} />
+        <MetricTile label="Poor" value={readiness.loading ? "..." : summary?.poorCount ?? 0} />
+      </div>
+      <div className="filter-pills">
+        {["All", "READY", "NEEDS_FIX", "POOR"].map((label) => (
+          <button type="button" key={label} className={statusFilter === label ? "active" : ""} onClick={() => setStatusFilter(label)}>
+            {label === "All" ? "All" : label.replace("_", " ")}
+          </button>
+        ))}
+      </div>
+      <Card title="Listing Readiness">
+        {loading ? (
+          <LoadingBlock text="Loading listing readiness..." />
+        ) : readiness.error ? (
+          <ErrorBlock text="Could not load listing readiness. Backend may still be deploying." />
+        ) : filteredRows.length === 0 ? (
+          <EmptyBlock text="No products match this filter." />
+        ) : (
+          <div className="table-wrap economics-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Product Name</th>
+                  <th>SKU</th>
+                  <th>Score</th>
+                  <th>Status</th>
+                  <th>Profit Status</th>
+                  <th>Top Missing</th>
+                  <th>Next Best Action</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row) => {
+                  const matchedProduct = findMatchingProduct(row);
+                  return (
+                    <tr key={row.productPassportId}>
+                      <td className="product-name-cell">{formatEmpty(row.productName)}</td>
+                      <td className="identity-cell">{formatEmpty(row.sku)}</td>
+                      <td>{row.overallScore}</td>
+                      <td><StatusBadge value={row.readinessStatus} /></td>
+                      <td><StatusBadge value={row.profitStatus ?? "NEEDS_INPUT"} /></td>
+                      <td>{row.topMissingItems.length ? row.topMissingItems.join(", ") : "—"}</td>
+                      <td>{formatEmpty(row.nextBestAction)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={!matchedProduct}
+                          onClick={() => matchedProduct && navigate("Product Detail", matchedProduct)}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
