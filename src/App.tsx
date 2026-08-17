@@ -1386,11 +1386,18 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
       });
       passports.reload();
     } catch (error) {
+      const details = error instanceof Error ? (error as Error & { details?: unknown }).details : undefined;
+      const detailLines: string[] = [];
+      if (details && typeof details === "object") {
+        for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+          detailLines.push(`${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+        }
+      }
       setAmazonSyncState({
         loading: false,
         isError: true,
         summary: error instanceof Error ? error.message : "Could not sync with Amazon.",
-        warnings: []
+        warnings: detailLines
       });
     }
   }
