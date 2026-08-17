@@ -1388,8 +1388,11 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
     } catch (error) {
       const details = error instanceof Error ? (error as Error & { details?: unknown }).details : undefined;
       const detailLines: string[] = [];
-      if (details && typeof details === "object") {
+      if (typeof details === "string" && details.trim().length > 0) {
+        detailLines.push(details);
+      } else if (details && typeof details === "object") {
         for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+          if (value === null || value === undefined || value === "") continue;
           detailLines.push(`${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
         }
       }
