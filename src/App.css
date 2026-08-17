@@ -2411,6 +2411,17 @@ textarea {
   border-radius: 12px;
   background: #ffffff;
   box-shadow: none;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.gallery-thumb:hover {
+  border-color: #b7d9c5;
+}
+
+.gallery-thumb-active {
+  border-color: #1a7f4e;
 }
 
 .main-product-image {
