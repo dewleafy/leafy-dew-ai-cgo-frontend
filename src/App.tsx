@@ -926,37 +926,111 @@ function FounderMetric(props: { label: string; value: ReactNode; badge?: boolean
   return <MetricCard {...props} />;
 }
 
-function TopNavigation({
-  activeTab,
+type NavItem = { label: string; page: AppPage; note?: string };
+type NavGroup = { title: string; items: NavItem[] };
+
+const sideNavGroups: NavGroup[] = [
+  { title: "Daily", items: [
+    { label: "Today", page: "Today" },
+    { label: "Products", page: "Products" },
+    { label: "AI Actions", page: "AI Actions" },
+    { label: "Reports", page: "Reports" }
+  ] },
+  { title: "Catalog & Listings", items: [
+    { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
+    { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action" },
+    { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
+    { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
+    { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" }
+  ] },
+  { title: "Growth & Ads", items: [
+    { label: "Growth Engine", page: "Growth Engine" },
+    { label: "Brand Center", page: "Brand Center" },
+    { label: "Sales & Ads", page: "Sales & Ads" },
+    { label: "PPC Recommendations", page: "PPC Recommendations" },
+    { label: "Experiments", page: "Experiments" },
+    { label: "Business Alerts", page: "Alert Center" }
+  ] },
+  { title: "Approvals & Safety", items: [
+    { label: "Approval Center", page: "Approval Center" },
+    { label: "Action Preview", page: "Approval Execution" },
+    { label: "Action Safety", page: "Execution Gateway" },
+    { label: "Controlled Live Actions", page: "Live Execution" },
+    { label: "Launch Readiness", page: "Launch Gate" },
+    { label: "Launch Tasks", page: "Launch Checklist" },
+    { label: "Security", page: "Security Guardrails" },
+    { label: "Recovery Center", page: "Rollback Center" }
+  ] },
+  { title: "Automation", items: [
+    { label: "Daily AI Run", page: "Daily AI-CGO" },
+    { label: "AI Control Room", page: "Engine Command Center" },
+    { label: "Automation Calendar", page: "Scheduler" },
+    { label: "Learning", page: "Learning" }
+  ] },
+  { title: "System", items: [
+    { label: "Business Health", page: "Production Health" },
+    { label: "Readiness Check", page: "QA Smoke" },
+    { label: "Housekeeping", page: "Maintenance" },
+    { label: "Data Status", page: "Data Freshness" },
+    { label: "Activity Timeline", page: "Activity Logs" },
+    { label: "AI Budget", page: "AI Gateway" },
+    { label: "Notifications", page: "Notification Outbox" },
+    { label: "Settings", page: "Settings" }
+  ] }
+];
+
+function GrowthRing({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" className="growth-ring">
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="3.6" stroke="currentColor" strokeOpacity="0.65" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="1.3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SideNav({
+  activePage,
   onNavigate
 }: {
-  activeTab: FounderTab | null;
-  onNavigate: (tab: FounderTab) => void;
+  activePage: AppPage;
+  onNavigate: FounderNavigate;
 }) {
   return (
-    <nav className="top-nav" aria-label="Primary navigation">
-      {founderTabs.map((tab) => (
-        <Button
-          key={tab}
-          className={`nav-tab ${activeTab === tab ? "nav-tab-active" : ""}`}
-          onClick={() => onNavigate(tab)}
-        >
-          {tab}
-        </Button>
+    <nav className="side-nav" aria-label="Primary navigation">
+      {sideNavGroups.map((group) => (
+        <div className="side-nav-group" key={group.title}>
+          <span className="side-nav-group-label">{group.title}</span>
+          {group.items.map((item) => {
+            const isActive = activePage === item.page || (item.page === "Products" && activePage === "Product Detail");
+            return (
+              <button
+                type="button"
+                key={item.page}
+                className={`side-nav-item ${isActive ? "side-nav-item-active" : ""}`}
+                onClick={() => onNavigate(item.page)}
+                title={item.note}
+              >
+                {isActive ? <GrowthRing size={14} /> : null}
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
       ))}
     </nav>
   );
 }
 
 function AppShell({
-  activeTab,
+  activePage,
   logoFailed,
   onLogoFailed,
   onNavigate,
   children,
   contentRef
 }: {
-  activeTab: FounderTab | null;
+  activePage: AppPage;
   logoFailed: boolean;
   onLogoFailed: () => void;
   onNavigate: FounderNavigate;
@@ -964,33 +1038,40 @@ function AppShell({
   contentRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="app-shell founder-app-shell">
-      <header className="top-header">
-        <Button className="brand-left" onClick={() => onNavigate("Today")} aria-label="Open Today">
+    <div className="app-shell-v2">
+      <aside className="side-nav-rail">
+        <Button className="side-nav-brand" onClick={() => onNavigate("Today")} aria-label="Open Today">
           {logoFailed ? (
             <div className="logo-fallback">LD</div>
           ) : (
             <img src="/ld-logo.png" alt="Leafy Dew" onError={onLogoFailed} />
           )}
           <span>
-            <strong>Leafy Dew AI-CGO</strong>
-            <small>AI Amazon Seller Operating System</small>
+            <strong>Leafy Dew</strong>
+            <small>AI-CGO</small>
           </span>
         </Button>
-        <TopNavigation activeTab={activeTab} onNavigate={(tab) => onNavigate(tab)} />
-        <div className="header-actions">
-          <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks."><FounderIcon name="shield" />Safe Mode ON</span>
-          <Button className="ai-status-pill" onClick={() => onNavigate("Safety Control")} title="Open advanced safety status">AI Status</Button>
-          <Button className="icon-button" onClick={() => onNavigate("Notification Outbox")} aria-label="Notifications"><FounderIcon name="bell" /></Button>
-          <Button className="founder-menu" onClick={() => onNavigate("Advanced Admin")}>Founder Profile</Button>
-        </div>
-      </header>
+        <SideNav activePage={activePage} onNavigate={onNavigate} />
+        <Button className="side-nav-settings" onClick={() => onNavigate("Settings")}>
+          <FounderIcon name="shield" />
+          <span>Founder Settings</span>
+        </Button>
+      </aside>
 
-      <main className="main-panel founder-main-panel">
-        <div className="main-content page-container" ref={contentRef}>
-          {children}
-        </div>
-      </main>
+      <div className="side-nav-main">
+        <header className="top-bar-slim">
+          <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks."><FounderIcon name="shield" />Safe Mode ON</span>
+          <div className="top-bar-slim-actions">
+            <Button className="ai-status-pill" onClick={() => onNavigate("Safety Control")} title="Open advanced safety status">AI Status</Button>
+            <Button className="icon-button" onClick={() => onNavigate("Notification Outbox")} aria-label="Notifications"><FounderIcon name="bell" /></Button>
+          </div>
+        </header>
+        <main className="main-panel founder-main-panel">
+          <div className="main-content page-container" ref={contentRef}>
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
@@ -1014,15 +1095,9 @@ function App() {
     setActivePage(tab);
   }
 
-  const activeFounderTab: FounderTab | null = activePage === "Product Detail"
-    ? "Products"
-    : founderTabs.includes(activePage as FounderTab)
-      ? activePage as FounderTab
-      : null;
-
   return (
     <AppShell
-      activeTab={activeFounderTab}
+      activePage={activePage}
       logoFailed={logoFailed}
       onLogoFailed={() => setLogoFailed(true)}
       onNavigate={navigate}
