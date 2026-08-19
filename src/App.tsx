@@ -1170,20 +1170,10 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
     profitRisks > 0 ? { icon: "chart" as FounderIconName, title: "Profit risk", text: "Some products may need pricing, cost, or ads attention.", priority: "Watch", action: "Open Products", page: "Products" as AppPage } : null
   ].filter(Boolean).slice(0, 5) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
 
-  const previewProduct = products[0] ?? null;
   const previewProducts = products.slice(0, 3);
-  const growthIdeaCount = ppcRisks + listingIdeas;
   const nextBestAction = pendingApprovalCount > 0 || missingCostCount > 0
     ? "Review high-priority approvals and fix missing cost data first."
     : "Run Daily AI to refresh growth, catalog, ads, and brand recommendations.";
-  const previewCards: Array<{ number: number; title: string; lines: string[]; icon: FounderIconName; page: AppPage; product?: FounderProduct | null; metric: string; kind: "today" | "products" | "detail" | "approvals" | "growth" | "brand" }> = [
-    { number: 1, title: "Today / Command Center", lines: ["Daily priorities", "Safe actions only", "Founder summary"], icon: "spark", page: "Today", metric: `${attentionItems.length} priorities`, kind: "today" },
-    { number: 2, title: "Products / Catalog", lines: [`${productCount} products connected`, "Costs and readiness", "Profit status"], icon: "box", page: "Products", metric: `${missingCostCount} need cost`, kind: "products" },
-    { number: 3, title: "Product Detail Preview", lines: [previewProduct?.name ?? "No product data available", previewProduct ? cleanFounderText(previewProduct.sku, "SKU pending") : "Live catalog required", "Amazon product workspace"], icon: "box", page: "Product Detail", product: previewProduct, metric: previewProduct ? cleanFounderText(previewProduct.price, "Price pending") : "No product data", kind: "detail" },
-    { number: 4, title: "AI Actions / Decision Center", lines: [`${pendingApprovalCount} waiting`, "Approve, reject, watch", "You stay in control"], icon: "approval", page: "AI Actions", metric: `${pendingApprovalCount} pending`, kind: "approvals" },
-    { number: 5, title: "Growth Engine", lines: ["PPC opportunities", "Listing improvements", "Creative ideas"], icon: "growth", page: "Growth Engine", metric: `${growthIdeaCount} ideas`, kind: "growth" },
-    { number: 6, title: "Brand Center", lines: ["Brand signals", "A+ content status", "Creative assets"], icon: "brand", page: "Brand Center", metric: "Not available yet", kind: "brand" }
-  ];
 
   return (
     <div className="page founder-page today-page">
@@ -1196,7 +1186,10 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           <div className="next-best-action">
             <span>Next Best Action</span>
             <strong>{nextBestAction}</strong>
-            <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "AI Actions" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
+            <div className="next-best-action-buttons">
+              <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "AI Actions" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
+              <button type="button" className="secondary" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
+            </div>
           </div>
         </div>
         <div className="hero-status-panel">
@@ -1206,33 +1199,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           <div><span>Seller</span><strong>Leafy Dew</strong></div>
         </div>
       </div>
-
-      <section className="action-card-grid">
-        <article className="action-card founder-action-card action-card-green">
-          <div className="card-icon"><FounderIcon name="spark" /></div>
-          <h2>Run Daily AI</h2>
-          <p>Get AI recommendations across catalog, ads, and content. No Amazon change is made.</p>
-          <button type="button" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
-        </article>
-        <article className="action-card founder-action-card action-card-blue">
-          <div className="card-icon"><FounderIcon name="approval" /></div>
-          <h2>AI Actions</h2>
-          <p>Recommendations waiting for your decision.</p>
-          <Badge tone={pendingApprovalCount > 0 ? "watch" : "good"}>{pendingApprovalCount} waiting</Badge>
-          <div className="action-card-footer">
-            <button type="button" onClick={() => navigate("AI Actions")}>Review Now</button>
-          </div>
-        </article>
-        <article className="action-card founder-action-card action-card-gold">
-          <div className="card-icon"><FounderIcon name="cost" /></div>
-          <h2>Missing Cost Data</h2>
-          <p>Products missing cost or fee data.</p>
-          <Badge tone={missingCostCount > 0 ? "watch" : "good"}>{missingCostCount} products</Badge>
-          <div className="action-card-footer">
-            <button type="button" onClick={() => navigate("Products")}>Fix Now</button>
-          </div>
-        </article>
-      </section>
 
       <section className="founder-section business-pulse-section">
         <div className="section-heading split-heading">
@@ -1282,54 +1248,28 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
         </div>
       </section>
 
-      <section className="founder-section">
+      <section className="founder-section today-preview-section">
         <div className="section-heading">
-          <h2>Explore Leafy Dew</h2>
-          <p>Open a full workspace for products, approvals, growth, brand, and sales.</p>
+          <h2>Today at a glance</h2>
+          <p>A quick look at your catalog while you decide what to work on.</p>
         </div>
-        <div className="preview-grid">
-          {previewCards.map((card) => (
-            <button type="button" className="preview-card" key={card.number} onClick={() => navigate(card.page, card.product ?? null)}>
-              <span className="number-badge">{card.number}</span>
-              <span className="preview-icon"><FounderIcon name={card.icon} /></span>
-              <strong>{card.title}</strong>
-              <div className={`preview-visual preview-visual-${card.kind}`}>
-                {card.kind === "products" ? (
-                  <div className="preview-product-stack">
-                    {previewProducts.length ? previewProducts.map((product) => <ProductThumb key={product.key} product={product} className="product-thumb" />) : <span className="preview-empty">No product data available</span>}
-                  </div>
-                ) : card.kind === "detail" && previewProduct ? (
-                  <div className="preview-detail-product">
-                    <ProductThumb product={previewProduct} className="product-thumb" />
-                    <span>{previewProduct.name}</span>
-                  </div>
-                ) : card.kind === "detail" ? (
-                  <span className="preview-empty">No product data available</span>
-                ) : card.kind === "approvals" ? (
-                  <div className="preview-approval-stack"><Badge tone="watch">High</Badge><Badge tone="neutral">Watch</Badge><Badge tone="good">Safe</Badge></div>
-                ) : card.kind === "growth" && previewProducts.length ? (
-                  <div className="preview-product-stack">
-                    {previewProducts.map((product) => <ProductThumb key={product.key} product={product} variant="small" fallbackType="creative" className="product-thumb" />)}
-                  </div>
-                ) : card.kind === "growth" ? (
-                  <span className="preview-empty">No product data available</span>
-                ) : card.kind === "brand" && previewProducts.length ? (
-                  <div className="preview-product-stack">
-                    {previewProducts.map((product) => <ProductThumb key={product.key} product={product} variant="small" fallbackType="brand" className="product-thumb" />)}
-                  </div>
-                ) : card.kind === "brand" ? (
-                  <span className="preview-empty">No product data available</span>
-                ) : (
-                  <div className="preview-status-chips"><Badge tone="good">Daily priorities</Badge><Badge tone="good">Safe actions</Badge><Badge tone="neutral">Founder summary</Badge></div>
-                )}
-              </div>
-              <span className="preview-metric">{card.metric}</span>
-              <span>{card.lines[0]}</span>
-              <span>{card.lines[1]}</span>
-              <span>{card.lines[2]}</span>
-              <em>Open Workspace <FounderIcon name="arrow" /></em>
+        <div className="today-glance-row">
+          {previewProducts.length ? previewProducts.map((product) => (
+            <button type="button" className="today-glance-card" key={product.key} onClick={() => navigate("Product Detail", product)}>
+              <ProductThumb product={product} className="product-thumb" />
+              <span className="today-glance-name">{product.name}</span>
+              <span className="today-glance-meta">{cleanFounderText(product.sku, "SKU pending")}</span>
             </button>
-          ))}
+          )) : (
+            <div className="attention-row attention-row-calm">
+              <span className="preview-empty">No product data available</span>
+            </div>
+          )}
+          <button type="button" className="today-glance-card today-glance-more" onClick={() => navigate("Products")}>
+            <span className="preview-metric">{productCount} products</span>
+            <span>Open full catalog</span>
+            <em>View all <FounderIcon name="arrow" /></em>
+          </button>
         </div>
       </section>
     </div>
