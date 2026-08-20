@@ -1392,16 +1392,41 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const detailProduct = product ?? products[0] ?? null;
 
   async function handleSyncFromAmazon() {
-    setAmazonSyncState({ loading: true, summary: null, warnings: [], isError: false });
+    setAmazonSyncState({ loading: true, summary: "Starting sync...", warnings: [], isError: false });
+    const BATCH_SIZE = 100;
+    const MAX_BATCHES = 6; // safety cap: covers up to 600 products in one click
+    let totalChecked = 0;
+    let totalUpdated = 0;
+    let totalSkipped = 0;
+    let lastWarnings: string[] = [];
+
     try {
-      const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; warnings: string[] }>(
-        `/api/amazon-sp/sync-listing-attributes?sellerId=${SELLER_ID}`
-      );
+      for (let batch = 1; batch <= MAX_BATCHES; batch += 1) {
+        setAmazonSyncState((current) => ({
+          ...current,
+          summary: `Syncing batch ${batch}... (${totalUpdated} updated so far)`
+        }));
+
+        const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; warnings: string[] }>(
+          `/api/amazon-sp/sync-listing-attributes?sellerId=${SELLER_ID}&limit=${BATCH_SIZE}`
+        );
+
+        totalChecked += result.checked;
+        totalUpdated += result.updatedCount;
+        totalSkipped += result.skippedCount;
+        lastWarnings = result.warnings ?? [];
+
+        if (result.checked < BATCH_SIZE) {
+          // Fewer than a full batch came back — we've reached the end of the catalog.
+          break;
+        }
+      }
+
       setAmazonSyncState({
         loading: false,
         isError: false,
-        summary: `Checked ${result.checked} product(s), updated ${result.updatedCount}.${result.skippedCount ? ` ${result.skippedCount} had no new data from Amazon.` : ""}`,
-        warnings: result.warnings ?? []
+        summary: `Checked ${totalChecked} product(s) across your catalog, updated ${totalUpdated}.${totalSkipped ? ` ${totalSkipped} had no new data from Amazon.` : ""}`,
+        warnings: lastWarnings
       });
       passports.reload();
     } catch (error) {
@@ -1418,7 +1443,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
       setAmazonSyncState({
         loading: false,
         isError: true,
-        summary: error instanceof Error ? error.message : "Could not sync with Amazon.",
+        summary: `${totalUpdated > 0 ? `Updated ${totalUpdated} before this happened: ` : ""}${error instanceof Error ? error.message : "Could not sync with Amazon."}`,
         warnings: detailLines
       });
     }
