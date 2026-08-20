@@ -120,6 +120,28 @@ export type AmazonSpListing = CostCompletionQueueItem & {
   price?: number | string | null;
 };
 
+export type SchemaAttributeStatus = {
+  attribute: string;
+  label: string;
+  status: "KNOWN" | "MISSING" | "UNTRACKED";
+};
+
+export type SchemaReadinessReport = {
+  ok: boolean;
+  sku: string;
+  productType: string | null;
+  marketplaceId: string;
+  schemaSource: "CACHED" | "FETCHED_LIVE" | "UNAVAILABLE";
+  requiredAttributeCount: number;
+  attributes: SchemaAttributeStatus[];
+  missingCount: number;
+  untrackedCount: number;
+  readyForSubmission: boolean;
+  summaryMessage: string;
+  checkedAt: string;
+  warning?: string;
+};
+
 export type ProductEconomics = {
   id: string;
   marketplaceId?: string | null;
