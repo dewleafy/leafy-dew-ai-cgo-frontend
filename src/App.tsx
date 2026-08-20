@@ -81,6 +81,7 @@ import type {
   SafetyControlStatus,
   SchedulerJob,
   SchedulerSummary,
+  SchemaReadinessReport,
   SecurityAuditEvent,
   SecurityGuardrailSummary,
   TodayCommandSummary
@@ -1423,6 +1424,29 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
     }
   }
 
+  const [schemaCheckState, setSchemaCheckState] = useState<{
+    loading: boolean;
+    report: SchemaReadinessReport | null;
+    error: string | null;
+  }>({ loading: false, report: null, error: null });
+
+  async function handleCheckAmazonReadiness() {
+    if (!detailProduct?.sku) return;
+    setSchemaCheckState({ loading: true, report: null, error: null });
+    try {
+      const report = await getJson<SchemaReadinessReport>(
+        `/api/listing-schema/check?sellerId=${SELLER_ID}&sku=${encodeURIComponent(String(detailProduct.sku))}`
+      );
+      setSchemaCheckState({ loading: false, report, error: null });
+    } catch (error) {
+      setSchemaCheckState({
+        loading: false,
+        report: null,
+        error: error instanceof Error ? error.message : "Could not check Amazon readiness."
+      });
+    }
+  }
+
   if (passports.loading || economics.loading) {
     return (
       <PageLayout title="Product Detail" subtitle="Live Amazon product workspace.">
@@ -1529,6 +1553,33 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                   <li key={index}>{warning}</li>
                 ))}
               </ul>
+            ) : null}
+          </div>
+
+          <div className="quick-actions-card schema-readiness-card">
+            <h2>Amazon Readiness Check</h2>
+            <p className="schema-readiness-intro">Checks your Product Passport against Amazon's real schema for this product's category.</p>
+            <button type="button" onClick={handleCheckAmazonReadiness} disabled={schemaCheckState.loading}>
+              {schemaCheckState.loading ? "Checking with Amazon..." : "Check Amazon Readiness"}
+            </button>
+            {schemaCheckState.error ? <p className="error-text">{schemaCheckState.error}</p> : null}
+            {schemaCheckState.report ? (
+              <div className="schema-readiness-result">
+                <p className={schemaCheckState.report.readyForSubmission ? "success-text" : "warning-text"}>
+                  {schemaCheckState.report.summaryMessage}
+                </p>
+                {schemaCheckState.report.attributes.length > 0 ? (
+                  <ul className="schema-attribute-list">
+                    {schemaCheckState.report.attributes.map((item) => (
+                      <li key={item.attribute} className={`schema-attribute-${item.status.toLowerCase()}`}>
+                        <span className="schema-attribute-dot" />
+                        <span>{item.label}</span>
+                        <em>{item.status === "KNOWN" ? "On file" : item.status === "MISSING" ? "Missing" : "Not tracked yet"}</em>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </aside>
