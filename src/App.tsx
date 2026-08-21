@@ -1394,7 +1394,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   async function handleSyncFromAmazon() {
     setAmazonSyncState({ loading: true, summary: "Starting sync...", warnings: [], isError: false });
     const BATCH_SIZE = 100;
-    const MAX_BATCHES = 6; // safety cap: covers up to 600 products in one click
+    const MAX_BATCHES = 10; // hard safety ceiling only — normal stop is one full pass through the catalog
     let totalChecked = 0;
     let totalUpdated = 0;
     let totalSkipped = 0;
@@ -1407,7 +1407,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
           summary: `Syncing batch ${batch}... (${totalUpdated} updated so far)`
         }));
 
-        const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; warnings: string[] }>(
+        const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; totalEligible?: number; warnings: string[] }>(
           `/api/amazon-sp/sync-listing-attributes?sellerId=${SELLER_ID}&limit=${BATCH_SIZE}`
         );
 
@@ -1416,8 +1416,10 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
         totalSkipped += result.skippedCount;
         lastWarnings = result.warnings ?? [];
 
-        if (result.checked < BATCH_SIZE) {
-          // Fewer than a full batch came back — we've reached the end of the catalog.
+        const reachedEndOfBatch = result.checked < BATCH_SIZE;
+        const coveredFullCatalog = typeof result.totalEligible === "number" && totalChecked >= result.totalEligible;
+
+        if (reachedEndOfBatch || coveredFullCatalog) {
           break;
         }
       }
