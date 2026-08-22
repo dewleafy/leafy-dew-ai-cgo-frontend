@@ -876,6 +876,34 @@ function ProductImage({
   return <img loading="lazy" decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
 }
 
+function relativeTimeFrom(iso: string | null): string {
+  if (!iso) return "not yet run";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+}
+
+function BackgroundSyncStatus() {
+  const status = useApi<{ ok: boolean; lastRunAt: string | null; lastRunSummary: string | null; isRunning: boolean }>(
+    () => getJson(`/api/background-sync/status`)
+  );
+
+  if (status.loading || !status.data) {
+    return <p className="background-sync-status">Auto-syncs with Amazon every 15 minutes.</p>;
+  }
+
+  return (
+    <p className="background-sync-status" title={status.data.lastRunSummary ?? undefined}>
+      <FounderIcon name="shield" />
+      {status.data.isRunning ? "Syncing with Amazon now..." : `Auto-synced with Amazon \u00b7 last run ${relativeTimeFrom(status.data.lastRunAt)}`}
+    </p>
+  );
+}
+
 function ProductThumbnail({
   src,
   title,
@@ -1277,6 +1305,62 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
+type BackgroundSyncStatus = {
+  ok: boolean;
+  lastRunAt: string | null;
+  lastRunSummary: string | null;
+  isRunning: boolean;
+};
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "not yet run";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+}
+
+function BackgroundSyncStatusBar() {
+  const [status, setStatus] = useState<BackgroundSyncStatus | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function poll() {
+      try {
+        const result = await getJson<BackgroundSyncStatus>("/api/background-sync/status");
+        if (alive) setStatus(result);
+      } catch {
+        // Stay quiet — this is a passive indicator, not worth alarming the founder over.
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 60000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  if (!status) return null;
+
+  return (
+    <div className="background-sync-bar">
+      <span className={`background-sync-dot${status.isRunning ? " background-sync-dot-active" : ""}`} />
+      <span>
+        {status.isRunning
+          ? "Syncing with Amazon now..."
+          : `Auto-synced with Amazon ${timeAgo(status.lastRunAt)}`}
+      </span>
+      {status.lastRunSummary ? <span className="background-sync-detail">{status.lastRunSummary}</span> : null}
+    </div>
+  );
+}
+
 function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
@@ -1285,6 +1369,7 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   const [filter, setFilter] = useState("All");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const hasRealProducts = products.length > 0;
   const filteredProducts = products.filter((product) => {
@@ -1328,6 +1413,7 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
         <button type="button" className="secondary">Filters</button>
         <button type="button" onClick={() => navigate("Product Passport")}>Add Product</button>
       </div>
+      <BackgroundSyncStatusBar />
       <div className="filter-pills">
         {["All", "Active", "Missing Cost", "Low Profit", "PPC Risk", "Listing Needs Work"].map((label) => (
           <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => { setFilter(label); setPage(1); }}>{label}</button>
@@ -1382,74 +1468,8 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const [activeTab, setActiveTab] = useState("Overview");
   const [activeImageIndex, setActiveImageIndex] = useState(0);
-  const [amazonSyncState, setAmazonSyncState] = useState<{
-    loading: boolean;
-    summary: string | null;
-    warnings: string[];
-    isError: boolean;
-  }>({ loading: false, summary: null, warnings: [], isError: false });
   const products = mergeFounderProducts(passports.data, economics.data);
   const detailProduct = product ?? products[0] ?? null;
-
-  async function handleSyncFromAmazon() {
-    setAmazonSyncState({ loading: true, summary: "Starting sync...", warnings: [], isError: false });
-    const BATCH_SIZE = 100;
-    const MAX_BATCHES = 10; // hard safety ceiling only — normal stop is one full pass through the catalog
-    let totalChecked = 0;
-    let totalUpdated = 0;
-    let totalSkipped = 0;
-    let lastWarnings: string[] = [];
-
-    try {
-      for (let batch = 1; batch <= MAX_BATCHES; batch += 1) {
-        setAmazonSyncState((current) => ({
-          ...current,
-          summary: `Syncing batch ${batch}... (${totalUpdated} updated so far)`
-        }));
-
-        const result = await postJson<{ ok: boolean; checked: number; updatedCount: number; skippedCount: number; totalEligible?: number; warnings: string[] }>(
-          `/api/amazon-sp/sync-listing-attributes?sellerId=${SELLER_ID}&limit=${BATCH_SIZE}`
-        );
-
-        totalChecked += result.checked;
-        totalUpdated += result.updatedCount;
-        totalSkipped += result.skippedCount;
-        lastWarnings = result.warnings ?? [];
-
-        const reachedEndOfBatch = result.checked < BATCH_SIZE;
-        const coveredFullCatalog = typeof result.totalEligible === "number" && totalChecked >= result.totalEligible;
-
-        if (reachedEndOfBatch || coveredFullCatalog) {
-          break;
-        }
-      }
-
-      setAmazonSyncState({
-        loading: false,
-        isError: false,
-        summary: `Checked ${totalChecked} product(s) across your catalog, updated ${totalUpdated}.${totalSkipped ? ` ${totalSkipped} had no new data from Amazon.` : ""}`,
-        warnings: lastWarnings
-      });
-      passports.reload();
-    } catch (error) {
-      const details = error instanceof Error ? (error as Error & { details?: unknown }).details : undefined;
-      const detailLines: string[] = [];
-      if (typeof details === "string" && details.trim().length > 0) {
-        detailLines.push(details);
-      } else if (details && typeof details === "object") {
-        for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
-          if (value === null || value === undefined || value === "") continue;
-          detailLines.push(`${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
-        }
-      }
-      setAmazonSyncState({
-        loading: false,
-        isError: true,
-        summary: `${totalUpdated > 0 ? `Updated ${totalUpdated} before this happened: ` : ""}${error instanceof Error ? error.message : "Could not sync with Amazon."}`,
-        warnings: detailLines
-      });
-    }
-  }
 
   const [schemaCheckState, setSchemaCheckState] = useState<{
     loading: boolean;
@@ -1568,19 +1588,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <button type="button" onClick={() => navigate("Growth Engine")}>Image & A+ Ideas</button>
             <button type="button" onClick={() => navigate("Products")}>Fix Cost</button>
             <button type="button" onClick={() => navigate("Product Economics")}>Profit Calculator</button>
-            <button type="button" onClick={handleSyncFromAmazon} disabled={amazonSyncState.loading}>
-              {amazonSyncState.loading ? "Syncing with Amazon..." : "Sync Dimensions/Weight from Amazon"}
-            </button>
-            {amazonSyncState.summary ? (
-              <p className={amazonSyncState.isError ? "error-text" : "success-text"}>{amazonSyncState.summary}</p>
-            ) : null}
-            {amazonSyncState.warnings.length > 0 ? (
-              <ul className="sync-warning-list">
-                {amazonSyncState.warnings.slice(0, 5).map((warning, index) => (
-                  <li key={index}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
+            <BackgroundSyncStatus />
           </div>
 
           <div className="quick-actions-card schema-readiness-card">
