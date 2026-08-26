@@ -1463,92 +1463,6 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
-function AmazonStylePreview({ product, gallery }: { product: FounderProduct; gallery: unknown[] }) {
-  const [activeImage, setActiveImage] = useState(0);
-  const safeActiveImage = activeImage < gallery.length ? activeImage : 0;
-  const bullets = product.bullets.filter((line) => line.trim().length > 0);
-  const detailRows: Array<[string, unknown]> = [
-    ["Brand", product.brand],
-    ["Color", product.color],
-    ["Material", product.material],
-    ["Dimensions", product.dimensions],
-    ["Weight", product.weight]
-  ].filter(([, value]) => cleanFounderText(value, "") !== "") as Array<[string, unknown]>;
-
-  return (
-    <Card title="Amazon Preview">
-      <p className="section-note amazon-preview-disclaimer">
-        An approximate preview of how this listing looks on Amazon, built from the data your Product Passport has on file. Not a live copy of your actual Amazon page.
-      </p>
-      <div className="amazon-preview">
-        <div className="amazon-preview-gallery">
-          <div className="amazon-preview-thumbs">
-            {gallery.map((image, index) => (
-              <button
-                type="button"
-                key={index}
-                className={`amazon-preview-thumb${index === safeActiveImage ? " amazon-preview-thumb-active" : ""}`}
-                onClick={() => setActiveImage(index)}
-                aria-label={`Preview thumbnail ${index + 1}`}
-              >
-                <ProductThumbnail src={image} title={`${product.name} thumbnail ${index + 1}`} variant="small" className="product-thumb" />
-              </button>
-            ))}
-          </div>
-          <div className="amazon-preview-main-image">
-            <ProductThumbnail src={gallery[safeActiveImage] ?? null} title={product.name} className="product-main-img" />
-          </div>
-        </div>
-
-        <div className="amazon-preview-details">
-          <a className="amazon-preview-brand" href="#" onClick={(event) => event.preventDefault()}>
-            Visit the {cleanFounderText(product.brand, "Brand")} Store
-          </a>
-          <h2 className="amazon-preview-title">{product.name}</h2>
-          <div className="amazon-preview-price-block">
-            <span className="amazon-preview-price">{formatMoney(product.price)}</span>
-            <span className="amazon-preview-tax-note">Inclusive of all taxes</span>
-          </div>
-          {bullets.length > 0 ? (
-            <ul className="amazon-preview-bullets">
-              {bullets.map((line, index) => <li key={index}>{line}</li>)}
-            </ul>
-          ) : (
-            <p className="section-note">No bullet points on file yet for this product.</p>
-          )}
-
-          {detailRows.length > 0 ? (
-            <div className="amazon-preview-product-info">
-              <h3>Product information</h3>
-              <table>
-                <tbody>
-                  {detailRows.map(([label, value]) => (
-                    <tr key={label}>
-                      <th>{label}</th>
-                      <td>{cleanFounderText(value, "Not available yet")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="amazon-preview-buybox">
-          <span className="amazon-preview-buybox-price">{formatMoney(product.price)}</span>
-          <span className="amazon-preview-buybox-line">FREE delivery <em>(preview only)</em></span>
-          <span className="amazon-preview-buybox-line">In stock</span>
-          <button type="button" className="amazon-preview-buybox-button" disabled>Add to Cart</button>
-          <button type="button" className="amazon-preview-buybox-button amazon-preview-buybox-button-primary" disabled>Buy Now</button>
-          <div className="amazon-preview-buybox-meta">
-            <span>Sold by <strong>{cleanFounderText(product.brand, "Leafy Dew")}</strong></span>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 function ProductDetailPage({ product, navigate }: { product: FounderProduct | null; navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
@@ -1599,9 +1513,20 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const detailImageSource = detailProduct.raw;
   const galleryImages = getProductImages(detailImageSource);
   const gallery = galleryImages.length ? galleryImages : [null, null, null];
-  const bullets = detailProduct.bullets;
+  const bullets = detailProduct.bullets.filter((line) => line.trim().length > 0);
   const imageDebugFields = productImageDebugFields(detailImageSource);
   const safeActiveImageIndex = activeImageIndex < gallery.length ? activeImageIndex : 0;
+  const detailRows: Array<[string, unknown]> = [
+    ["ASIN", detailProduct.asin],
+    ["SKU", detailProduct.sku],
+    ["Category", detailProduct.category],
+    ["Brand", detailProduct.brand],
+    ["Color", detailProduct.color],
+    ["Material", detailProduct.material],
+    ["Dimensions", detailProduct.dimensions],
+    ["Weight", detailProduct.weight],
+    ["Supplier", detailProduct.supplierName]
+  ];
 
   return (
     <div className="page founder-page">
@@ -1609,14 +1534,17 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
         <button type="button" className="secondary" onClick={() => navigate("Products")}>Back to Products</button>
         <FounderBadge value={detailProduct.status ?? "Safe preview"} />
       </div>
-      <div className="product-detail-layout">
-        <section className="product-gallery">
-          <div className="thumb-rail">
+      <p className="section-note amazon-preview-disclaimer">
+        Laid out the way this listing looks on Amazon, using the data your Product Passport has on file — not a live copy of your actual Amazon page.
+      </p>
+      <div className="amazon-preview">
+        <div className="amazon-preview-gallery">
+          <div className="amazon-preview-thumbs">
             {gallery.map((image, index) => (
               <button
                 type="button"
                 key={index}
-                className={`gallery-thumb${index === safeActiveImageIndex ? " gallery-thumb-active" : ""}`}
+                className={`amazon-preview-thumb${index === safeActiveImageIndex ? " amazon-preview-thumb-active" : ""}`}
                 aria-label={`Thumbnail ${index + 1}`}
                 aria-pressed={index === safeActiveImageIndex}
                 onClick={() => setActiveImageIndex(index)}
@@ -1625,37 +1553,48 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
               </button>
             ))}
           </div>
-          <div className="main-product-image">
+          <div className="amazon-preview-main-image">
             <ProductThumbnail src={gallery[safeActiveImageIndex] ?? null} title={detailProduct.name} className="product-main-img" />
           </div>
-        </section>
-        <section className="product-info-panel">
-          <h1>{detailProduct.name}</h1>
-          <p className="muted-line">Brand: {detailProduct.brand}</p>
+        </div>
+
+        <div className="amazon-preview-details">
+          <span className="amazon-preview-brand">Visit the {cleanFounderText(detailProduct.brand, "Brand")} Store</span>
+          <h1 className="amazon-preview-title">{detailProduct.name}</h1>
           <div className="badge-row">
             <FounderBadge value={detailProduct.readiness ?? "Listing readiness pending"} />
             <FounderBadge value={detailProduct.profitStatus ?? "Profit data pending"} />
           </div>
-          <div className="price-line">{formatMoney(detailProduct.price)}</div>
-          <div className="detail-grid compact-business-grid">
-            <MetricRow label="ASIN" value={detailProduct.asin} />
-            <MetricRow label="SKU" value={detailProduct.sku} />
-            <MetricRow label="Category" value={detailProduct.category} />
-            <MetricRow label="Product Status" value={<FounderBadge value={detailProduct.status ?? "Not available yet"} />} />
-            <MetricRow label="Dimensions" value={cleanFounderText(detailProduct.dimensions, "Not available yet")} />
-            <MetricRow label="Weight" value={cleanFounderText(detailProduct.weight, "Not available yet")} />
-            <MetricRow label="Material" value={cleanFounderText(detailProduct.material, "Not available yet")} />
-            <MetricRow label="Color" value={cleanFounderText(detailProduct.color, "Not available yet")} />
-            <MetricRow label="Supplier" value={cleanFounderText(detailProduct.supplierName, "Not available yet")} />
+          <div className="amazon-preview-price-block">
+            <span className="amazon-preview-price">{formatMoney(detailProduct.price)}</span>
+            <span className="amazon-preview-tax-note">Inclusive of all taxes</span>
           </div>
-          <h2>About this item</h2>
-          {bullets.length ? (
-            <ul className="clean-list product-bullets">
-              {bullets.map((bullet, index) => <li key={index}>{bullet}</li>)}
+
+          <h3>About this item</h3>
+          {bullets.length > 0 ? (
+            <ul className="amazon-preview-bullets">
+              {bullets.map((line, index) => <li key={index}>{line}</li>)}
             </ul>
-          ) : <EmptyBlock text="No product data available" />}
-          <p className="product-description">{detailProduct.description}</p>
-        </section>
+          ) : (
+            <EmptyBlock text="No product data available" />
+          )}
+          {detailProduct.description ? <p className="product-description">{detailProduct.description}</p> : null}
+
+          <div className="amazon-preview-product-info">
+            <h3>Product information</h3>
+            <table>
+              <tbody>
+                {detailRows.map(([label, value]) => (
+                  <tr key={label}>
+                    <th>{label}</th>
+                    <td>{cleanFounderText(value, "Not available yet")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <aside className="product-side-panel">
           <div className="product-health-card">
             <h2>Product Health</h2>
@@ -1706,28 +1645,24 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
         </aside>
       </div>
       <div className="bottom-tabs">
-        {["Overview", "Amazon Preview", "Content", "Pricing & Profit", "Images & A+", "PPC", "Recommendations", "History"].map((tab) => (
+        {["Overview", "Content", "Pricing & Profit", "Images & A+", "PPC", "Recommendations", "History"].map((tab) => (
           <button type="button" key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>
         ))}
       </div>
-      {activeTab === "Amazon Preview" ? (
-        <AmazonStylePreview product={detailProduct} gallery={gallery} />
-      ) : (
-        <Card title={activeTab}>
-          <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
-          <details className="technical-accordion">
-            <summary>Advanced Details</summary>
-            <div className="detail-grid">
-              <MetricRow label="Internal Key" value={detailProduct.key} />
-              <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
-              {imageDebugFields.map(([label, value]) => (
-                <MetricRow key={label} label={label} value={value} />
-              ))}
-            </div>
-            <ProductImageDebug product={detailImageSource} />
-          </details>
-        </Card>
-      )}
+      <Card title={activeTab}>
+        <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
+        <details className="technical-accordion">
+          <summary>Advanced Details</summary>
+          <div className="detail-grid">
+            <MetricRow label="Internal Key" value={detailProduct.key} />
+            <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
+            {imageDebugFields.map(([label, value]) => (
+              <MetricRow key={label} label={label} value={value} />
+            ))}
+          </div>
+          <ProductImageDebug product={detailImageSource} />
+        </details>
+      </Card>
     </div>
   );
 }
