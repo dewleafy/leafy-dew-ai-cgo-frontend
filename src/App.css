@@ -336,8 +336,9 @@
 
 .amazon-preview {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(340px, 1.3fr) minmax(280px, 0.8fr);
   gap: 24px;
+  align-items: start;
   margin-top: 16px;
   font-family: "Amazon Ember", Arial, sans-serif;
   color: #0f1111;
