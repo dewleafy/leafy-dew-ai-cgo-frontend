@@ -1468,9 +1468,54 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
+function economicsDetailRows(row: ProductEconomics): Array<[string, ReactNode]> {
+  return [
+    ["Selling Price", formatMoney(row.sellingPrice)],
+    ["Buying Cost", formatMoney(row.buyingCost)],
+    ["Landed Cost", formatMoney(row.landedCost)],
+    ["Total Amazon Fees", formatMoney(row.totalAmazonFees)],
+    ["Gross Profit", formatMoney(row.grossProfit)],
+    ["Required Profit", formatMoney(row.requiredProfit)],
+    ["Net Profit", formatMoney(row.netProfit)],
+    ["Net Profit Before Ads", formatMoney(row.netProfitBeforeAds)],
+    ["Profit Margin", formatPercent(row.profitMargin ?? row.profitMarginPercent)],
+    ["Target ACOS", formatPercent(row.targetAcos)],
+    ["Break-even ACOS", formatPercent(row.breakEvenAcos)],
+    ["Profit Status", <StatusBadge key="profit-status" value={row.profitStatus ?? "NEEDS_INPUT"} />],
+    ["Data Status", <StatusBadge key="data-status" value={row.profitDataStatus ?? "NEEDS_INPUT"} />],
+    ["Fee Rules Version", formatEmpty(row.feeRulesVersion)]
+  ];
+}
+
+function readinessMissingItemLabel(value: string): string {
+  return labelize(value)
+    .replace(/\bSeo\b/g, "SEO")
+    .replace(/\bAcos\b/g, "ACOS")
+    .replace(/\bPpc\b/g, "PPC");
+}
+
+function findByskuOrAsin<T extends { sku?: string | null; asin?: string | null }>(
+  rows: T[],
+  product: { sku?: unknown; asin?: unknown } | null
+): T | null {
+  if (!product) return null;
+  const sku = product.sku ? String(product.sku) : "";
+  const asin = product.asin ? String(product.asin) : "";
+  if (sku) {
+    const bySku = rows.find((row) => row.sku && String(row.sku) === sku);
+    if (bySku) return bySku;
+  }
+  if (asin) {
+    const byAsin = rows.find((row) => row.asin && String(row.asin) === asin);
+    if (byAsin) return byAsin;
+  }
+  return null;
+}
+
 function ProductDetailPage({ product, navigate }: { product: FounderProduct | null; navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const readiness = useApi<ListingReadinessSummary>(() => getJson(`/api/listing-readiness?sellerId=${SELLER_ID}`));
   const [activeTab, setActiveTab] = useState("Overview");
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const products = mergeFounderProducts(passports.data, economics.data);
@@ -1563,6 +1608,11 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
     ["Weight", detailProduct.weight],
     ["Supplier", detailProduct.supplierName]
   ];
+
+  const economicsRows = rowsOf<ProductEconomics>(economics.data);
+  const readinessRows = readiness.data?.rows ?? [];
+  const matchedEconomics = findByskuOrAsin(economicsRows, detailProduct);
+  const matchedReadiness = findByskuOrAsin(readinessRows, detailProduct);
 
   return (
     <div className="page founder-page">
@@ -1760,7 +1810,84 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
         ))}
       </div>
       <Card title={activeTab}>
-        <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
+        {activeTab === "Overview" ? (
+          <div className="detail-tab-overview">
+            <div className="detail-grid">
+              <MetricRow label="Readiness Score" value={matchedReadiness ? `${matchedReadiness.overallScore} / 100` : "Not scored yet"} />
+              <MetricRow label="Readiness Status" value={<StatusBadge value={matchedReadiness?.readinessStatus ?? "NOT_SCORED"} />} />
+              <MetricRow label="Profit Status" value={<StatusBadge value={matchedEconomics?.profitStatus ?? detailProduct.profitStatus ?? "NEEDS_INPUT"} />} />
+              <MetricRow label="Selling Price" value={formatMoney(matchedEconomics?.sellingPrice ?? detailProduct.price)} />
+              <MetricRow label="Category" value={cleanFounderText(matchedReadiness?.category ?? detailProduct.category)} />
+              <MetricRow label="Listing Status" value={cleanFounderText(detailProduct.status)} />
+            </div>
+            {matchedReadiness?.nextBestAction ? (
+              <div className="callout-card next-best-action-card">
+                <strong>Next best action</strong>
+                <p>{matchedReadiness.nextBestAction}</p>
+              </div>
+            ) : null}
+            {!matchedReadiness && !matchedEconomics ? (
+              <p className="section-note">This product hasn't been scored for readiness or profit yet. Add cost data in Product Passport to get started.</p>
+            ) : null}
+          </div>
+        ) : activeTab === "Content" ? (
+          <div className="detail-tab-content">
+            {matchedReadiness ? (
+              <>
+                <div className="detail-grid">
+                  <MetricRow label="Content Readiness Score" value={`${matchedReadiness.overallScore} / 100`} />
+                  <MetricRow label="Status" value={<StatusBadge value={matchedReadiness.readinessStatus} />} />
+                </div>
+                {matchedReadiness.topMissingItems.length > 0 ? (
+                  <div className="missing-items-card">
+                    <strong>What's missing from this listing's content</strong>
+                    <ul className="missing-items-list">
+                      {matchedReadiness.topMissingItems.map((item) => (
+                        <li key={item}>{readinessMissingItemLabel(item)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="success-text">No content gaps found for this listing.</p>
+                )}
+                {matchedReadiness.nextBestAction ? (
+                  <div className="callout-card next-best-action-card">
+                    <strong>Next best action</strong>
+                    <p>{matchedReadiness.nextBestAction}</p>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <EmptyBlock text="No content readiness data yet for this product." />
+            )}
+          </div>
+        ) : activeTab === "Pricing & Profit" ? (
+          <div className="detail-tab-pricing">
+            {matchedEconomics ? (
+              <>
+                <div className="detail-grid">
+                  {economicsDetailRows(matchedEconomics).map(([label, value]) => (
+                    <MetricRow key={label} label={label} value={value} />
+                  ))}
+                </div>
+                {matchedEconomics.reason ? <p className="warning-text">{matchedEconomics.reason}</p> : null}
+                {matchedEconomics.notes ? (
+                  <details className="technical-accordion">
+                    <summary>Full fee &amp; cost notes</summary>
+                    <p className="section-note notes-block">{matchedEconomics.notes}</p>
+                  </details>
+                ) : null}
+              </>
+            ) : (
+              <div className="pricing-empty-state">
+                <EmptyBlock text="No cost or profit data yet for this product." />
+                <button type="button" className="secondary" onClick={() => navigate("Products")}>Fix Cost</button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
+        )}
         <details className="technical-accordion">
           <summary>Advanced Details</summary>
           <div className="detail-grid">
@@ -3508,23 +3635,6 @@ function ProductEconomicsPage() {
   const selectedRow = rows.find((row) => row.id === selectedId) ?? null;
   const completeCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("COMPLETE") || normalizeState(row.profitDataStatus).includes("AVAILABLE")).length;
   const needsInputCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("MISSING") || normalizeState(row.profitDataStatus).includes("NEEDS") || normalizeState(row.profitDataStatus).includes("PARTIAL")).length;
-
-  function economicsDetailRows(row: ProductEconomics): Array<[string, ReactNode]> {
-    return [
-      ["Selling Price", formatMoney(row.sellingPrice)],
-      ["Buying Cost", formatMoney(row.buyingCost)],
-      ["Landed Cost", formatMoney(row.landedCost)],
-      ["Required Profit", formatMoney(row.requiredProfit)],
-      ["Net Profit", formatMoney(row.netProfit)],
-      ["Net Profit Before Ads", formatMoney(row.netProfitBeforeAds)],
-      ["Profit Margin", formatPercent(row.profitMargin)],
-      ["Target ACOS", formatPercent(row.targetAcos)],
-      ["Break-even ACOS", formatPercent(row.breakEvenAcos)],
-      ["Profit Status", <StatusBadge key="profit-status" value={row.profitStatus ?? "NEEDS_INPUT"} />],
-      ["Data Status", <StatusBadge key="data-status" value={row.profitDataStatus ?? "NEEDS_INPUT"} />],
-      ["Fee Rules Version", formatEmpty(row.feeRulesVersion)]
-    ];
-  }
 
   return (
     <div className="page">
