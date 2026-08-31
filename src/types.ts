@@ -206,6 +206,7 @@ export type ProductEconomics = {
   netProfit?: number | string | null;
   netProfitBeforeAds?: number | string | null;
   profitMargin?: number | string | null;
+  profitMarginPercent?: number | string | null;
   feeRulesVersion?: string | null;
   requiredProfit?: number | string | null;
   minimumApprovedProfit?: number | string | null;
