@@ -1505,12 +1505,13 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
     error: string | null;
   }>({ loading: false, report: null, error: null });
 
-  async function handleLoadAplusContent() {
+  async function handleLoadAplusContent(forceRefresh = false) {
     if (!detailProduct?.asin) return;
     setAplusState({ loading: true, report: null, error: null });
     try {
+      const refreshParam = forceRefresh ? "&refresh=true" : "";
       const report = await getJson<AplusContentReport>(
-        `/api/aplus-content/preview?sellerId=${SELLER_ID}&asin=${encodeURIComponent(String(detailProduct.asin))}`
+        `/api/aplus-content/preview?sellerId=${SELLER_ID}&asin=${encodeURIComponent(String(detailProduct.asin))}${refreshParam}`
       );
       setAplusState({ loading: false, report, error: null });
     } catch (error) {
@@ -1700,7 +1701,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <div className="aplus-preview">
               <div className="aplus-preview-meta">
                 <span>{aplusState.report.moduleCount} module(s) · status: {aplusState.report.status} · {aplusState.report.source === "CACHED" ? "from cache" : "freshly loaded"}</span>
-                <button type="button" className="secondary" onClick={handleLoadAplusContent}>Refresh</button>
+                <button type="button" className="secondary" onClick={() => handleLoadAplusContent(true)}>Refresh</button>
               </div>
               {aplusState.report.modules.map((module, index) => (
                 <div className="aplus-module" key={index}>
