@@ -3272,9 +3272,9 @@ textarea {
   width: 100%;
   max-width: 100%;
   height: auto;
-  min-height: 320px;
+  border: none;
   border-radius: 8px;
-  object-fit: cover;
+  object-fit: contain;
   background: #ffffff;
 }
 
@@ -3294,8 +3294,10 @@ textarea {
 .aplus-module-item .aplus-block-image {
   width: 100%;
   height: 220px;
+  border: none;
   border-radius: 10px;
-  object-fit: cover;
+  object-fit: contain;
+  background: #ffffff;
 }
 
 .aplus-module-item strong {
