@@ -855,7 +855,8 @@ function ProductImage({
   title,
   variant = "medium",
   fallbackType = "product",
-  className = ""
+  className = "",
+  eager = false
 }: {
   src?: unknown;
   product?: unknown;
@@ -867,6 +868,7 @@ function ProductImage({
   variant?: ProductThumbnailVariant;
   fallbackType?: ProductFallbackType;
   className?: string;
+  eager?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const image = firstValidImageUrl([mainImageUrl, imageUrl, amazonImageUrl, imageUrls, src]) ?? getProductImage(product);
@@ -874,35 +876,7 @@ function ProductImage({
     setFailed(false);
   }, [image]);
   if (!image || failed) return <ProductPlaceholder title={title} variant={variant} fallbackType={fallbackType} className={className} />;
-  return <img loading="lazy" decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
-}
-
-function relativeTimeFrom(iso: string | null): string {
-  if (!iso) return "not yet run";
-  const diffMs = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
-  const minutes = Math.floor(diffMs / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-}
-
-function BackgroundSyncStatus() {
-  const status = useApi<{ ok: boolean; lastRunAt: string | null; lastRunSummary: string | null; isRunning: boolean }>(
-    () => getJson(`/api/background-sync/status`)
-  );
-
-  if (status.loading || !status.data) {
-    return <p className="background-sync-status">Auto-syncs with Amazon every 15 minutes.</p>;
-  }
-
-  return (
-    <p className="background-sync-status" title={status.data.lastRunSummary ?? undefined}>
-      <FounderIcon name="shield" />
-      {status.data.isRunning ? "Syncing with Amazon now..." : `Auto-synced with Amazon \u00b7 last run ${relativeTimeFrom(status.data.lastRunAt)}`}
-    </p>
-  );
+  return <img loading={eager ? "eager" : "lazy"} decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
 }
 
 function ProductThumbnail({
@@ -910,7 +884,8 @@ function ProductThumbnail({
   title,
   variant = "medium",
   fallbackType = "product",
-  className = ""
+  className = "",
+  eager = false
 }: {
   src?: unknown;
   title: string;
@@ -918,8 +893,9 @@ function ProductThumbnail({
   variant?: ProductThumbnailVariant;
   fallbackType?: ProductFallbackType;
   className?: string;
+  eager?: boolean;
 }) {
-  return <ProductImage src={src} title={title} variant={variant} fallbackType={fallbackType} className={className} />;
+  return <ProductImage src={src} title={title} variant={variant} fallbackType={fallbackType} className={className} eager={eager} />;
 }
 
 function ProductThumb({
@@ -1702,19 +1678,19 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                 <div className="aplus-module" key={index}>
                   <span className="aplus-module-type">{module.type}</span>
                   {module.headline ? <h3>{module.headline}</h3> : null}
-                  {module.body ? <p>{module.body}</p> : null}
                   {module.images.length > 0 ? (
                     <div className="aplus-module-images">
                       {module.images.map((url, imgIndex) => (
-                        <ProductThumbnail key={imgIndex} src={url} title={`${module.type} image ${imgIndex + 1}`} className="product-thumb" />
+                        <ProductThumbnail key={imgIndex} src={url} title={`${module.type} image ${imgIndex + 1}`} className="aplus-image" eager />
                       ))}
                     </div>
                   ) : null}
+                  {module.body ? <p>{module.body}</p> : null}
                   {module.items.length > 0 ? (
                     <div className="aplus-module-items">
                       {module.items.map((item, itemIndex) => (
                         <div className="aplus-module-item" key={itemIndex}>
-                          {item.image ? <ProductThumbnail src={item.image} title={item.headline ?? `Block ${itemIndex + 1}`} className="product-thumb" /> : null}
+                          {item.image ? <ProductThumbnail src={item.image} title={item.headline ?? `Block ${itemIndex + 1}`} className="aplus-block-image" eager /> : null}
                           {item.headline ? <strong>{item.headline}</strong> : null}
                           {item.body ? <p>{item.body}</p> : null}
                         </div>
@@ -1722,7 +1698,10 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                     </div>
                   ) : null}
                   {!module.headline && !module.body && module.images.length === 0 && module.items.length === 0 ? (
-                    <p className="section-note">This module type isn't fully supported for preview yet.</p>
+                    <p className="section-note">
+                      This section didn't include readable text or images from Amazon's response.
+                      {module.debugKeys && module.debugKeys.length > 0 ? ` (fields Amazon sent: ${module.debugKeys.join(", ")})` : ""}
+                    </p>
                   ) : null}
                 </div>
               ))}
