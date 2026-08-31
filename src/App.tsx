@@ -879,6 +879,34 @@ function ProductImage({
   return <img loading={eager ? "eager" : "lazy"} decoding="async" className={`product-thumbnail product-thumbnail-${variant} ${className}`} src={image} alt={title} onError={() => setFailed(true)} />;
 }
 
+function relativeTimeFrom(iso: string | null): string {
+  if (!iso) return "not yet run";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+}
+
+function BackgroundSyncStatus() {
+  const status = useApi<{ ok: boolean; lastRunAt: string | null; lastRunSummary: string | null; isRunning: boolean }>(
+    () => getJson(`/api/background-sync/status`)
+  );
+
+  if (status.loading || !status.data) {
+    return <p className="background-sync-status">Auto-syncs with Amazon every 15 minutes.</p>;
+  }
+
+  return (
+    <p className="background-sync-status" title={status.data.lastRunSummary ?? undefined}>
+      <FounderIcon name="shield" />
+      {status.data.isRunning ? "Syncing with Amazon now..." : `Auto-synced with Amazon · last run ${relativeTimeFrom(status.data.lastRunAt)}`}
+    </p>
+  );
+}
+
 function ProductThumbnail({
   src,
   title,
