@@ -140,6 +140,7 @@ export type NormalizedAplusModule = {
   body?: string;
   images: string[];
   items: NormalizedAplusBlock[];
+  debugKeys?: string[];
 };
 
 export type AplusContentReport = {
