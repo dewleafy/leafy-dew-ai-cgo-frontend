@@ -3269,12 +3269,11 @@ textarea {
 }
 
 .aplus-module-images .aplus-image {
+  display: block;
   width: 100%;
-  max-width: 100%;
   height: auto;
   border: none;
   border-radius: 8px;
-  object-fit: contain;
   background: #ffffff;
 }
 
@@ -3292,6 +3291,7 @@ textarea {
 }
 
 .aplus-module-item .aplus-block-image {
+  display: block;
   width: 100%;
   height: 220px;
   border: none;
