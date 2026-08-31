@@ -1518,6 +1518,13 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
     }
   }
 
+  useEffect(() => {
+    if (detailProduct?.asin) {
+      handleLoadAplusContent();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailProduct?.asin]);
+
   if (passports.loading || economics.loading) {
     return (
       <PageLayout title="Product Detail" subtitle="Live Amazon product workspace.">
@@ -1668,77 +1675,81 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
           </div>
         </aside>
       </div>
+
+      <section className="aplus-storefront-section">
+        <div className="section-heading">
+          <h2>Product Description &amp; A+ Content</h2>
+          <p>Pulled directly from this ASIN's live A+ Content on Amazon.</p>
+        </div>
+        {!detailProduct.asin ? (
+          <p className="error-text">This product has no ASIN on file yet, so A+ Content can't be looked up.</p>
+        ) : aplusState.loading ? (
+          <LoadingBlock text="Loading A+ Content from Amazon..." />
+        ) : aplusState.error ? (
+          <p className="error-text">{aplusState.error}</p>
+        ) : aplusState.report ? (
+          aplusState.report.warning ? (
+            <p className="warning-text">{aplusState.report.warning}</p>
+          ) : aplusState.report.moduleCount === 0 ? (
+            <EmptyBlock text="No A+ Content found for this product on Amazon." />
+          ) : (
+            <div className="aplus-preview">
+              <div className="aplus-preview-meta">
+                <span>{aplusState.report.moduleCount} module(s) · status: {aplusState.report.status} · {aplusState.report.source === "CACHED" ? "from cache" : "freshly loaded"}</span>
+                <button type="button" className="secondary" onClick={handleLoadAplusContent}>Refresh</button>
+              </div>
+              {aplusState.report.modules.map((module, index) => (
+                <div className="aplus-module" key={index}>
+                  <span className="aplus-module-type">{module.type}</span>
+                  {module.headline ? <h3>{module.headline}</h3> : null}
+                  {module.body ? <p>{module.body}</p> : null}
+                  {module.images.length > 0 ? (
+                    <div className="aplus-module-images">
+                      {module.images.map((url, imgIndex) => (
+                        <ProductThumbnail key={imgIndex} src={url} title={`${module.type} image ${imgIndex + 1}`} className="product-thumb" />
+                      ))}
+                    </div>
+                  ) : null}
+                  {module.items.length > 0 ? (
+                    <div className="aplus-module-items">
+                      {module.items.map((item, itemIndex) => (
+                        <div className="aplus-module-item" key={itemIndex}>
+                          {item.image ? <ProductThumbnail src={item.image} title={item.headline ?? `Block ${itemIndex + 1}`} className="product-thumb" /> : null}
+                          {item.headline ? <strong>{item.headline}</strong> : null}
+                          {item.body ? <p>{item.body}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {!module.headline && !module.body && module.images.length === 0 && module.items.length === 0 ? (
+                    <p className="section-note">This module type isn't fully supported for preview yet.</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )
+        ) : null}
+      </section>
+
       <div className="bottom-tabs">
-        {["Overview", "Content", "Pricing & Profit", "Images & A+", "PPC", "Recommendations", "History"].map((tab) => (
+        {["Overview", "Content", "Pricing & Profit", "PPC", "Recommendations", "History"].map((tab) => (
           <button type="button" key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>
         ))}
       </div>
-      {activeTab === "Images & A+" ? (
-        <Card title="Images & A+">
-          <p className="section-note">A+ Content preview — pulled from Amazon's A+ Content API for this ASIN.</p>
-          <button type="button" onClick={handleLoadAplusContent} disabled={aplusState.loading || !detailProduct.asin}>
-            {aplusState.loading ? "Loading from Amazon..." : "Load A+ Content Preview"}
-          </button>
-          {!detailProduct.asin ? <p className="error-text">This product has no ASIN on file yet, so A+ Content can't be looked up.</p> : null}
-          {aplusState.error ? <p className="error-text">{aplusState.error}</p> : null}
-          {aplusState.report ? (
-            aplusState.report.warning ? (
-              <p className="warning-text">{aplusState.report.warning}</p>
-            ) : aplusState.report.moduleCount === 0 ? (
-              <EmptyBlock text="No A+ Content found for this product on Amazon." />
-            ) : (
-              <div className="aplus-preview">
-                <p className="section-note">
-                  {aplusState.report.moduleCount} module(s) found · status: {aplusState.report.status} · {aplusState.report.source === "CACHED" ? "from cache" : "freshly loaded"}
-                </p>
-                {aplusState.report.modules.map((module, index) => (
-                  <div className="aplus-module" key={index}>
-                    <span className="aplus-module-type">{module.type}</span>
-                    {module.headline ? <h3>{module.headline}</h3> : null}
-                    {module.body ? <p>{module.body}</p> : null}
-                    {module.images.length > 0 ? (
-                      <div className="aplus-module-images">
-                        {module.images.map((url, imgIndex) => (
-                          <ProductThumbnail key={imgIndex} src={url} title={`${module.type} image ${imgIndex + 1}`} className="product-thumb" />
-                        ))}
-                      </div>
-                    ) : null}
-                    {module.items.length > 0 ? (
-                      <div className="aplus-module-items">
-                        {module.items.map((item, itemIndex) => (
-                          <div className="aplus-module-item" key={itemIndex}>
-                            {item.image ? <ProductThumbnail src={item.image} title={item.headline ?? `Block ${itemIndex + 1}`} className="product-thumb" /> : null}
-                            {item.headline ? <strong>{item.headline}</strong> : null}
-                            {item.body ? <p>{item.body}</p> : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    {!module.headline && !module.body && module.images.length === 0 && module.items.length === 0 ? (
-                      <p className="section-note">This module type isn't fully supported for preview yet.</p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            )
-          ) : null}
-        </Card>
-      ) : (
-        <Card title={activeTab}>
-          <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
-          <details className="technical-accordion">
-            <summary>Advanced Details</summary>
-            <div className="detail-grid">
-              <MetricRow label="Internal Key" value={detailProduct.key} />
-              <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
-              {imageDebugFields.map(([label, value]) => (
-                <MetricRow key={label} label={label} value={value} />
-              ))}
-            </div>
-            <ProductImageDebug product={detailImageSource} />
-          </details>
-        </Card>
-      )}
+      <Card title={activeTab}>
+        <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
+        <details className="technical-accordion">
+          <summary>Advanced Details</summary>
+          <div className="detail-grid">
+            <MetricRow label="Internal Key" value={detailProduct.key} />
+            <MetricRow label="Data Status" value={cleanFounderText(detailProduct.costStatus)} />
+            {imageDebugFields.map(([label, value]) => (
+              <MetricRow key={label} label={label} value={value} />
+            ))}
+          </div>
+          <ProductImageDebug product={detailImageSource} />
+        </details>
+      </Card>
     </div>
   );
 }
