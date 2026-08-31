@@ -1710,7 +1710,14 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                   {module.images.length > 0 ? (
                     <div className="aplus-module-images">
                       {module.images.map((url, imgIndex) => (
-                        <ProductThumbnail key={imgIndex} src={url} title={`${module.type} image ${imgIndex + 1}`} className="aplus-image" eager />
+                        <img
+                          key={imgIndex}
+                          src={url}
+                          alt={`${module.type} image ${imgIndex + 1}`}
+                          loading="eager"
+                          decoding="async"
+                          className="aplus-image"
+                        />
                       ))}
                     </div>
                   ) : null}
@@ -1719,7 +1726,15 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                     <div className="aplus-module-items">
                       {module.items.map((item, itemIndex) => (
                         <div className="aplus-module-item" key={itemIndex}>
-                          {item.image ? <ProductThumbnail src={item.image} title={item.headline ?? `Block ${itemIndex + 1}`} className="aplus-block-image" eager /> : null}
+                          {item.image ? (
+                            <img
+                              src={item.image}
+                              alt={item.headline ?? `Block ${itemIndex + 1}`}
+                              loading="eager"
+                              decoding="async"
+                              className="aplus-block-image"
+                            />
+                          ) : null}
                           {item.headline ? <strong>{item.headline}</strong> : null}
                           {item.body ? <p>{item.body}</p> : null}
                         </div>
