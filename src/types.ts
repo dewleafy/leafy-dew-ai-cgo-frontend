@@ -910,3 +910,88 @@ export type CreativeRecommendation = AnyRecord & {
   status?: string | null;
   actionId?: string | null;
 };
+
+export type AmazonAdsDashboardMetricSummary = {
+  impressions: number;
+  clicks: number;
+  cost: number;
+  sales: number;
+  orders: number;
+  ctr: number;
+  cpc: number;
+  acos: number | null;
+  roas: number | null;
+  conversionRate: number;
+};
+
+export type AmazonAdsDashboardCampaignSummary = AmazonAdsDashboardMetricSummary & {
+  campaignId: string;
+  campaignName: string | null;
+};
+
+export type AmazonAdsDashboardDailyTrend = AmazonAdsDashboardMetricSummary & {
+  date: string;
+};
+
+export type AmazonAdsDashboardSummary = AnyRecord & {
+  ok?: boolean;
+  sellerId?: string;
+  days?: number;
+  dateRange?: { startDate: string; endDate: string };
+  totals: AmazonAdsDashboardMetricSummary;
+  dailyTrend: AmazonAdsDashboardDailyTrend[];
+  campaigns: AmazonAdsDashboardCampaignSummary[];
+  bestCampaignByClicks: AmazonAdsDashboardCampaignSummary | null;
+  highestSpendCampaign: AmazonAdsDashboardCampaignSummary | null;
+  zeroSalesSpend: number;
+};
+
+export type AmazonAdsRecommendationEvidence = {
+  impressions: number;
+  clicks: number;
+  cost: number;
+  sales: number;
+  orders: number;
+  ctr: number;
+  cpc: number;
+  acos: number | null;
+  roas: number;
+  conversionRate: number;
+};
+
+export type AmazonAdsRecommendationItem = AnyRecord & {
+  searchTerm: string;
+  campaignId: string;
+  campaignName: string | null;
+  adGroupId: string;
+  adGroupName: string | null;
+  recommendationType?: string | null;
+  recommendedAction?: string | null;
+  priorityScore?: number | null;
+  priorityLabel?: "LOW" | "MEDIUM" | "HIGH" | "URGENT" | null;
+  confidenceScore?: number | null;
+  confidenceLabel?: "LOW" | "MEDIUM" | "HIGH" | null;
+  riskLevel?: "LOW" | "MEDIUM" | "HIGH" | null;
+  reason?: string | null;
+  evidence?: AmazonAdsRecommendationEvidence;
+};
+
+export type PpcRecommendationResponse = AnyRecord & {
+  ok?: boolean;
+  sellerId?: string;
+  days?: number;
+  targetAcos?: number;
+  effectiveTargetAcos?: number;
+  summary?: Record<string, number>;
+  profitDataStatus?: "AVAILABLE" | "MISSING" | "MISSING_COST_DATA";
+  exactMatchOpportunities: AmazonAdsRecommendationItem[];
+  productTargetingOpportunities: AmazonAdsRecommendationItem[];
+  watchlistWasteTerms: AmazonAdsRecommendationItem[];
+  negativeKeywordCandidates: AmazonAdsRecommendationItem[];
+  negativeProductTargetCandidates: AmazonAdsRecommendationItem[];
+  bidDownCandidates: AmazonAdsRecommendationItem[];
+  productPageCheckWarnings: AmazonAdsRecommendationItem[];
+  profitRiskWarnings: AmazonAdsRecommendationItem[];
+  monitorOnlyTerms: AmazonAdsRecommendationItem[];
+  warnings?: string[];
+};
