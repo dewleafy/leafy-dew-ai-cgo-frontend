@@ -1526,6 +1526,17 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const products = mergeFounderProducts(passports.data, economics.data);
   const detailProduct = product ?? products[0] ?? null;
+  const detailAsin = detailProduct?.asin ? String(detailProduct.asin).trim() : "";
+  const detailSku = detailProduct?.sku ? String(detailProduct.sku).trim() : "";
+  const ledgerFilter = detailAsin
+    ? `&asin=${encodeURIComponent(detailAsin)}`
+    : detailSku
+    ? `&sku=${encodeURIComponent(detailSku)}`
+    : "";
+  const actionLedger = useApi<ApiRows<ActionLedgerRow>>(
+    () => (ledgerFilter ? getJson(`/api/action-ledger?sellerId=${SELLER_ID}&limit=100${ledgerFilter}`) : Promise.resolve({ rows: [] })),
+    [ledgerFilter]
+  );
 
   const [schemaCheckState, setSchemaCheckState] = useState<{
     loading: boolean;
@@ -1619,7 +1630,6 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const readinessRows = readiness.data?.rows ?? [];
   const matchedEconomics = findByskuOrAsin(economicsRows, detailProduct);
   const matchedReadiness = findByskuOrAsin(readinessRows, detailProduct);
-  const detailAsin = detailProduct.asin ? String(detailProduct.asin).trim() : "";
   const matchedCampaigns = detailAsin
     ? (adsSummary.data?.campaigns ?? []).filter((campaign) => campaignNameMatchesAsin(campaign.campaignName, detailAsin))
     : [];
@@ -1642,6 +1652,13 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   );
   const matchedAdsAcos = matchedAdsTotals.sales > 0 ? (matchedAdsTotals.cost / matchedAdsTotals.sales) * 100 : null;
   const matchedAdsRoas = matchedAdsTotals.cost > 0 ? matchedAdsTotals.sales / matchedAdsTotals.cost : null;
+  const ledgerRows = actionLedger.data?.rows ?? [];
+  const pendingLedgerRows = ledgerRows
+    .filter((row) => normalizeState(row.approvalStatus ?? row.state).includes("PENDING") || normalizeState(row.state).includes("WAITING"))
+    .sort((a, b) => new Date(String(b.createdAt ?? 0)).getTime() - new Date(String(a.createdAt ?? 0)).getTime());
+  const resolvedLedgerRows = ledgerRows
+    .filter((row) => !pendingLedgerRows.includes(row))
+    .sort((a, b) => new Date(String(b.createdAt ?? 0)).getTime() - new Date(String(a.createdAt ?? 0)).getTime());
 
   return (
     <div className="page founder-page">
@@ -1964,6 +1981,56 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                   )}
                 </div>
               </>
+            )}
+          </div>
+        ) : activeTab === "Recommendations" ? (
+          <div className="detail-tab-recommendations">
+            {!detailAsin && !detailSku ? (
+              <EmptyBlock text="This product has no SKU or ASIN on file yet, so recommendations can't be matched to it." />
+            ) : actionLedger.loading ? (
+              <LoadingBlock text="Loading recommendations..." />
+            ) : pendingLedgerRows.length === 0 ? (
+              <EmptyBlock text="No open recommendations for this product right now." />
+            ) : (
+              <>
+                <p className="section-note">Recommendations waiting for a decision, pulled from your Approval Center for this product only.</p>
+                <div className="card-list">
+                  {pendingLedgerRows.map((row) => (
+                    <article className="item-card compact-card" key={row.id}>
+                      <div className="badge-row">
+                        <StatusBadge value={row.riskLevel ?? "MEDIUM"} />
+                        <span className="section-note">{formatLocalDateTime(row.createdAt)}</span>
+                      </div>
+                      <strong>{cleanFounderText(row.title, "Recommendation")}</strong>
+                      <p>{cleanFounderText(row.summary)}</p>
+                    </article>
+                  ))}
+                </div>
+                <button type="button" className="secondary" onClick={() => navigate("Approval Center")}>Review in Approval Center</button>
+              </>
+            )}
+          </div>
+        ) : activeTab === "History" ? (
+          <div className="detail-tab-history">
+            {!detailAsin && !detailSku ? (
+              <EmptyBlock text="This product has no SKU or ASIN on file yet, so history can't be matched to it." />
+            ) : actionLedger.loading ? (
+              <LoadingBlock text="Loading history..." />
+            ) : resolvedLedgerRows.length === 0 ? (
+              <EmptyBlock text="No decided actions yet for this product." />
+            ) : (
+              <div className="card-list">
+                {resolvedLedgerRows.map((row) => (
+                  <article className="item-card compact-card" key={row.id}>
+                    <div className="badge-row">
+                      <StatusBadge value={row.approvalStatus ?? row.state ?? "UNKNOWN"} />
+                      <span className="section-note">{formatLocalDateTime(row.createdAt)}</span>
+                    </div>
+                    <strong>{cleanFounderText(row.title, "Action")}</strong>
+                    <p>{cleanFounderText(row.summary)}</p>
+                  </article>
+                ))}
+              </div>
             )}
           </div>
         ) : (
