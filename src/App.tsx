@@ -1190,6 +1190,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
+  const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
   const data = todayCommandSummaryOf(today.data);
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const productCount = products.length;
@@ -1249,9 +1250,9 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
       <section className="quick-status-strip">
         <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? "Catalog connected" : "No product data available"} />
         <FounderMetric label="Active Listings" value={activeListings || "-"} icon="check" trend={activeListings ? "Live catalog signal" : "Waiting for sync"} />
-        <FounderMetric label="Sales 7D" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sevenDaySales"]))} icon="sales" trend="Last 7 days" tone="blue" />
-        <FounderMetric label="Net Profit 7D" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit7d"]))} icon="chart" trend="After known costs" />
-        <FounderMetric label="ACOS 7D" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "sevenDayAcos"]))} icon="growth" trend="Ads efficiency" tone="gold" />
+        <FounderMetric label="Ad Sales (7d)" value={adsSummary.loading ? "…" : formatMoney(adsSummary.data?.totals?.sales)} icon="sales" trend="Ad-attributed, not total store sales" tone="blue" />
+        <FounderMetric label="Profit Risk Products" value={profitRisks || "0"} icon="chart" trend={profitRisks ? "Products flagged low-profit" : "None flagged right now"} />
+        <FounderMetric label="ACOS 7D" value={adsSummary.loading ? "…" : formatPercent(adsSummary.data?.totals?.acos)} icon="growth" trend="Ads efficiency" tone="gold" />
         <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="All actions locked" />
       </section>
       </section>
