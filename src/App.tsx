@@ -28,6 +28,8 @@ import type {
   ActionLedgerSummary,
   ActivityLogEvent,
   ActivityLogSummary,
+  AmazonAdsDashboardSummary,
+  AmazonAdsRecommendationItem,
   AnyRecord,
   ApiRows,
   ApprovalExecutionSummary,
@@ -70,6 +72,7 @@ import type {
   NotificationSummary,
   ProductionHealthModule,
   ProductionHealthSummary,
+  PpcRecommendationResponse,
   ProductEconomics,
   ProductPassport,
   QaSmokeCheck,
@@ -2139,39 +2142,54 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
+function ppcRiskItems(ppc: PpcRecommendationResponse | null | undefined): AmazonAdsRecommendationItem[] {
+  if (!ppc) return [];
+  const combined = [
+    ...(ppc.profitRiskWarnings ?? []),
+    ...(ppc.negativeKeywordCandidates ?? []),
+    ...(ppc.negativeProductTargetCandidates ?? []),
+    ...(ppc.watchlistWasteTerms ?? [])
+  ];
+  return combined.sort((a, b) => readNumber(b.priorityScore) - readNumber(a.priorityScore));
+}
+
 function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
-  const today = useApi<TodayCommandSummary>(() => getJson(`/api/today-command/summary?sellerId=${SELLER_ID}`));
-  const ppc = useApi<AnyRecord>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
+  const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
+  const ppc = useApi<PpcRecommendationResponse>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const data = todayCommandSummaryOf(today.data);
-  const ppcRisks = arrayOf(ppc.data?.watchlistRisks).slice(0, 4);
+  const totals = adsSummary.data?.totals;
+  const dailyTrend = adsSummary.data?.dailyTrend ?? [];
+  const ppcRisks = ppcRiskItems(ppc.data).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
-  const salesTrend = readNumberSeries(data, ["salesTrend", "sales7dTrend", "dailySales", "salesSeries"]);
-  const adsTrend = readNumberSeries(data, ["adSpendTrend", "adSpend7dTrend", "dailyAdSpend", "adsSeries"]);
+  const salesTrend = dailyTrend.map((day) => readNumber(day.sales));
+  const adsTrend = dailyTrend.map((day) => readNumber(day.cost));
   const salesMax = Math.max(...salesTrend, 0);
   const adsMax = Math.max(...adsTrend, 0);
+  const hasAdsError = Boolean(adsSummary.error);
 
   return (
     <div className="page founder-page">
-      <PageHeader title="Sales & Ads" subtitle="Understand sales, ads, ACOS, and profit health." />
+      <PageHeader title="Sales & Ads" subtitle="Ad-attributed sales, spend, and ACOS from Amazon Ads (last 7 days)." />
+      {hasAdsError ? <SafetyBanner text="Amazon Ads data could not be loaded right now. Showing whatever is available." /> : null}
       <div className="quick-status-strip">
-        <FounderMetric label="Sales" value={formatMoney(readFirst(data, ["sales7d", "sales7D", "sales"]))} />
-        <FounderMetric label="Orders" value={cleanFounderText(readFirst(data, ["orders7d", "orders7D", "orders"]), "0")} />
-        <FounderMetric label="Ad Spend" value={formatMoney(readFirst(data, ["adSpend7d", "adSpend7D", "adSpend"]))} />
-        <FounderMetric label="ACOS" value={formatPercent(readFirst(data, ["acos7d", "acos7D", "acos"]))} />
-        <FounderMetric label="Profit" value={formatMoney(readFirst(data, ["netProfit7d", "netProfit7D", "profit"]))} />
-        <FounderMetric label="PPC Risk" value={ppcRisks.length} />
+        <FounderMetric label="Ad Sales (7d)" value={adsSummary.loading ? "…" : formatMoney(totals?.sales)} />
+        <FounderMetric label="Ad Orders (7d)" value={adsSummary.loading ? "…" : cleanFounderText(totals?.orders, "0")} />
+        <FounderMetric label="Ad Spend (7d)" value={adsSummary.loading ? "…" : formatMoney(totals?.cost)} />
+        <FounderMetric label="ACOS" value={adsSummary.loading ? "…" : formatPercent(totals?.acos)} />
+        <FounderMetric label="ROAS" value={adsSummary.loading ? "…" : totals?.roas != null ? `${Number(totals.roas).toFixed(2)}x` : "—"} />
+        <FounderMetric label="PPC Risk" value={ppc.loading ? "…" : ppcRisks.length} />
       </div>
+      <p className="section-note">"Ad Sales" and "Ad Orders" count only sales Amazon attributes to ads — not your total store sales.</p>
       <div className="sales-layout">
-        <Card title="Sales Trend">
-          {salesTrend.length === 0 ? <EmptyBlock text="No sales data available" /> : (
+        <Card title="Ad Sales Trend (daily)">
+          {adsSummary.loading ? <LoadingBlock /> : salesTrend.length === 0 ? <EmptyBlock text="No ad sales data available yet." /> : (
             <div className="simple-chart">
               {salesTrend.map((value, index) => <span key={index} style={{ height: `${salesMax > 0 ? Math.max(8, (value / salesMax) * 100) : 8}%` }} />)}
             </div>
           )}
         </Card>
-        <Card title="Ad Spend vs Sales">
-          {adsTrend.length === 0 ? <EmptyBlock text="No ads data available" /> : (
+        <Card title="Ad Spend Trend (daily)">
+          {adsSummary.loading ? <LoadingBlock /> : adsTrend.length === 0 ? <EmptyBlock text="No ad spend data available yet." /> : (
             <div className="simple-chart ads-chart">
               {adsTrend.map((value, index) => <span key={index} style={{ height: `${adsMax > 0 ? Math.max(8, (value / adsMax) * 100) : 8}%` }} />)}
             </div>
@@ -2181,9 +2199,10 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
           {ppc.loading ? <LoadingBlock /> : ppcRisks.length === 0 ? <EmptyBlock text="No PPC risks returned yet." /> : (
             <div className="card-list">
               {ppcRisks.map((risk, index) => (
-                <article className="item-card compact-card" key={String(readFirst(risk, ["id", "entityValue"]) ?? index)}>
-                  <strong>{cleanFounderText(readFirst(risk, ["title", "entityValue", "campaignName"]), "PPC risk")}</strong>
-                  <p>{cleanFounderText(readFirst(risk, ["reason", "summary", "recommendedAction"]))}</p>
+                <article className="item-card compact-card" key={`${risk.searchTerm}-${risk.campaignId}-${index}`}>
+                  <strong>{cleanFounderText(risk.searchTerm, "Search term")}</strong>
+                  <p>{cleanFounderText(risk.reason)}</p>
+                  <span className="section-note">{cleanFounderText(risk.campaignName, "Unnamed campaign")}</span>
                 </article>
               ))}
             </div>
