@@ -1896,7 +1896,8 @@ textarea {
 
 .detail-tab-overview,
 .detail-tab-content,
-.detail-tab-pricing {
+.detail-tab-pricing,
+.detail-tab-ppc {
   display: flex;
   flex-direction: column;
   gap: 18px;
