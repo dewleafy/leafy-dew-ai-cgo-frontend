@@ -28,6 +28,7 @@ import type {
   ActionLedgerSummary,
   ActivityLogEvent,
   ActivityLogSummary,
+  AmazonAdsDashboardDailyTrend,
   AmazonAdsDashboardSummary,
   AmazonAdsRecommendationItem,
   AnyRecord,
@@ -2161,8 +2162,8 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const dailyTrend = adsSummary.data?.dailyTrend ?? [];
   const ppcRisks = ppcRiskItems(ppc.data).slice(0, 4);
   const products = mergeFounderProducts(economics.data);
-  const salesTrend = dailyTrend.map((day) => readNumber(day.sales));
-  const adsTrend = dailyTrend.map((day) => readNumber(day.cost));
+  const salesTrend = dailyTrend.map((day: AmazonAdsDashboardDailyTrend) => readNumber(day.sales));
+  const adsTrend = dailyTrend.map((day: AmazonAdsDashboardDailyTrend) => readNumber(day.cost));
   const salesMax = Math.max(...salesTrend, 0);
   const adsMax = Math.max(...adsTrend, 0);
   const hasAdsError = Boolean(adsSummary.error);
@@ -2184,14 +2185,14 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <Card title="Ad Sales Trend (daily)">
           {adsSummary.loading ? <LoadingBlock /> : salesTrend.length === 0 ? <EmptyBlock text="No ad sales data available yet." /> : (
             <div className="simple-chart">
-              {salesTrend.map((value, index) => <span key={index} style={{ height: `${salesMax > 0 ? Math.max(8, (value / salesMax) * 100) : 8}%` }} />)}
+              {salesTrend.map((value: number, index: number) => <span key={index} style={{ height: `${salesMax > 0 ? Math.max(8, (value / salesMax) * 100) : 8}%` }} />)}
             </div>
           )}
         </Card>
         <Card title="Ad Spend Trend (daily)">
           {adsSummary.loading ? <LoadingBlock /> : adsTrend.length === 0 ? <EmptyBlock text="No ad spend data available yet." /> : (
             <div className="simple-chart ads-chart">
-              {adsTrend.map((value, index) => <span key={index} style={{ height: `${adsMax > 0 ? Math.max(8, (value / adsMax) * 100) : 8}%` }} />)}
+              {adsTrend.map((value: number, index: number) => <span key={index} style={{ height: `${adsMax > 0 ? Math.max(8, (value / adsMax) * 100) : 8}%` }} />)}
             </div>
           )}
         </Card>
@@ -2377,17 +2378,6 @@ function todayCommandNumber(data: AnyRecord, keys: string[]): number {
     if (value !== undefined && value !== null && value !== "") return readNumber(value);
   }
   return 0;
-}
-
-function readNumberSeries(source: unknown, keys: string[]): number[] {
-  const value = readFirst(source, keys);
-  const rows = Array.isArray(value) ? value : [];
-  return rows
-    .map((item) => {
-      if (typeof item === "number" || typeof item === "string") return Number(item);
-      return Number(readFirst(item, ["value", "sales", "adSpend", "spend", "amount", "total"]));
-    })
-    .filter((item) => Number.isFinite(item) && item >= 0);
 }
 
 function SafetyBanner({ text }: { text: string }) {
