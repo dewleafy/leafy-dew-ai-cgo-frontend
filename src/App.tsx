@@ -1520,6 +1520,8 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const readiness = useApi<ListingReadinessSummary>(() => getJson(`/api/listing-readiness?sellerId=${SELLER_ID}`));
+  const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=30`));
+  const ppc = useApi<PpcRecommendationResponse>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
   const [activeTab, setActiveTab] = useState("Overview");
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const products = mergeFounderProducts(passports.data, economics.data);
@@ -1617,6 +1619,29 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
   const readinessRows = readiness.data?.rows ?? [];
   const matchedEconomics = findByskuOrAsin(economicsRows, detailProduct);
   const matchedReadiness = findByskuOrAsin(readinessRows, detailProduct);
+  const detailAsin = detailProduct.asin ? String(detailProduct.asin).trim() : "";
+  const matchedCampaigns = detailAsin
+    ? (adsSummary.data?.campaigns ?? []).filter((campaign) => campaignNameMatchesAsin(campaign.campaignName, detailAsin))
+    : [];
+  const matchedRecommendations = detailAsin
+    ? allPpcRecommendationItems(ppc.data).filter(
+        (item) =>
+          (item.searchTerm && String(item.searchTerm).toUpperCase() === detailAsin.toUpperCase()) ||
+          campaignNameMatchesAsin(item.campaignName, detailAsin)
+      )
+    : [];
+  const matchedAdsTotals = matchedCampaigns.reduce(
+    (totals, campaign) => ({
+      impressions: totals.impressions + readNumber(campaign.impressions),
+      clicks: totals.clicks + readNumber(campaign.clicks),
+      cost: totals.cost + readNumber(campaign.cost),
+      sales: totals.sales + readNumber(campaign.sales),
+      orders: totals.orders + readNumber(campaign.orders)
+    }),
+    { impressions: 0, clicks: 0, cost: 0, sales: 0, orders: 0 }
+  );
+  const matchedAdsAcos = matchedAdsTotals.sales > 0 ? (matchedAdsTotals.cost / matchedAdsTotals.sales) * 100 : null;
+  const matchedAdsRoas = matchedAdsTotals.cost > 0 ? matchedAdsTotals.sales / matchedAdsTotals.cost : null;
 
   return (
     <div className="page founder-page">
@@ -1889,6 +1914,58 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
               </div>
             )}
           </div>
+        ) : activeTab === "PPC" ? (
+          <div className="detail-tab-ppc">
+            {!detailAsin ? (
+              <EmptyBlock text="This product has no ASIN on file yet, so ad campaigns can't be matched to it." />
+            ) : adsSummary.loading || ppc.loading ? (
+              <LoadingBlock text="Loading ad campaign data..." />
+            ) : (
+              <>
+                <p className="section-note">
+                  Campaigns are matched to this product by looking for its ASIN ({detailAsin}) inside the campaign name (last 30 days). Some campaigns advertise more than one product and may not show up here.
+                </p>
+                {matchedCampaigns.length > 0 ? (
+                  <>
+                    <div className="detail-grid">
+                      <MetricRow label="Matched Campaigns" value={matchedCampaigns.length} />
+                      <MetricRow label="Ad Spend (30d)" value={formatMoney(matchedAdsTotals.cost)} />
+                      <MetricRow label="Ad Sales (30d)" value={formatMoney(matchedAdsTotals.sales)} />
+                      <MetricRow label="Ad Orders (30d)" value={cleanFounderText(matchedAdsTotals.orders, "0")} />
+                      <MetricRow label="ACOS" value={formatPercent(matchedAdsAcos)} />
+                      <MetricRow label="ROAS" value={matchedAdsRoas != null ? `${matchedAdsRoas.toFixed(2)}x` : "—"} />
+                    </div>
+                    <div className="card-list">
+                      {matchedCampaigns.map((campaign) => (
+                        <article className="item-card compact-card" key={campaign.campaignId}>
+                          <strong>{cleanFounderText(campaign.campaignName, "Unnamed campaign")}</strong>
+                          <p>{formatMoney(campaign.cost)} spend · {formatMoney(campaign.sales)} sales · {formatPercent(campaign.acos)} ACOS · {readNumber(campaign.clicks)} clicks</p>
+                        </article>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <EmptyBlock text="No ad campaigns matched to this ASIN in the last 30 days." />
+                )}
+                <div className="missing-items-card">
+                  <strong>PPC recommendations for this product</strong>
+                  {matchedRecommendations.length > 0 ? (
+                    <div className="card-list">
+                      {matchedRecommendations.slice(0, 6).map((item, index) => (
+                        <article className="item-card compact-card" key={`${item.searchTerm}-${item.campaignId}-${index}`}>
+                          <strong>{PPC_RECOMMENDATION_CATEGORY_LABELS[item.category] ?? item.category}</strong>
+                          <p>{cleanFounderText(item.reason)}</p>
+                          <span className="section-note">{cleanFounderText(item.campaignName, "Unnamed campaign")}</span>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="section-note">No PPC recommendations are tied to this ASIN right now.</p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         ) : (
           <p className="section-note">Business-ready details for {activeTab.toLowerCase()} will appear here as the connected Amazon, economics, ads, and recommendation data grows.</p>
         )}
@@ -2141,6 +2218,37 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
       </section>
     </div>
   );
+}
+
+const PPC_RECOMMENDATION_CATEGORY_LABELS: Record<string, string> = {
+  exactMatchOpportunities: "Exact match opportunity",
+  productTargetingOpportunities: "Product targeting opportunity",
+  watchlistWasteTerms: "Watchlist (possible waste)",
+  negativeKeywordCandidates: "Negative keyword candidate",
+  negativeProductTargetCandidates: "Negative product target candidate",
+  bidDownCandidates: "Bid-down candidate",
+  productPageCheckWarnings: "Check listing page",
+  profitRiskWarnings: "Profit risk warning",
+  monitorOnlyTerms: "Monitor only"
+};
+
+function allPpcRecommendationItems(
+  ppc: PpcRecommendationResponse | null | undefined
+): Array<AmazonAdsRecommendationItem & { category: string }> {
+  if (!ppc) return [];
+  const combined: Array<AmazonAdsRecommendationItem & { category: string }> = [];
+  for (const category of Object.keys(PPC_RECOMMENDATION_CATEGORY_LABELS)) {
+    const items = (ppc as AnyRecord)[category];
+    if (Array.isArray(items)) {
+      for (const item of items) combined.push({ ...(item as AmazonAdsRecommendationItem), category });
+    }
+  }
+  return combined.sort((a, b) => readNumber(b.priorityScore) - readNumber(a.priorityScore));
+}
+
+function campaignNameMatchesAsin(name: string | null | undefined, asin: string): boolean {
+  if (!name || !asin) return false;
+  return name.toUpperCase().includes(asin.toUpperCase());
 }
 
 function ppcRiskItems(ppc: PpcRecommendationResponse | null | undefined): AmazonAdsRecommendationItem[] {
