@@ -73,6 +73,7 @@ import type {
   NotificationSummary,
   ProductionHealthModule,
   ProductionHealthSummary,
+  PpcExecutionApiResult,
   PpcRecommendationResponse,
   ProductEconomics,
   ProductPassport,
@@ -2074,6 +2075,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
     const id = row.id;
     const paths: Record<LedgerAction, string> = {
       approve: `/api/action-ledger/${id}/approve`,
+      approveExecute: `/api/action-ledger/${id}/approve`,
       reject: `/api/action-ledger/${id}/reject`,
       monitor: `/api/action-ledger/${id}/monitor`,
       complete: `/api/action-ledger/${id}/complete`
@@ -4938,7 +4940,7 @@ function EngineCommandCenterPage() {
 }
 
 type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
-type LedgerAction = "approve" | "reject" | "monitor" | "complete";
+type LedgerAction = "approve" | "reject" | "monitor" | "complete" | "approveExecute";
 type BatchLedgerAction = "reject" | "monitor" | "complete";
 type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
 type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
@@ -5110,6 +5112,14 @@ function uniqueSortedValues(rows: ActionLedgerRow[], field: keyof ActionLedgerRo
 
 function isMonitoringAction(row: ActionLedgerRow): boolean {
   return ["MONITOR", "MONITORING"].includes(normalizeState(row.state));
+}
+
+function isNegativePpcAction(row: ActionLedgerRow): boolean {
+  return (
+    row.source === "PPC_RECOMMENDATIONS" &&
+    row.actionType === "PAUSE_OR_REDUCE_SPEND_AFTER_APPROVAL" &&
+    normalizeState(row.recommendedAction) === "ADD_NEGATIVE_AFTER_APPROVAL"
+  );
 }
 
 function isCompletedAction(row: ActionLedgerRow): boolean {
@@ -5403,11 +5413,22 @@ function ActionLedgerCard({
   } else if (approvalStatus === "APPROVED") {
     footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
   } else if (approvalStatus === "PENDING") {
+    const canExecute = isNegativePpcAction(row);
     footer = (
       <div className="button-row compact">
         <button type="button" onClick={() => onAction(row, "approve")} disabled={buttonDisabled}>
           {processing?.id === row.id && processing.action === "approve" ? "Approving..." : "Approve"}
         </button>
+        {canExecute ? (
+          <button
+            type="button"
+            onClick={() => onAction(row, "approveExecute")}
+            disabled={buttonDisabled}
+            title="Approve and add this negative on Amazon Ads. Sends a real change only if PPC Live Execution is turned ON in Safety Control; otherwise this simulates it safely."
+          >
+            {processing?.id === row.id && processing.action === "approveExecute" ? "Working..." : "Approve & Send to Amazon"}
+          </button>
+        ) : null}
         <button type="button" onClick={() => onAction(row, "reject")} disabled={buttonDisabled}>
           {processing?.id === row.id && processing.action === "reject" ? "Rejecting..." : "Reject"}
         </button>
@@ -5806,6 +5827,28 @@ function ApprovalCenterPage() {
 
   async function act(row: ActionLedgerRow, action: LedgerAction) {
     const id = row.id;
+
+    if (action === "approveExecute") {
+      setProcessing({ id, action });
+      setMessage(null);
+      try {
+        const result = await postJson<PpcExecutionApiResult>(`/api/ppc-execution/${id}/execute?sellerId=${SELLER_ID}`, {
+          actor: "founder"
+        });
+        const refreshed = await refreshApprovalData();
+        await refreshDailyPriorityRows(refreshed.rows);
+        if (workflowPanels[id]?.open) {
+          await fetchWorkflowPanel(refreshed.rows.find((refreshedRow) => refreshedRow.id === id) ?? row);
+        }
+        setMessage({ type: "success", text: result?.message ?? `Processed action ${formatShortId(id)}.` });
+      } catch (error) {
+        setMessage({ type: "error", text: `Action failed: ${sanitizeActionError(error)}` });
+      } finally {
+        setProcessing(null);
+      }
+      return;
+    }
+
     const actions = {
       approve: {
         path: `/api/action-ledger/${id}/approve`,
@@ -6181,6 +6224,8 @@ function SafetyControlPage() {
     safetyNotes: ""
   });
   const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
+  const [ppcLiveState, setPpcLiveState] = useState({ loading: false, message: "", error: "" });
+  const ppcLiveExecutionEnabled = readBoolean(readFirst(settings, ["ppcLiveExecution", "ppcLiveExecutionEnabled"]));
 
   useEffect(() => {
     if (!hasSettings) return;
@@ -6219,6 +6264,32 @@ function SafetyControlPage() {
       audits.reload();
     } catch {
       setActionState({ loading: false, message: "", error: "Could not save safety settings" });
+    }
+  }
+
+  async function togglePpcLiveExecution(nextValue: boolean) {
+    if (nextValue) {
+      const confirmed = window.confirm(
+        "Turning PPC Live Execution ON means the next time you click \"Approve & Send to Amazon\" on a negative-keyword or negative-product-target recommendation, it will send a REAL change to your live Amazon Ads account. Turn this on?"
+      );
+      if (!confirmed) return;
+    }
+    setPpcLiveState({ loading: true, message: "", error: "" });
+    try {
+      await safetyControlApi.saveSettings(SELLER_ID, {
+        ppcLiveExecutionEnabled: nextValue,
+        actor: "founder",
+        note: nextValue ? "Founder turned PPC Live Execution ON." : "Founder turned PPC Live Execution OFF."
+      });
+      setPpcLiveState({
+        loading: false,
+        message: nextValue ? "PPC Live Execution is now ON. Approvals will send real changes to Amazon." : "PPC Live Execution is now OFF (practice mode).",
+        error: ""
+      });
+      status.reload();
+      audits.reload();
+    } catch {
+      setPpcLiveState({ loading: false, message: "", error: "Could not update PPC Live Execution." });
     }
   }
 
@@ -6283,6 +6354,29 @@ function SafetyControlPage() {
                   <Badge tone="good">Locked in V1</Badge>
                 </div>
               ))}
+            </div>
+          </Card>
+          <Card
+            title="PPC Live Execution (Negative Keywords)"
+            action={
+              <button
+                type="button"
+                onClick={() => togglePpcLiveExecution(!ppcLiveExecutionEnabled)}
+                disabled={ppcLiveState.loading}
+              >
+                {ppcLiveExecutionEnabled ? "Turn OFF (back to practice mode)" : "Turn ON (send real changes to Amazon)"}
+              </button>
+            }
+          >
+            <p className="section-note">
+              {ppcLiveExecutionEnabled
+                ? "PPC Live Execution is ON. Approving a negative-keyword or negative-product-target recommendation in Approval Center will send a real change to your live Amazon Ads account."
+                : "PPC Live Execution is OFF (practice mode). Approving a negative-keyword or negative-product-target recommendation in Approval Center will show you exactly what would happen on Amazon, without sending anything."}
+            </p>
+            <div className="button-row">
+              <StatusBadge value={safeBooleanLabel(ppcLiveExecutionEnabled, "WARNING", "SAFE")} />
+              {ppcLiveState.message ? <span className="save-message">{ppcLiveState.message}</span> : null}
+              {ppcLiveState.error ? <span className="save-error">{ppcLiveState.error}</span> : null}
             </div>
           </Card>
           <Card title="Edit Safe Settings">
