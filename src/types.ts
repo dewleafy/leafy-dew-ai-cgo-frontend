@@ -256,6 +256,17 @@ export type SafetyControlSettingsPayload = {
   maxDailyExecutionAttempts?: number;
   maxDailyAiCost?: number;
   safetyNotes?: string;
+  ppcLiveExecutionEnabled?: boolean;
+  actor?: string;
+  note?: string;
+};
+
+export type PpcExecutionApiResult = AnyRecord & {
+  ok?: boolean;
+  mode?: "SIMULATED" | "EXECUTED";
+  message?: string;
+  targetType?: string;
+  targetValue?: string;
 };
 
 export type SafetyControlStatus = AnyRecord & {
