@@ -1006,3 +1006,46 @@ export type PpcRecommendationResponse = AnyRecord & {
   monitorOnlyTerms: AmazonAdsRecommendationItem[];
   warnings?: string[];
 };
+
+export type AmazonSpSalesSummaryBySku = AnyRecord & {
+  sku: string;
+  asin: string | null;
+  title: string | null;
+  units: number;
+  sales: number;
+  orders: number;
+  confirmedUnits: number;
+  confirmedSales: number;
+  confirmedOrders: number;
+  pendingUnits: number;
+  pendingSales: number;
+  pendingOrders: number;
+  cancelledUnits: number;
+  cancelledSales: number;
+  cancelledOrders: number;
+};
+
+export type AmazonSpSalesSummary = AnyRecord & {
+  days: number;
+  rawSales: number;
+  rawOrders: number;
+  rawUnits: number;
+  confirmedSales: number;
+  confirmedOrders: number;
+  confirmedUnits: number;
+  pendingSales: number;
+  pendingOrders: number;
+  pendingUnits: number;
+  cancelledSales: number;
+  cancelledOrders: number;
+  cancelledUnits: number;
+  unknownSales: number;
+  unknownOrders: number;
+  unknownUnits: number;
+  totalSales: number;
+  totalOrders: number;
+  totalUnits: number;
+  averageConfirmedOrderValue: number | null;
+  averageOrderValue: number | null;
+  bySku: AmazonSpSalesSummaryBySku[];
+};
