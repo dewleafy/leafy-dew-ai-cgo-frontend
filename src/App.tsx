@@ -32,6 +32,7 @@ import type {
   AmazonAdsDashboardSummary,
   AmazonAdsRecommendationItem,
   AmazonSpSalesSummary,
+  AmazonSpSalesSummaryBySku,
   AnyRecord,
   ApiRows,
   ApprovalExecutionSummary,
@@ -783,6 +784,60 @@ function productLowProfit(product: FounderProduct): boolean {
   return state.includes("LOW") || state.includes("RISK") || (Number.isFinite(margin) && margin > 0 && margin < 15);
 }
 
+type RealProfitSummary = {
+  grossProfitBeforeAds: number;
+  netProfitAfterAds: number;
+  coveredUnits: number;
+  missingUnits: number;
+  missingSkuCount: number;
+};
+
+// Joins real per-SKU units sold (from Amazon SP-API sales-summary, confirmed orders only) with each
+// product's per-unit "profit before ads" from the profit calculator, then subtracts the real ad spend
+// for the same period. SKUs with no cost data yet are excluded from the total and counted separately,
+// so the number is honest about what it does and doesn't cover.
+function computeRealProfitSummary(bySku: AmazonSpSalesSummaryBySku[], economicsRows: ProductEconomics[], realAdSpend: number): RealProfitSummary {
+  const economicsBySku = new Map<string, ProductEconomics>();
+  economicsRows.forEach((row) => {
+    const key = String(row.sku ?? "").trim().toLowerCase();
+    if (key) economicsBySku.set(key, row);
+  });
+
+  let grossProfitBeforeAds = 0;
+  let coveredUnits = 0;
+  let missingUnits = 0;
+  let missingSkuCount = 0;
+
+  bySku.forEach((item) => {
+    const units = readNumber(item.confirmedUnits);
+    if (units <= 0) return;
+    const key = String(item.sku ?? "").trim().toLowerCase();
+    const econ = key ? economicsBySku.get(key) : undefined;
+    const perUnitProfit = econ ? Number(econ.netProfitBeforeAds) : NaN;
+    if (econ && Number.isFinite(perUnitProfit)) {
+      grossProfitBeforeAds += perUnitProfit * units;
+      coveredUnits += units;
+    } else {
+      missingUnits += units;
+      missingSkuCount += 1;
+    }
+  });
+
+  return {
+    grossProfitBeforeAds,
+    netProfitAfterAds: grossProfitBeforeAds - realAdSpend,
+    coveredUnits,
+    missingUnits,
+    missingSkuCount
+  };
+}
+
+function realProfitTrendText(summary: RealProfitSummary): string {
+  if (summary.coveredUnits === 0 && summary.missingUnits === 0) return "No real order data yet for this period";
+  if (summary.missingUnits > 0) return `${summary.missingSkuCount} product(s), ${summary.missingUnits} unit(s) missing cost data — not included`;
+  return "Real sales minus costs minus real ad spend";
+}
+
 function productStatusTone(value: unknown): "good" | "watch" | "risk" | "neutral" {
   const state = normalizeState(value);
   if (["PASS", "READY", "COMPLETE", "ACTIVE", "HEALTHY", "GOOD", "SAFE", "APPROVED", "DONE"].some((token) => state.includes(token))) return "good";
@@ -1203,6 +1258,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const listingIdeas = todayCommandNumber(data, ["listingDrafts", "totalListingDrafts", "listingIdeas"]);
   const ppcRisks = todayCommandNumber(data, ["ppcRisks", "highRiskApprovals", "highRiskCount"]);
   const profitRisks = products.filter(productLowProfit).length;
+  const realProfit = computeRealProfitSummary(salesSummary.data?.bySku ?? [], rowsOf<ProductEconomics>(economics.data), readNumber(adsSummary.data?.totals?.cost));
 
   const attentionItems = [
     missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
@@ -1255,6 +1311,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Active Listings" value={activeListings || "-"} icon="check" trend={activeListings ? "Live catalog signal" : "Waiting for sync"} />
         <FounderMetric label="Ad Sales (7d)" value={adsSummary.loading ? "…" : formatMoney(adsSummary.data?.totals?.sales)} icon="sales" trend="Ad-attributed, not total store sales" tone="blue" />
         <FounderMetric label="Total Sales (7d)" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.totalSales)} icon="sales" trend={salesSummary.error ? "Could not load real sales" : "Real store sales, all orders"} tone="green" />
+        <FounderMetric label="Real Profit (7d)" value={salesSummary.loading || economics.loading || adsSummary.loading ? "…" : formatMoney(realProfit.netProfitAfterAds)} icon="chart" trend={realProfitTrendText(realProfit)} tone="gold" />
         <FounderMetric label="Profit Risk Products" value={profitRisks || "0"} icon="chart" trend={profitRisks ? "Products flagged low-profit" : "None flagged right now"} />
         <FounderMetric label="ACOS 7D" value={adsSummary.loading ? "…" : formatPercent(adsSummary.data?.totals?.acos)} icon="growth" trend="Ads efficiency" tone="gold" />
         <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="All actions locked" />
@@ -2350,6 +2407,8 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const adsMax = Math.max(...adsTrend, 0);
   const hasAdsError = Boolean(adsSummary.error);
   const topSellingSku = [...(salesSummary.data?.bySku ?? [])].sort((a, b) => readNumber(b.sales) - readNumber(a.sales)).slice(0, 5);
+  const realProfit = computeRealProfitSummary(salesSummary.data?.bySku ?? [], rowsOf<ProductEconomics>(economics.data), readNumber(totals?.cost));
+  const realProfitLoading = salesSummary.loading || economics.loading || adsSummary.loading;
 
   return (
     <div className="page founder-page">
@@ -2379,6 +2438,17 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Cancelled Sales" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.cancelledSales)} />
       </div>
       <p className="section-note">"Total Sales" counts confirmed orders only. Pending and cancelled orders are shown separately above and are not included in the total.</p>
+
+      <div className="section-heading">
+        <h2>Real Profit</h2>
+        <p>Real sales minus per-unit product costs minus real ad spend (last 7 days).</p>
+      </div>
+      <div className="quick-status-strip">
+        <FounderMetric label="Real Gross Profit (7d)" value={realProfitLoading ? "…" : formatMoney(realProfit.grossProfitBeforeAds)} trend="Before ad spend" tone="gold" />
+        <FounderMetric label="Real Net Profit (7d)" value={realProfitLoading ? "…" : formatMoney(realProfit.netProfitAfterAds)} trend="After real ad spend" tone="gold" />
+      </div>
+      <p className="section-note">{realProfitLoading ? "Loading real profit…" : realProfitTrendText(realProfit)}</p>
+
       <Card title="Top Products by Real Sales (7d)">
         {salesSummary.loading ? <LoadingBlock /> : topSellingSku.length === 0 ? <EmptyBlock text="No real order data available yet for this period." /> : (
           <div className="card-list">
