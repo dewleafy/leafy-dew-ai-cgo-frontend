@@ -31,6 +31,7 @@ import type {
   AmazonAdsDashboardDailyTrend,
   AmazonAdsDashboardSummary,
   AmazonAdsRecommendationItem,
+  AmazonSpSalesSummary,
   AnyRecord,
   ApiRows,
   ApprovalExecutionSummary,
@@ -1192,6 +1193,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
   const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
+  const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
   const data = todayCommandSummaryOf(today.data);
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const productCount = products.length;
@@ -1252,6 +1254,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? "Catalog connected" : "No product data available"} />
         <FounderMetric label="Active Listings" value={activeListings || "-"} icon="check" trend={activeListings ? "Live catalog signal" : "Waiting for sync"} />
         <FounderMetric label="Ad Sales (7d)" value={adsSummary.loading ? "…" : formatMoney(adsSummary.data?.totals?.sales)} icon="sales" trend="Ad-attributed, not total store sales" tone="blue" />
+        <FounderMetric label="Total Sales (7d)" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.totalSales)} icon="sales" trend={salesSummary.error ? "Could not load real sales" : "Real store sales, all orders"} tone="green" />
         <FounderMetric label="Profit Risk Products" value={profitRisks || "0"} icon="chart" trend={profitRisks ? "Products flagged low-profit" : "None flagged right now"} />
         <FounderMetric label="ACOS 7D" value={adsSummary.loading ? "…" : formatPercent(adsSummary.data?.totals?.acos)} icon="growth" trend="Ads efficiency" tone="gold" />
         <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="All actions locked" />
@@ -2336,6 +2339,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
   const ppc = useApi<PpcRecommendationResponse>(() => getJson(`/api/amazon-ads/ppc-recommendations?sellerId=${SELLER_ID}&days=30&targetAcos=35`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
   const totals = adsSummary.data?.totals;
   const dailyTrend = adsSummary.data?.dailyTrend ?? [];
   const ppcRisks = ppcRiskItems(ppc.data).slice(0, 4);
@@ -2345,6 +2349,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
   const salesMax = Math.max(...salesTrend, 0);
   const adsMax = Math.max(...adsTrend, 0);
   const hasAdsError = Boolean(adsSummary.error);
+  const topSellingSku = [...(salesSummary.data?.bySku ?? [])].sort((a, b) => readNumber(b.sales) - readNumber(a.sales)).slice(0, 5);
 
   return (
     <div className="page founder-page">
@@ -2359,6 +2364,35 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="PPC Risk" value={ppc.loading ? "…" : ppcRisks.length} />
       </div>
       <p className="section-note">"Ad Sales" and "Ad Orders" count only sales Amazon attributes to ads — not your total store sales.</p>
+
+      <div className="section-heading">
+        <h2>Total Store Sales</h2>
+        <p>Real orders from your Amazon Seller account (not just ad-attributed).</p>
+      </div>
+      {salesSummary.error ? <SafetyBanner text="Real store sales could not be loaded right now. Showing whatever is available." /> : null}
+      <div className="quick-status-strip">
+        <FounderMetric label="Total Sales (7d)" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.totalSales)} tone="green" />
+        <FounderMetric label="Total Orders (7d)" value={salesSummary.loading ? "…" : cleanFounderText(salesSummary.data?.totalOrders, "0")} />
+        <FounderMetric label="Total Units (7d)" value={salesSummary.loading ? "…" : cleanFounderText(salesSummary.data?.confirmedUnits, "0")} />
+        <FounderMetric label="Avg Order Value" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.averageOrderValue)} />
+        <FounderMetric label="Pending Sales" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.pendingSales)} />
+        <FounderMetric label="Cancelled Sales" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.cancelledSales)} />
+      </div>
+      <p className="section-note">"Total Sales" counts confirmed orders only. Pending and cancelled orders are shown separately above and are not included in the total.</p>
+      <Card title="Top Products by Real Sales (7d)">
+        {salesSummary.loading ? <LoadingBlock /> : topSellingSku.length === 0 ? <EmptyBlock text="No real order data available yet for this period." /> : (
+          <div className="card-list">
+            {topSellingSku.map((item) => (
+              <article className="item-card compact-card" key={item.sku}>
+                <strong>{cleanFounderText(item.title, item.sku)}</strong>
+                <p>{formatMoney(item.sales)} sales · {readNumber(item.orders)} orders · {readNumber(item.units)} units</p>
+                <span className="section-note">{cleanFounderText(item.sku, "No SKU on file")}</span>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
+
       <div className="sales-layout">
         <Card title="Ad Sales Trend (daily)">
           {adsSummary.loading ? <LoadingBlock /> : salesTrend.length === 0 ? <EmptyBlock text="No ad sales data available yet." /> : (
