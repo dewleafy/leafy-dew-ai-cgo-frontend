@@ -38,6 +38,17 @@ export type ActionLedgerRow = {
   state?: string | null;
   approvalStatus?: string | null;
   createdAt?: string | null;
+  // The Action Ledger API already returns this on every row (it's how the action was created),
+  // but the frontend never typed or rendered it. For listing-draft actions specifically it
+  // carries the actual currentValue/proposedValue text the founder needs to see to make a
+  // decision — see ActionLedgerCard's draft-preview rendering in App.tsx.
+  payload?: {
+    draftId?: string | null;
+    draftType?: string | null;
+    currentValue?: string | null;
+    proposedValue?: string | null;
+    [key: string]: unknown;
+  } | null;
 };
 
 export type ActionLedgerSummary = {
