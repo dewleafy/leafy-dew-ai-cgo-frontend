@@ -1024,30 +1024,36 @@ function FounderMetric(props: { label: string; value: ReactNode; badge?: boolean
 type NavItem = { label: string; page: AppPage; note?: string };
 type NavGroup = { title: string; items: NavItem[] };
 
-const sideNavGroups: NavGroup[] = [
-  { title: "Daily", items: [
-    { label: "Today", page: "Today" },
-    { label: "Products", page: "Products" },
-    { label: "AI Actions", page: "AI Actions" },
-    { label: "Reports", page: "Reports" }
-  ] },
+// Simplified two-tier nav (2026-09-04): the 6 pages a founder actually opens most days are
+// always visible with no grouping label needed. Everything else — the deeper, less-frequent,
+// or power-user pages — lives under a single collapsed "Advanced Tools" disclosure so the
+// sidebar isn't 35 items deep by default. Nothing was removed or merged; every page below still
+// exists and works exactly as before, this only changes how much of the menu shows up front.
+const essentialNavItems: NavItem[] = [
+  { label: "Today", page: "Today" },
+  { label: "Products", page: "Products" },
+  { label: "Approval Center", page: "Approval Center", note: "Review and decide on pending AI recommendations" },
+  { label: "Listing Drafts", page: "Listing Drafts", note: "AI-written title, bullet, and description drafts" },
+  { label: "Sales & Ads", page: "Sales & Ads", note: "Real sales and ad performance" },
+  { label: "AI Actions", page: "AI Actions" },
+  { label: "Reports", page: "Reports" }
+];
+
+const advancedNavGroups: NavGroup[] = [
   { title: "Catalog & Listings", items: [
     { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
     { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action" },
     { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
-    { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
     { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" }
   ] },
   { title: "Growth & Ads", items: [
     { label: "Growth Engine", page: "Growth Engine" },
     { label: "Brand Center", page: "Brand Center" },
-    { label: "Sales & Ads", page: "Sales & Ads" },
     { label: "PPC Recommendations", page: "PPC Recommendations" },
     { label: "Experiments", page: "Experiments" },
     { label: "Business Alerts", page: "Alert Center" }
   ] },
   { title: "Approvals & Safety", items: [
-    { label: "Approval Center", page: "Approval Center" },
     { label: "Action Preview", page: "Approval Execution" },
     { label: "Action Safety", page: "Execution Gateway" },
     { label: "Controlled Live Actions", page: "Live Execution" },
@@ -1074,6 +1080,10 @@ const sideNavGroups: NavGroup[] = [
   ] }
 ];
 
+function isAdvancedNavPage(page: AppPage): boolean {
+  return advancedNavGroups.some((group) => group.items.some((item) => item.page === page));
+}
+
 function GrowthRing({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" className="growth-ring">
@@ -1084,6 +1094,30 @@ function GrowthRing({ size = 16 }: { size?: number }) {
   );
 }
 
+function SideNavItemButton({
+  item,
+  activePage,
+  onNavigate
+}: {
+  item: NavItem;
+  activePage: AppPage;
+  onNavigate: FounderNavigate;
+}) {
+  const isActive = activePage === item.page || (item.page === "Products" && activePage === "Product Detail");
+  return (
+    <button
+      type="button"
+      key={item.page}
+      className={`side-nav-item ${isActive ? "side-nav-item-active" : ""}`}
+      onClick={() => onNavigate(item.page)}
+      title={item.note}
+    >
+      {isActive ? <GrowthRing size={14} /> : null}
+      <span>{item.label}</span>
+    </button>
+  );
+}
+
 function SideNav({
   activePage,
   onNavigate
@@ -1091,28 +1125,45 @@ function SideNav({
   activePage: AppPage;
   onNavigate: FounderNavigate;
 }) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // If navigation elsewhere in the app lands on a page that only lives under "Advanced Tools"
+  // (e.g. a "View in Approval Center" style deep link, or a page that isn't in the everyday
+  // list), auto-expand the section so the active item is visible and highlighted instead of
+  // looking like nothing is selected.
+  useEffect(() => {
+    if (isAdvancedNavPage(activePage)) setAdvancedOpen(true);
+  }, [activePage]);
+
   return (
     <nav className="side-nav" aria-label="Primary navigation">
-      {sideNavGroups.map((group) => (
-        <div className="side-nav-group" key={group.title}>
-          <span className="side-nav-group-label">{group.title}</span>
-          {group.items.map((item) => {
-            const isActive = activePage === item.page || (item.page === "Products" && activePage === "Product Detail");
-            return (
-              <button
-                type="button"
-                key={item.page}
-                className={`side-nav-item ${isActive ? "side-nav-item-active" : ""}`}
-                onClick={() => onNavigate(item.page)}
-                title={item.note}
-              >
-                {isActive ? <GrowthRing size={14} /> : null}
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+      <div className="side-nav-group">
+        {essentialNavItems.map((item) => (
+          <SideNavItemButton key={item.page} item={item} activePage={activePage} onNavigate={onNavigate} />
+        ))}
+      </div>
+      <button
+        type="button"
+        className="side-nav-advanced-toggle"
+        onClick={() => setAdvancedOpen((open) => !open)}
+        aria-expanded={advancedOpen}
+        title="More tools: catalog detail, growth/ads detail, approvals safety controls, automation, and system pages. Most days you won't need these."
+      >
+        <span>{advancedOpen ? "▾" : "▸"}</span>
+        <span>Advanced Tools</span>
+      </button>
+      {advancedOpen ? (
+        <div className="side-nav-advanced">
+          {advancedNavGroups.map((group) => (
+            <div className="side-nav-group" key={group.title}>
+              <span className="side-nav-group-label">{group.title}</span>
+              {group.items.map((item) => (
+                <SideNavItemButton key={item.page} item={item} activePage={activePage} onNavigate={onNavigate} />
+              ))}
+            </div>
+          ))}
         </div>
-      ))}
+      ) : null}
     </nav>
   );
 }
@@ -5485,6 +5536,15 @@ function ActionLedgerCard({
   const buttonDisabled = Boolean(processing || batchProcessing || actionsDisabled);
   const showProductThumbnail = hasProductContext(row);
   const imageDebugFields = productImageDebugFields(row);
+  const draftCurrentValue = typeof row.payload?.currentValue === "string" ? row.payload.currentValue.trim() : "";
+  const draftProposedValue = typeof row.payload?.proposedValue === "string" ? row.payload.proposedValue.trim() : "";
+  const hasDraftContent = Boolean(draftCurrentValue || draftProposedValue);
+  const draftPreviewLimit = 220;
+  const draftPreviewText = draftProposedValue
+    ? draftProposedValue.length > draftPreviewLimit
+      ? `${draftProposedValue.slice(0, draftPreviewLimit).trim()}…`
+      : draftProposedValue
+    : "";
   const importantFields: Array<[string, ReactNode]> = [
     ["Recommended Action", formatEmpty(row.recommendedAction)],
     ["SKU", formatEmpty(row.sku)],
@@ -5571,6 +5631,15 @@ function ActionLedgerCard({
         </div>
       </div>
       <p className="approval-summary-text">{formatEmpty(row.summary)}</p>
+      {draftPreviewText ? (
+        <div className="approval-draft-preview">
+          <span className="approval-draft-preview-label">AI Draft Preview</span>
+          <p>{draftPreviewText}</p>
+          {draftProposedValue.length > draftPreviewLimit ? (
+            <span className="approval-draft-preview-hint">Full text in "More details" below.</span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="approval-id-row">
         <span>{formatEmpty(row.source)} priority review</span>
         <div className="approval-id-actions">
@@ -5601,6 +5670,14 @@ function ActionLedgerCard({
             <MetricRow key={label} label={label} value={value} />
           ))}
         </div>
+        {hasDraftContent ? (
+          <div className="approval-draft-full">
+            <span className="approval-draft-full-label">Current Value</span>
+            <p className="approval-draft-full-text">{draftCurrentValue || "—"}</p>
+            <span className="approval-draft-full-label">Proposed Value</span>
+            <p className="approval-draft-full-text">{draftProposedValue || "—"}</p>
+          </div>
+        ) : null}
         <ProductImageDebug product={row} compact />
       </details>
       {footer}
