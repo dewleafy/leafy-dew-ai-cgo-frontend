@@ -268,6 +268,7 @@ export type SafetyControlSettingsPayload = {
   maxDailyAiCost?: number;
   safetyNotes?: string;
   ppcLiveExecutionEnabled?: boolean;
+  listingLiveExecutionEnabled?: boolean;
   actor?: string;
   note?: string;
 };
