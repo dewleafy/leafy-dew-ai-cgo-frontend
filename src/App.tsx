@@ -2187,6 +2187,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
     const paths: Record<LedgerAction, string> = {
       approve: `/api/action-ledger/${id}/approve`,
       approveExecute: `/api/action-ledger/${id}/approve`,
+      approveExecuteListing: `/api/action-ledger/${id}/approve`,
       reject: `/api/action-ledger/${id}/reject`,
       monitor: `/api/action-ledger/${id}/monitor`,
       complete: `/api/action-ledger/${id}/complete`
@@ -5095,7 +5096,7 @@ function EngineCommandCenterPage() {
 }
 
 type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
-type LedgerAction = "approve" | "reject" | "monitor" | "complete" | "approveExecute";
+type LedgerAction = "approve" | "reject" | "monitor" | "complete" | "approveExecute" | "approveExecuteListing";
 type BatchLedgerAction = "reject" | "monitor" | "complete";
 type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
 type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
@@ -5274,6 +5275,20 @@ function isNegativePpcAction(row: ActionLedgerRow): boolean {
     row.source === "PPC_RECOMMENDATIONS" &&
     row.actionType === "PAUSE_OR_REDUCE_SPEND_AFTER_APPROVAL" &&
     normalizeState(row.recommendedAction) === "ADD_NEGATIVE_AFTER_APPROVAL"
+  );
+}
+
+const LISTING_DRAFT_EXECUTABLE_ACTION_TYPES = [
+  "LISTING_TITLE_DRAFT_REVIEW",
+  "LISTING_BULLETS_DRAFT_REVIEW",
+  "LISTING_DESCRIPTION_DRAFT_REVIEW"
+];
+
+function isListingDraftExecutableAction(row: ActionLedgerRow): boolean {
+  return (
+    row.source === "LISTING_DRAFT_SYSTEM" &&
+    typeof row.actionType === "string" &&
+    LISTING_DRAFT_EXECUTABLE_ACTION_TYPES.includes(row.actionType)
   );
 }
 
@@ -5578,6 +5593,7 @@ function ActionLedgerCard({
     footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
   } else if (approvalStatus === "PENDING") {
     const canExecute = isNegativePpcAction(row);
+    const canExecuteListing = isListingDraftExecutableAction(row);
     footer = (
       <div className="button-row compact">
         <button type="button" onClick={() => onAction(row, "approve")} disabled={buttonDisabled}>
@@ -5591,6 +5607,16 @@ function ActionLedgerCard({
             title="Approve and add this negative on Amazon Ads. Sends a real change only if PPC Live Execution is turned ON in Safety Control; otherwise this simulates it safely."
           >
             {processing?.id === row.id && processing.action === "approveExecute" ? "Working..." : "Approve & Send to Amazon"}
+          </button>
+        ) : null}
+        {canExecuteListing ? (
+          <button
+            type="button"
+            onClick={() => onAction(row, "approveExecuteListing")}
+            disabled={buttonDisabled}
+            title="Approve and update this title, bullets, or description on Amazon. Sends a real change only if Listing Content Live Execution is turned ON in Safety Control; otherwise this simulates it safely."
+          >
+            {processing?.id === row.id && processing.action === "approveExecuteListing" ? "Working..." : "Approve & Send to Amazon"}
           </button>
         ) : null}
         <button type="button" onClick={() => onAction(row, "reject")} disabled={buttonDisabled}>
@@ -6009,11 +6035,14 @@ function ApprovalCenterPage() {
   async function act(row: ActionLedgerRow, action: LedgerAction) {
     const id = row.id;
 
-    if (action === "approveExecute") {
+    if (action === "approveExecute" || action === "approveExecuteListing") {
       setProcessing({ id, action });
       setMessage(null);
+      const executionPath = action === "approveExecute"
+        ? `/api/ppc-execution/${id}/execute?sellerId=${SELLER_ID}`
+        : `/api/listing-execution/${id}/execute?sellerId=${SELLER_ID}`;
       try {
-        const result = await postJson<PpcExecutionApiResult>(`/api/ppc-execution/${id}/execute?sellerId=${SELLER_ID}`, {
+        const result = await postJson<PpcExecutionApiResult>(executionPath, {
           actor: "founder"
         });
         const refreshed = await refreshApprovalData();
@@ -6407,6 +6436,8 @@ function SafetyControlPage() {
   const [actionState, setActionState] = useState({ loading: false, message: "", error: "" });
   const [ppcLiveState, setPpcLiveState] = useState({ loading: false, message: "", error: "" });
   const ppcLiveExecutionEnabled = readBoolean(readFirst(settings, ["ppcLiveExecution", "ppcLiveExecutionEnabled"]));
+  const [listingLiveState, setListingLiveState] = useState({ loading: false, message: "", error: "" });
+  const listingLiveExecutionEnabled = readBoolean(readFirst(settings, ["listingLiveExecution", "listingLiveExecutionEnabled"]));
 
   useEffect(() => {
     if (!hasSettings) return;
@@ -6471,6 +6502,32 @@ function SafetyControlPage() {
       audits.reload();
     } catch {
       setPpcLiveState({ loading: false, message: "", error: "Could not update PPC Live Execution." });
+    }
+  }
+
+  async function toggleListingLiveExecution(nextValue: boolean) {
+    if (nextValue) {
+      const confirmed = window.confirm(
+        "Turning Listing Content Live Execution ON means the next time you click \"Approve & Send to Amazon\" on a title, bullets, or description draft, it will send a REAL change to your live Amazon listing. Turn this on?"
+      );
+      if (!confirmed) return;
+    }
+    setListingLiveState({ loading: true, message: "", error: "" });
+    try {
+      await safetyControlApi.saveSettings(SELLER_ID, {
+        listingLiveExecutionEnabled: nextValue,
+        actor: "founder",
+        note: nextValue ? "Founder turned Listing Content Live Execution ON." : "Founder turned Listing Content Live Execution OFF."
+      });
+      setListingLiveState({
+        loading: false,
+        message: nextValue ? "Listing Content Live Execution is now ON. Approvals will send real changes to Amazon." : "Listing Content Live Execution is now OFF (practice mode).",
+        error: ""
+      });
+      status.reload();
+      audits.reload();
+    } catch {
+      setListingLiveState({ loading: false, message: "", error: "Could not update Listing Content Live Execution." });
     }
   }
 
@@ -6558,6 +6615,29 @@ function SafetyControlPage() {
               <StatusBadge value={safeBooleanLabel(ppcLiveExecutionEnabled, "WARNING", "SAFE")} />
               {ppcLiveState.message ? <span className="save-message">{ppcLiveState.message}</span> : null}
               {ppcLiveState.error ? <span className="save-error">{ppcLiveState.error}</span> : null}
+            </div>
+          </Card>
+          <Card
+            title="Listing Content Live Execution (Title / Bullets / Description)"
+            action={
+              <button
+                type="button"
+                onClick={() => toggleListingLiveExecution(!listingLiveExecutionEnabled)}
+                disabled={listingLiveState.loading}
+              >
+                {listingLiveExecutionEnabled ? "Turn OFF (back to practice mode)" : "Turn ON (send real changes to Amazon)"}
+              </button>
+            }
+          >
+            <p className="section-note">
+              {listingLiveExecutionEnabled
+                ? "Listing Content Live Execution is ON. Approving a title, bullets, or description draft in Approval Center will send a real update to your live Amazon listing."
+                : "Listing Content Live Execution is OFF (practice mode). Approving a title, bullets, or description draft in Approval Center will show you exactly what would happen on Amazon, without sending anything."}
+            </p>
+            <div className="button-row">
+              <StatusBadge value={safeBooleanLabel(listingLiveExecutionEnabled, "WARNING", "SAFE")} />
+              {listingLiveState.message ? <span className="save-message">{listingLiveState.message}</span> : null}
+              {listingLiveState.error ? <span className="save-error">{listingLiveState.error}</span> : null}
             </div>
           </Card>
           <Card title="Edit Safe Settings">
