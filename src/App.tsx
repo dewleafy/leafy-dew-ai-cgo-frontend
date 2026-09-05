@@ -2506,7 +2506,10 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
           <div className="card-list">
             {topSellingSku.map((item) => (
               <article className="item-card compact-card" key={item.sku}>
-                <strong>{cleanFounderText(item.title, item.sku)}</strong>
+                <div className="item-top">
+                  <ProductThumb product={item} className="action-ledger-thumb" variant="small" />
+                  <strong>{cleanFounderText(item.title, item.sku)}</strong>
+                </div>
                 <p>{formatMoney(item.sales)} sales · {readNumber(item.orders)} orders · {readNumber(item.units)} units</p>
                 <span className="section-note">{cleanFounderText(item.sku, "No SKU on file")}</span>
               </article>
@@ -7744,6 +7747,7 @@ function ListingDraftsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void 
               {filteredRows.map((row) => (
                 <article className="item-card command-item-card" key={row.id}>
                   <div className="item-top">
+                    <ProductThumb product={row} className="action-ledger-thumb" variant="small" />
                     <strong>{formatEmpty(row.productName ?? row.sku ?? row.asin)}</strong>
                     <StatusBadge value={row.status ?? "DRAFTED"} />
                   </div>
