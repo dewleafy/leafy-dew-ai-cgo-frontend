@@ -32,6 +32,10 @@ export type ActionLedgerRow = {
   entityId?: string | null;
   sku?: string | null;
   asin?: string | null;
+  // Real product photo URL for this row's SKU/ASIN, looked up server-side from Product Passport
+  // image data, so Approval Center and AI Actions cards can show a real thumbnail instead of a
+  // generic icon. Null when no image is on file for this product yet.
+  imageUrl?: string | null;
   riskLevel?: string | null;
   confidenceLabel?: string | null;
   approvalTier?: string | null;
@@ -897,6 +901,9 @@ export type ListingDraft = AnyRecord & {
   sku?: string | null;
   asin?: string | null;
   productName?: string | null;
+  // Real product photo URL for this draft's SKU/ASIN, looked up server-side from Product Passport
+  // image data, so the Listing Drafts page can show a real thumbnail instead of a generic icon.
+  imageUrl?: string | null;
   draftType?: string | null;
   currentValue?: string | null;
   proposedValue?: string | null;
@@ -1023,6 +1030,10 @@ export type AmazonSpSalesSummaryBySku = AnyRecord & {
   sku: string;
   asin: string | null;
   title: string | null;
+  // Real product photo URL for this SKU/ASIN, looked up server-side from Product Passport image
+  // data, so the Sales & Ads "Top Products by Real Sales" card can show a real thumbnail instead
+  // of a generic icon.
+  imageUrl?: string | null;
   units: number;
   sales: number;
   orders: number;
