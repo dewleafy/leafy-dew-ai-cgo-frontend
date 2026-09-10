@@ -1216,7 +1216,8 @@
   margin: 14px 0 0;
 }
 
-.action-ledger-card.selected {
+.action-ledger-card.selected,
+.command-item-card.selected {
   border-color: #8cc79e;
   background: #f4fbf6;
 }
@@ -1836,6 +1837,13 @@ td {
 .save-error {
   color: #a33c34;
   font-weight: 700;
+}
+
+.save-message-timestamp,
+.soft-state-timestamp {
+  font-weight: 500;
+  opacity: 0.7;
+  font-size: 0.9em;
 }
 
 input,
