@@ -912,6 +912,7 @@ export type ListingDraft = AnyRecord & {
   riskLevel?: string | null;
   status?: string | null;
   actionId?: string | null;
+  createdAt?: string | null;
 };
 
 export type CreativeRecommendationSummary = AnyRecord & {
