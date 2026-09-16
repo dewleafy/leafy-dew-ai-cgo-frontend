@@ -2229,6 +2229,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
       approve: `/api/action-ledger/${id}/approve`,
       approveExecute: `/api/action-ledger/${id}/approve`,
       approveExecuteListing: `/api/action-ledger/${id}/approve`,
+      approveSavePassport: `/api/action-ledger/${id}/approve`,
       reject: `/api/action-ledger/${id}/reject`,
       monitor: `/api/action-ledger/${id}/monitor`,
       complete: `/api/action-ledger/${id}/complete`
@@ -5218,7 +5219,7 @@ function EngineCommandCenterPage() {
 }
 
 type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
-type LedgerAction = "approve" | "reject" | "monitor" | "complete" | "approveExecute" | "approveExecuteListing";
+type LedgerAction = "approve" | "reject" | "monitor" | "complete" | "approveExecute" | "approveExecuteListing" | "approveSavePassport";
 type BatchLedgerAction = "reject" | "monitor" | "complete" | "delete";
 type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
 type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
@@ -5411,6 +5412,20 @@ function isListingDraftExecutableAction(row: ActionLedgerRow): boolean {
     row.source === "LISTING_DRAFT_SYSTEM" &&
     typeof row.actionType === "string" &&
     LISTING_DRAFT_EXECUTABLE_ACTION_TYPES.includes(row.actionType)
+  );
+}
+
+// Passport drafts (brand positioning, customer objections) never go to Amazon — approving one
+// just saves the AI-authored text into the Product Passport itself, which is what the Brand
+// Readiness score reads. Separate button from "Approve & Send to Amazon" since it does something
+// different (an internal database save, not a live Amazon change).
+const PASSPORT_DRAFT_EXECUTABLE_ACTION_TYPES = ["PASSPORT_BRAND_POSITIONING_DRAFT_REVIEW", "PASSPORT_CUSTOMER_OBJECTIONS_DRAFT_REVIEW"];
+
+function isPassportDraftExecutableAction(row: ActionLedgerRow): boolean {
+  return (
+    row.source === "LISTING_DRAFT_SYSTEM" &&
+    typeof row.actionType === "string" &&
+    PASSPORT_DRAFT_EXECUTABLE_ACTION_TYPES.includes(row.actionType)
   );
 }
 
@@ -5737,6 +5752,7 @@ function ActionLedgerCard({
   } else if (approvalStatus === "PENDING") {
     const canExecute = isNegativePpcAction(row);
     const canExecuteListing = isListingDraftExecutableAction(row);
+    const canSavePassport = isPassportDraftExecutableAction(row);
     footer = (
       <div className="button-row compact">
         <button type="button" onClick={() => onAction(row, "approve")} disabled={buttonDisabled}>
@@ -5760,6 +5776,16 @@ function ActionLedgerCard({
             title="Approve and update this title, bullets, or description on Amazon. Sends a real change only if Listing Content Live Execution is turned ON in Safety Control; otherwise this simulates it safely."
           >
             {processing?.id === row.id && processing.action === "approveExecuteListing" ? "Working..." : "Approve & Send to Amazon"}
+          </button>
+        ) : null}
+        {canSavePassport ? (
+          <button
+            type="button"
+            onClick={() => onAction(row, "approveSavePassport")}
+            disabled={buttonDisabled}
+            title="Approve and save this text into the Product Passport. This never goes to Amazon — it only updates your own catalog data, which is what the Brand Readiness score reads."
+          >
+            {processing?.id === row.id && processing.action === "approveSavePassport" ? "Working..." : "Approve & Save to Passport"}
           </button>
         ) : null}
         <button type="button" onClick={() => onAction(row, "reject")} disabled={buttonDisabled}>
@@ -6191,12 +6217,14 @@ function ApprovalCenterPage() {
   async function act(row: ActionLedgerRow, action: LedgerAction) {
     const id = row.id;
 
-    if (action === "approveExecute" || action === "approveExecuteListing") {
+    if (action === "approveExecute" || action === "approveExecuteListing" || action === "approveSavePassport") {
       setProcessing({ id, action });
       setMessage(null);
       const executionPath = action === "approveExecute"
         ? `/api/ppc-execution/${id}/execute?sellerId=${SELLER_ID}`
-        : `/api/listing-execution/${id}/execute?sellerId=${SELLER_ID}`;
+        : action === "approveExecuteListing"
+        ? `/api/listing-execution/${id}/execute?sellerId=${SELLER_ID}`
+        : `/api/passport-draft-execution/${id}/execute?sellerId=${SELLER_ID}`;
       try {
         const result = await postJson<PpcExecutionApiResult>(executionPath, {
           actor: "founder"
