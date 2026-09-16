@@ -77,6 +77,9 @@ import type {
   ProductionHealthSummary,
   PpcExecutionApiResult,
   PpcRecommendationResponse,
+  BrandReadinessBrandResult,
+  BrandReadinessResponse,
+  BrandReadinessSection,
   ProductEconomics,
   ProductPassport,
   QaSmokeCheck,
@@ -1328,6 +1331,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
   const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
   const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
+  const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
   const data = todayCommandSummaryOf(today.data);
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const productCount = products.length;
@@ -1338,6 +1342,13 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const ppcRisks = todayCommandNumber(data, ["ppcRisks", "highRiskApprovals", "highRiskCount"]);
   const profitRisks = products.filter(productLowProfit).length;
   const realProfit = computeRealProfitSummary(salesSummary.data?.bySku ?? [], rowsOf<ProductEconomics>(economics.data), readNumber(adsSummary.data?.totals?.cost));
+  const brandReadinessBrands = brandReadiness.data?.brands ?? [];
+  const brandReadinessTrend = brandReadinessBrands.length
+    ? brandReadinessBrands.map((brand) => `${brand.brandName} ${brand.overallScore}`).join(" · ")
+    : "See Brand Center";
+  const brandReadinessValue = brandReadinessBrands.length
+    ? brandReadinessBrands.map((brand) => brand.overallScore).join(" / ")
+    : "-";
 
   const attentionItems = [
     missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
@@ -1394,6 +1405,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Real Profit (7d)" value={salesSummary.loading || economics.loading || adsSummary.loading ? "…" : formatMoney(realProfit.netProfitAfterAds)} icon="chart" trend={realProfitTrendText(realProfit)} tone="gold" />
         <FounderMetric label="Profit Risk Products" value={profitRisks || "0"} icon="chart" trend={profitRisks ? "Products flagged low-profit" : "None flagged right now"} />
         <FounderMetric label="ACOS 7D" value={adsSummary.loading ? "…" : formatPercent(adsSummary.data?.totals?.acos)} icon="growth" trend="Ads efficiency" tone="gold" />
+        <FounderMetric label="Brand Health" value={brandReadiness.loading ? "…" : brandReadinessValue} icon="shield" trend={brandReadiness.loading ? "Loading…" : brandReadinessTrend} tone="blue" />
         <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="All actions locked" />
       </section>
       </section>
@@ -2357,32 +2369,95 @@ function GrowthPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
+function brandReadinessTone(status: string | undefined): "good" | "watch" | "risk" | "neutral" {
+  if (status === "STRONG") return "good";
+  if (status === "NEEDS_WORK") return "watch";
+  if (status === "WEAK") return "risk";
+  return "neutral";
+}
+
+const BRAND_READINESS_SECTION_LABELS: Record<string, string> = {
+  brandConsistency: "Brand Consistency",
+  trustReadiness: "Trust Readiness",
+  premiumFeel: "Premium Feel",
+  productRangeClarity: "Product Range Clarity",
+  bundleOpportunity: "Bundle Opportunity",
+  socialContentOpportunity: "Social Content Opportunity",
+  storeReadiness: "Store Readiness"
+};
+
+function BrandReadinessCard({ brand }: { brand: BrandReadinessBrandResult }) {
+  const sectionEntries = Object.entries(brand.sections) as Array<[string, BrandReadinessSection]>;
+
+  return (
+    <article className="brand-card brand-readiness-card">
+      <div className="brand-readiness-card-header">
+        <div>
+          <h2>{brand.brandName}</h2>
+          <p>{brand.summary.productCount} products &middot; {brand.summary.activeProductCount} active</p>
+        </div>
+        <div className="brand-readiness-score">
+          <strong>{brand.overallScore}</strong>
+          <span>/ 100</span>
+          <FounderBadge value={labelize(brand.readinessStatus)} tone={brandReadinessTone(brand.readinessStatus)} />
+        </div>
+      </div>
+      <div className="brand-readiness-sections">
+        {sectionEntries.map(([key, section]) => (
+          <div className="brand-readiness-section-row" key={key}>
+            <span className="brand-readiness-section-label">{BRAND_READINESS_SECTION_LABELS[key] ?? labelize(key)}</span>
+            <div className="brand-readiness-bar-track">
+              <div className="brand-readiness-bar-fill" style={{ width: `${Math.max(0, Math.min(100, section.score))}%` }} />
+            </div>
+            <span className="brand-readiness-section-score">{section.score}</span>
+          </div>
+        ))}
+      </div>
+      <div className="brand-readiness-next-action">
+        <span>Next Best Action</span>
+        <strong>{brand.nextBestAction.title}</strong>
+        <p>{brand.nextBestAction.reason}</p>
+      </div>
+      {brand.topBrandGaps.length > 0 && (
+        <div className="brand-readiness-gaps">
+          <span>Top gaps</span>
+          <ul>
+            {brand.topBrandGaps.slice(0, 5).map((gap) => <li key={gap}>{gap}</li>)}
+          </ul>
+        </div>
+      )}
+    </article>
+  );
+}
+
 function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
+  const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
   const products = mergeFounderProducts(passports.data, economics.data);
   const topProducts = products.slice(0, 4);
-  const brandScore = readFirst(creative.data, ["brandHealthScore", "brandScore", "score", "healthScore"]);
   const creativeAssetCount = readNumber(readFirst(creative.data, ["totalRecommendations", "total"]));
+  const brands = brandReadiness.data?.brands ?? [];
+  const primaryBrand = brands[0];
 
   return (
     <div className="page founder-page">
       <PageHeader title="Brand Center" subtitle="Track brand health, content, assets, and top products." />
       <section className="brand-hero-card">
         <div>
-          <span className="eyebrow">Leafy Dew Brand Workspace</span>
+          <span className="eyebrow">{primaryBrand ? `${primaryBrand.brandName} Brand Workspace` : "Leafy Dew Brand Workspace"}</span>
           <h2>Protect the brand, improve creative, and turn top products into stronger storefront assets.</h2>
           <p>Brand Store, A+ content, product imagery, and campaign ideas stay founder-approved and safe.</p>
         </div>
         <div className="brand-hero-score">
-          <span>Brand Health Score</span>
-          <strong>{cleanFounderText(brandScore)}</strong>
-          <FounderBadge value={brandScore === null || brandScore === undefined ? "Not available yet" : "Available"} tone={brandScore === null || brandScore === undefined ? "neutral" : "good"} />
+          <span>Brand Readiness Score</span>
+          <strong>{brandReadiness.loading ? "…" : primaryBrand ? primaryBrand.overallScore : "—"}</strong>
+          <FounderBadge value={primaryBrand ? labelize(primaryBrand.readinessStatus) : "Not available yet"} tone={primaryBrand ? brandReadinessTone(primaryBrand.readinessStatus) : "neutral"} />
         </div>
       </section>
       <div className="brand-grid">
-        <FounderMetric label="Brand Health Score" value={cleanFounderText(brandScore)} />
+        <FounderMetric label="Brand Readiness Score" value={brandReadiness.loading ? "…" : primaryBrand ? `${primaryBrand.overallScore} / 100` : "Not available yet"} />
         <FounderMetric label="A+ Content Status" value={readNumber(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"])) > 0 ? "Needs review" : "Not available yet"} badge />
         <FounderMetric label="Store Status" value="Not connected yet" badge />
         <FounderMetric label="Creative Assets" value={creativeAssetCount} />
@@ -2427,6 +2502,20 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
           <p>Seasonal bundles, brand story refresh, and creative opportunities can be prepared for founder approval.</p>
           <button type="button" onClick={() => navigate("Growth Engine")}>Open Growth Engine</button>
         </article>
+      </section>
+
+      <section className="founder-section brand-readiness-overview">
+        <div className="section-heading">
+          <h2>Brand Readiness by Brand</h2>
+          <p>Computed from your real Product Passport data &mdash; one score per brand you sell under.</p>
+        </div>
+        {brandReadiness.loading ? <EmptyBlock text="Loading brand readiness…" /> :
+          brandReadiness.error ? <ErrorBlock text="Could not load brand readiness." /> :
+          brands.length === 0 ? <EmptyBlock text="No product data available" /> : (
+            <div className="brand-readiness-grid">
+              {brands.map((brand) => <BrandReadinessCard key={brand.brandName} brand={brand} />)}
+            </div>
+          )}
       </section>
     </div>
   );
