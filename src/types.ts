@@ -1073,3 +1073,49 @@ export type AmazonSpSalesSummary = AnyRecord & {
   averageOrderValue: number | null;
   bySku: AmazonSpSalesSummaryBySku[];
 };
+
+export type BrandReadinessStatus = "STRONG" | "NEEDS_WORK" | "WEAK";
+
+export type BrandReadinessSection = {
+  score: number;
+  status: BrandReadinessStatus;
+  gaps: string[];
+  warnings: string[];
+};
+
+export type BrandReadinessSummary = {
+  productCount: number;
+  activeProductCount: number;
+  draftProductCount: number;
+  missingBrandPositioningCount: number;
+  missingImagesCount: number;
+  bundleCandidateCount: number;
+};
+
+export type BrandReadinessNextBestAction = {
+  title: string;
+  reason: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+};
+
+export type BrandReadinessBrandResult = {
+  brandName: string;
+  overallScore: number;
+  readinessStatus: BrandReadinessStatus;
+  sections: Record<string, BrandReadinessSection>;
+  summary: BrandReadinessSummary;
+  topBrandGaps: string[];
+  recommendedActions: string[];
+  bundleIdeas: string[];
+  socialContentIdeas: string[];
+  nextBestAction: BrandReadinessNextBestAction;
+  warnings: string[];
+};
+
+export type BrandReadinessResponse = AnyRecord & {
+  ok: boolean;
+  sellerId: string;
+  mode: string;
+  brands: BrandReadinessBrandResult[];
+  brandDetectionNote: string;
+};
