@@ -5220,7 +5220,7 @@ function EngineCommandCenterPage() {
 
 type ApprovalFilter = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "MONITORING" | "COMPLETED";
 type LedgerAction = "approve" | "reject" | "monitor" | "complete" | "approveExecute" | "approveExecuteListing" | "approveSavePassport";
-type BatchLedgerAction = "reject" | "monitor" | "complete" | "delete";
+type BatchLedgerAction = "reject" | "monitor" | "complete" | "delete" | "savePassport";
 type QuickViewFilter = "ALL" | "NEEDS_COST_DATA" | "ACCOUNT_RISK" | "PPC_GUARDRAILS" | "PROFIT_BAND_APPROVALS" | "HIGH_RISK_ONLY" | "FOUNDER_OVERRIDE";
 type ApprovalSortMode = "PRIORITY_FIRST" | "NEWEST_FIRST" | "OLDEST_FIRST" | "RISK_HIGH_FIRST";
 type WorkflowEvent = AnyRecord;
@@ -5982,6 +5982,15 @@ function ApprovalCenterPage() {
   const selectedCount = selectedRows.length;
   const selectedPendingOnly = selectedCount > 0 && selectedRows.every(isPendingBatchAction);
   const selectedMonitoringOnly = selectedCount > 0 && selectedRows.every(isMonitoringAction);
+  // Narrow, deliberate exception to "no batch approve": these two draft types only ever save
+  // AI-authored text into this app's own Product Passport (never to Amazon), and each one is
+  // still independently validated and approved server-side, one row at a time -- see
+  // passport-draft-execution.service.ts's batchExecutePassportDraftActions(). Selecting a mix of
+  // eligible and ineligible pending rows only acts on the eligible ones, never on the rest.
+  const selectedPassportDraftEligible = useMemo(() => (
+    selectedRows.filter((row) => isPendingBatchAction(row) && isPassportDraftExecutableAction(row))
+  ), [selectedRows]);
+  const selectedPassportDraftEligibleCount = selectedPassportDraftEligible.length;
   const hasSelectablePageRows = pageRows.some(isSelectableBatchAction);
   const selectableLoadedCount = useMemo(() => rows.filter(isSelectableBatchAction).length, [rows]);
   const costDataDismissVisible = quickView === "NEEDS_COST_DATA" || normalizeState(actionTypeFilter) === "COST_DATA_REQUIRED";
@@ -6306,7 +6315,12 @@ function ApprovalCenterPage() {
   }
 
   async function batchAct(action: BatchLedgerAction) {
-    const ids = selectedRows.map((row) => row.id);
+    // "savePassport" only ever acts on the eligible subset of what's selected (brand
+    // positioning / customer objections drafts) -- never on other selected rows, even if some
+    // of those are also pending. Every other batch action keeps using the full selection.
+    const ids = action === "savePassport"
+      ? selectedPassportDraftEligible.map((row) => row.id)
+      : selectedRows.map((row) => row.id);
     if (ids.length === 0) return;
 
     if (action === "delete") {
@@ -6356,6 +6370,15 @@ function ApprovalCenterPage() {
           actor: "founder"
         }),
         label: "Batch delete"
+      },
+      savePassport: {
+        path: "/api/passport-draft-execution/batch/execute",
+        body: (idsChunk) => ({
+          sellerId: SELLER_ID,
+          ids: idsChunk,
+          actor: "founder"
+        }),
+        label: "Batch save to Product Passport"
       }
     };
 
@@ -6547,7 +6570,12 @@ function ApprovalCenterPage() {
         <div className="batch-action-bar" aria-label="Batch actions">
           <div>
             <strong>Selected: {selectedCount}</strong>
-            <span>Batch approve is disabled. Only reject, monitor, complete, or delete are allowed in batch.</span>
+            <span>
+              Batch approve is disabled for everything else. Only reject, monitor, complete, or delete are allowed in batch
+              {selectedPassportDraftEligibleCount > 0
+                ? ` — except brand positioning / customer objections drafts (${selectedPassportDraftEligibleCount} of your selection), which can be batch-saved to the Product Passport below.`
+                : "."}
+            </span>
           </div>
           <div className="button-row compact">
             <button type="button" onClick={() => batchAct("reject")} disabled={!selectedPendingOnly || controlsDisabled}>
@@ -6559,6 +6587,18 @@ function ApprovalCenterPage() {
             <button type="button" onClick={() => batchAct("complete")} disabled={!selectedMonitoringOnly || controlsDisabled}>
               {batchProcessing === "complete" ? "Completing..." : "Batch Complete Selected"}
             </button>
+            {selectedPassportDraftEligibleCount > 0 ? (
+              <button
+                type="button"
+                title="Saves the AI-drafted brand positioning / customer objections text straight into the Product Passport for each eligible selected row. Never touches Amazon."
+                onClick={() => batchAct("savePassport")}
+                disabled={controlsDisabled}
+              >
+                {batchProcessing === "savePassport"
+                  ? "Saving to Passport..."
+                  : `Approve & Save ${selectedPassportDraftEligibleCount} to Passport`}
+              </button>
+            ) : null}
             <button type="button" className="danger-button" onClick={() => batchAct("delete")} disabled={controlsDisabled}>
               {batchProcessing === "delete" ? "Deleting..." : "Delete Selected"}
             </button>
