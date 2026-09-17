@@ -80,6 +80,8 @@ import type {
   BrandReadinessBrandResult,
   BrandReadinessResponse,
   BrandReadinessSection,
+  AplusCoverageReport,
+  AplusCoverageScanResult,
   ProductEconomics,
   ProductPassport,
   QaSmokeCheck,
@@ -2436,11 +2438,39 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
   const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
+  const aplusCoverage = useApi<AplusCoverageReport>(() => getJson(`/api/aplus-content/coverage?sellerId=${SELLER_ID}`));
   const products = mergeFounderProducts(passports.data, economics.data);
   const topProducts = products.slice(0, 4);
   const creativeAssetCount = readNumber(readFirst(creative.data, ["totalRecommendations", "total"]));
   const brands = brandReadiness.data?.brands ?? [];
   const primaryBrand = brands[0];
+
+  const aplusBrands = aplusCoverage.data?.brands ?? [];
+  const aplusTotalHasContent = aplusBrands.reduce((sum, brand) => sum + brand.hasContentCount, 0);
+  const aplusTotalNoContent = aplusBrands.reduce((sum, brand) => sum + brand.noContentCount, 0);
+  const aplusTotalUnchecked = aplusCoverage.data?.uncheckedCount ?? 0;
+  const aplusTotalProducts = aplusTotalHasContent + aplusTotalNoContent + aplusTotalUnchecked;
+
+  const [isScanningAplus, setIsScanningAplus] = useState(false);
+  const [aplusScanMessage, setAplusScanMessage] = useState("");
+
+  async function scanAplusContent() {
+    setIsScanningAplus(true);
+    setAplusScanMessage("");
+    try {
+      const result = await postJson<AplusCoverageScanResult>(`/api/aplus-content/coverage/scan?sellerId=${SELLER_ID}`, {});
+      setAplusScanMessage(
+        result.scannedCount === 0
+          ? "Every product has already been checked for A+ Content."
+          : `Checked ${result.scannedCount} more product${result.scannedCount === 1 ? "" : "s"}: ${result.hasContentCount} have A+ Content, ${result.noContentCount} don't. ${result.remainingUncheckedCount} left to check.`
+      );
+      aplusCoverage.reload();
+    } catch {
+      setAplusScanMessage("Could not run the A+ Content scan. Try again in a moment.");
+    } finally {
+      setIsScanningAplus(false);
+    }
+  }
 
   return (
     <div className="page founder-page">
@@ -2474,8 +2504,32 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
         </article>
         <article className="brand-card">
           <h2>A+ Content</h2>
-          <p>{cleanFounderText(readFirst(creative.data, ["aplusContentReviews", "aPlusContentReviews"]), "0")} products need A+ review.</p>
-          <button type="button" onClick={() => navigate("Growth")}>Review A+ Ideas</button>
+          {aplusCoverage.loading ? <EmptyBlock text="Checking A+ Content coverage…" /> :
+            aplusCoverage.error ? <ErrorBlock text="Could not load A+ Content coverage." /> : (
+            <>
+              <p>
+                <strong>{aplusTotalHasContent}</strong> of <strong>{aplusTotalProducts}</strong> products have A+ Content.{" "}
+                {aplusTotalNoContent > 0 && `${aplusTotalNoContent} confirmed missing.`}
+                {aplusTotalUnchecked > 0 && ` ${aplusTotalUnchecked} not checked yet.`}
+              </p>
+              <button type="button" onClick={scanAplusContent} disabled={isScanningAplus || aplusTotalUnchecked === 0}>
+                {isScanningAplus ? "Scanning…" : aplusTotalUnchecked === 0 ? "All products checked" : `Scan next batch (${Math.min(20, aplusTotalUnchecked)})`}
+              </button>
+              {aplusScanMessage && <p className="brand-card-note">{aplusScanMessage}</p>}
+              {(aplusCoverage.data?.missingProducts.length ?? 0) > 0 && (
+                <ul className="brand-card-list">
+                  {(aplusCoverage.data?.missingProducts ?? []).slice(0, 6).map((product) => (
+                    <li key={`${product.asin ?? product.sku}`}>
+                      {product.productName || product.sku || product.asin} <span className="muted-line">({product.brand})</span>
+                    </li>
+                  ))}
+                  {(aplusCoverage.data?.missingProducts.length ?? 0) > 6 && (
+                    <li className="muted-line">+{(aplusCoverage.data?.missingProducts.length ?? 0) - 6} more</li>
+                  )}
+                </ul>
+              )}
+            </>
+          )}
         </article>
         <article className="brand-card creative-assets-card">
           <h2>Creative Assets</h2>
