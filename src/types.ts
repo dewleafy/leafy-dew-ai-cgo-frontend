@@ -53,6 +53,14 @@ export type ActionLedgerRow = {
     proposedValue?: string | null;
     [key: string]: unknown;
   } | null;
+  // The backend already writes a specific, honest note here on every approval — e.g. "Approved
+  // and sent live to Amazon: updated description for SKU ..." or "Approved in practice mode.
+  // Nothing was sent to Amazon because Listing Content Live Execution is OFF." or "Approved and
+  // saved brand positioning to the Product Passport." The frontend never rendered it, so the
+  // Approval Center's per-card footer always showed a generic "Approved in shadow mode" note
+  // even when a real Amazon write-back or Product Passport save had just genuinely happened.
+  // See ActionLedgerCard's footer rendering in App.tsx.
+  approvalNote?: string | null;
 };
 
 export type ActionLedgerSummary = {
