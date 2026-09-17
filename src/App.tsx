@@ -5748,7 +5748,18 @@ function ActionLedgerCard({
       </div>
     );
   } else if (approvalStatus === "APPROVED") {
-    footer = <p className="approval-status-note">Approved in shadow mode. No external action executed.</p>;
+    // The backend records a specific, honest note for every approval (real live Amazon send,
+    // practice-mode simulation, or a real Product Passport save) — show that real outcome
+    // instead of a generic "shadow mode" line that used to show even after a genuine live send.
+    // Falls back to the old generic copy only for a plain Approve with no recorded note (the one
+    // case where nothing external was ever attempted).
+    footer = (
+      <p className="approval-status-note">
+        {typeof row.approvalNote === "string" && row.approvalNote.trim()
+          ? row.approvalNote
+          : "Approved. No external action was attempted for this action."}
+      </p>
+    );
   } else if (approvalStatus === "PENDING") {
     const canExecute = isNegativePpcAction(row);
     const canExecuteListing = isListingDraftExecutableAction(row);
@@ -5911,6 +5922,16 @@ function ApprovalCenterPage() {
   const [rowsState, setRowsState] = useState<LoadState<ActionLedgerRow[]>>(emptyState<ActionLedgerRow[]>());
   const [workflowPanels, setWorkflowPanels] = useState<Record<string, WorkflowPanelState>>({});
   const [reopeningId, setReopeningId] = useState<string | null>(null);
+  // Loaded so the page-level banner below can honestly reflect whether Live Execution is
+  // actually ON for PPC/Listing content, instead of a static "shadow mode" claim that stayed on
+  // screen even after a real live Amazon send (see the dedicated bug note in the project's
+  // action plan — found during the first real write-back test).
+  const safetyStatus = useApi<SafetyControlStatus>(() => safetyControlApi.status(SELLER_ID));
+  const safetyData = safetyControlStatusOf(safetyStatus.data);
+  const safetySettings = recordOf(readFirst(safetyData, ["settings", "safetySettings", "controlSettings"]));
+  const ppcLiveExecutionEnabled = readBoolean(readFirst(safetySettings, ["ppcLiveExecution", "ppcLiveExecutionEnabled"]));
+  const listingLiveExecutionEnabled = readBoolean(readFirst(safetySettings, ["listingLiveExecution", "listingLiveExecutionEnabled"]));
+  const anyLiveExecutionEnabled = ppcLiveExecutionEnabled || listingLiveExecutionEnabled;
 
   async function refreshApprovalData(): Promise<{ summary: ActionLedgerSummary; rows: ActionLedgerRow[] }> {
     setSummaryState((current) => ({ ...current, loading: true, error: null }));
@@ -6456,9 +6477,29 @@ function ApprovalCenterPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Approval Center" subtitle="Shadow mode active. No Amazon action is executed." />
+      <PageHeader
+        title="Approval Center"
+        subtitle={
+          anyLiveExecutionEnabled
+            ? "Some actions send real changes live. Check each card's note for what actually happened."
+            : "Shadow mode active. No Amazon action is executed."
+        }
+      />
       <div className="warning-card approval-warning">
-        <p>Approval Center works in shadow mode. No external Amazon, Ads, Store, Image, A+, or Social action is executed yet.</p>
+        {anyLiveExecutionEnabled ? (
+          <p>
+            Live Execution is ON for {ppcLiveExecutionEnabled && listingLiveExecutionEnabled
+              ? "PPC and Listing Content"
+              : ppcLiveExecutionEnabled
+                ? "PPC"
+                : "Listing Content"} — approving an eligible card there sends a real change to Amazon. Everything else still runs in
+            shadow mode (no external action). Brand positioning / customer objections saves always write to the Product Passport
+            for real, regardless of this setting — that's a Passport save, not an Amazon change. Each card's own note shows exactly
+            what happened for that action.
+          </p>
+        ) : (
+          <p>Approval Center works in shadow mode. No external Amazon, Ads, Store, Image, A+, or Social action is executed yet.</p>
+        )}
       </div>
       <div className="summary-strip approval-summary" aria-label="Approval summary">
         <MetricTile label="Pending" value={summaryState.loading && !summaryState.data ? "..." : summaryCounts.pending} />
