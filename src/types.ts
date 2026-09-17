@@ -1127,3 +1127,38 @@ export type BrandReadinessResponse = AnyRecord & {
   brands: BrandReadinessBrandResult[];
   brandDetectionNote: string;
 };
+
+export type AplusCoverageProductStatus = "HAS_CONTENT" | "NO_CONTENT" | "NOT_CHECKED_YET" | "NO_ASIN";
+
+export type AplusCoverageProduct = {
+  sku: string | null;
+  asin: string | null;
+  productName: string;
+  brand: string;
+  status: AplusCoverageProductStatus;
+  moduleCount: number;
+  lastCheckedAt: string | null;
+};
+
+export type AplusCoverageBrandSummary = {
+  brandName: string;
+  productCount: number;
+  hasContentCount: number;
+  noContentCount: number;
+  notCheckedCount: number;
+};
+
+export type AplusCoverageReport = {
+  ok: true;
+  brands: AplusCoverageBrandSummary[];
+  missingProducts: AplusCoverageProduct[];
+  uncheckedCount: number;
+};
+
+export type AplusCoverageScanResult = {
+  ok: true;
+  scannedCount: number;
+  hasContentCount: number;
+  noContentCount: number;
+  remainingUncheckedCount: number;
+};
