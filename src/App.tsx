@@ -2453,6 +2453,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
 
   const [isScanningAplus, setIsScanningAplus] = useState(false);
   const [aplusScanMessage, setAplusScanMessage] = useState("");
+  const [showAllAplusMissing, setShowAllAplusMissing] = useState(false);
 
   async function scanAplusContent() {
     setIsScanningAplus(true);
@@ -2517,16 +2518,28 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
               </button>
               {aplusScanMessage && <p className="brand-card-note">{aplusScanMessage}</p>}
               {(aplusCoverage.data?.missingProducts.length ?? 0) > 0 && (
-                <ul className="brand-card-list">
-                  {(aplusCoverage.data?.missingProducts ?? []).slice(0, 6).map((product) => (
-                    <li key={`${product.asin ?? product.sku}`}>
-                      {product.productName || product.sku || product.asin} <span className="muted-line">({product.brand})</span>
-                    </li>
-                  ))}
+                <>
+                  <ul className={showAllAplusMissing ? "brand-card-list brand-card-list-scroll" : "brand-card-list"}>
+                    {(aplusCoverage.data?.missingProducts ?? [])
+                      .slice(0, showAllAplusMissing ? undefined : 6)
+                      .map((product) => (
+                        <li key={`${product.asin ?? product.sku}`}>
+                          {product.productName || product.sku || product.asin} <span className="muted-line">({product.brand})</span>
+                        </li>
+                      ))}
+                  </ul>
                   {(aplusCoverage.data?.missingProducts.length ?? 0) > 6 && (
-                    <li className="muted-line">+{(aplusCoverage.data?.missingProducts.length ?? 0) - 6} more</li>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => setShowAllAplusMissing((value) => !value)}
+                    >
+                      {showAllAplusMissing
+                        ? "Show fewer"
+                        : `Show all ${aplusCoverage.data?.missingProducts.length ?? 0} missing products`}
+                    </button>
                   )}
-                </ul>
+                </>
               )}
             </>
           )}
