@@ -82,6 +82,7 @@ import type {
   BrandReadinessSection,
   AplusCoverageReport,
   AplusCoverageScanResult,
+  BulkComplianceNotesResult,
   ProductEconomics,
   ProductPassport,
   QaSmokeCheck,
@@ -2455,6 +2456,12 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const [aplusScanMessage, setAplusScanMessage] = useState("");
   const [showAllAplusMissing, setShowAllAplusMissing] = useState(false);
 
+  const complianceNotesMissingCount = (passports.data?.rows ?? []).filter(
+    (product) => !product.complianceNotes && product.status !== "ARCHIVED"
+  ).length;
+  const [isApplyingComplianceNotes, setIsApplyingComplianceNotes] = useState(false);
+  const [complianceNotesMessage, setComplianceNotesMessage] = useState("");
+
   async function scanAplusContent() {
     setIsScanningAplus(true);
     setAplusScanMessage("");
@@ -2470,6 +2477,33 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
       setAplusScanMessage("Could not run the A+ Content scan. Try again in a moment.");
     } finally {
       setIsScanningAplus(false);
+    }
+  }
+
+  // Founder-confirmed statement, not AI-drafted -- see bulkApplyStandardComplianceNotes on the
+  // backend. Saves directly to every eligible Product Passport in one click; never overwrites a
+  // product that already has compliance notes on file.
+  async function applyStandardComplianceNotes() {
+    setIsApplyingComplianceNotes(true);
+    setComplianceNotesMessage("");
+    try {
+      const result = await postJson<BulkComplianceNotesResult>(
+        `/api/product-passports/compliance-notes/bulk-apply?sellerId=${SELLER_ID}`,
+        {}
+      );
+      setComplianceNotesMessage(
+        result.eligibleCount === 0
+          ? "Every product already has compliance notes on file."
+          : `Applied to ${result.updatedCount} of ${result.eligibleCount} eligible products.${
+              result.failedCount > 0 ? ` ${result.failedCount} could not be updated -- try again.` : ""
+            }`
+      );
+      passports.reload();
+      brandReadiness.reload();
+    } catch {
+      setComplianceNotesMessage("Could not apply compliance notes. Try again in a moment.");
+    } finally {
+      setIsApplyingComplianceNotes(false);
     }
   }
 
@@ -2543,6 +2577,28 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
               )}
             </>
           )}
+        </article>
+        <article className="brand-card">
+          <h2>Compliance Notes</h2>
+          <p>
+            {complianceNotesMissingCount === 0
+              ? "Every eligible product already has compliance notes on file."
+              : `${complianceNotesMissingCount} product${complianceNotesMissingCount === 1 ? "" : "s"} missing compliance notes.`}{" "}
+            Since these are standard household items with no certification or regulatory audit requirement, apply one
+            founder-confirmed statement to every eligible product at once instead of drafting one per product.
+          </p>
+          <button
+            type="button"
+            onClick={applyStandardComplianceNotes}
+            disabled={isApplyingComplianceNotes || complianceNotesMissingCount === 0}
+          >
+            {isApplyingComplianceNotes
+              ? "Applying…"
+              : complianceNotesMissingCount === 0
+                ? "All products covered"
+                : `Apply to all ${complianceNotesMissingCount} eligible products`}
+          </button>
+          {complianceNotesMessage && <p className="brand-card-note">{complianceNotesMessage}</p>}
         </article>
         <article className="brand-card creative-assets-card">
           <h2>Creative Assets</h2>
