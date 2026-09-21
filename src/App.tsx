@@ -5482,11 +5482,16 @@ function isListingDraftExecutableAction(row: ActionLedgerRow): boolean {
   );
 }
 
-// Passport drafts (brand positioning, customer objections) never go to Amazon — approving one
-// just saves the AI-authored text into the Product Passport itself, which is what the Brand
-// Readiness score reads. Separate button from "Approve & Send to Amazon" since it does something
-// different (an internal database save, not a live Amazon change).
-const PASSPORT_DRAFT_EXECUTABLE_ACTION_TYPES = ["PASSPORT_BRAND_POSITIONING_DRAFT_REVIEW", "PASSPORT_CUSTOMER_OBJECTIONS_DRAFT_REVIEW"];
+// Passport drafts (brand positioning, customer objections, package contents, compliance notes)
+// never go to Amazon — approving one just saves the AI-authored text into the Product Passport
+// itself, which is what the Brand Readiness score reads. Separate button from "Approve & Send to
+// Amazon" since it does something different (an internal database save, not a live Amazon change).
+const PASSPORT_DRAFT_EXECUTABLE_ACTION_TYPES = [
+  "PASSPORT_BRAND_POSITIONING_DRAFT_REVIEW",
+  "PASSPORT_CUSTOMER_OBJECTIONS_DRAFT_REVIEW",
+  "PASSPORT_PACKAGE_CONTENTS_DRAFT_REVIEW",
+  "PASSPORT_COMPLIANCE_NOTES_DRAFT_REVIEW"
+];
 
 function isPassportDraftExecutableAction(row: ActionLedgerRow): boolean {
   return (
