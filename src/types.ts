@@ -84,6 +84,14 @@ export type ProductPassport = {
   sellingPrice?: number | string | null;
   weight?: string | null;
   status?: string;
+  complianceNotes?: string | null;
+};
+
+export type BulkComplianceNotesResult = {
+  ok: boolean;
+  eligibleCount: number;
+  updatedCount: number;
+  failedCount: number;
 };
 
 export type CostCompletionQueueItem = {
