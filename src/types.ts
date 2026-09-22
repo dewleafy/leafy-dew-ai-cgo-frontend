@@ -1170,3 +1170,88 @@ export type AplusCoverageScanResult = {
   noContentCount: number;
   remainingUncheckedCount: number;
 };
+
+// Order-level estimated profit/loss (Phase 6, slice 2): real order revenue
+// from amazon_sp_orders / amazon_sp_order_items, minus each product's saved
+// Product Economics fee estimate, minus that order's pooled share of the
+// real per-ASIN Amazon Ads spend on that same day. This is the founder's
+// "which orders are actually losing money" view — estimated, not settled.
+export type OrderEconomicsProfitStatus = "PROFIT" | "LOSS" | "BREAKEVEN" | "NEEDS_COST_DATA";
+
+export type OrderEconomicsLine = {
+  amazonOrderId: string;
+  orderItemId: string;
+  sku: string | null;
+  asin: string | null;
+  productName: string | null;
+  purchaseDate: string | null;
+  quantityOrdered: number;
+  itemRevenue: number;
+  itemTax: number;
+  promotionDiscount: number;
+  unitRevenue: number;
+  nonAdCostPerUnit: number | null;
+  nonAdCostTotal: number | null;
+  allocatedAdSpend: number;
+  hasAdSpendDataForAsinDate: boolean;
+  estimatedProfit: number | null;
+  profitStatus: OrderEconomicsProfitStatus;
+  missingCostDataReason: string | null;
+};
+
+export type OrderEconomicsOrderRow = {
+  amazonOrderId: string;
+  purchaseDate: string | null;
+  orderStatus: string | null;
+  isCancelled: boolean;
+  lines: OrderEconomicsLine[];
+  orderRevenue: number;
+  orderNonAdCost: number | null;
+  orderAdSpend: number;
+  orderEstimatedProfit: number | null;
+  profitStatus: OrderEconomicsProfitStatus;
+};
+
+export type OrderEconomicsProductRollup = {
+  sku: string | null;
+  asin: string | null;
+  productName: string | null;
+  orderCount: number;
+  unitsSold: number;
+  totalRevenue: number;
+  totalNonAdCost: number;
+  totalAdSpend: number;
+  totalEstimatedProfit: number;
+};
+
+export type OrderEconomicsSummary = {
+  ordersConsidered: number;
+  cancelledOrdersExcluded: number;
+  totalRevenue: number;
+  totalNonAdCost: number;
+  totalAdSpend: number;
+  totalEstimatedProfit: number;
+  profitableOrderCount: number;
+  lossOrderCount: number;
+  breakevenOrderCount: number;
+  needsCostDataOrderCount: number;
+  zeroConversionAdSpend: number;
+  zeroConversionAsinDateCount: number;
+};
+
+export type OrderEconomicsResponse = {
+  ok: true;
+  sellerId: string;
+  dateRange: { startDate: string; endDate: string };
+  summary: OrderEconomicsSummary;
+  orders: OrderEconomicsOrderRow[];
+  topLossProducts: OrderEconomicsProductRollup[];
+  topProfitProducts: OrderEconomicsProductRollup[];
+  productsNeedingCostData: Array<{
+    sku: string | null;
+    asin: string | null;
+    productName: string | null;
+    orderCount: number;
+  }>;
+  caveats: string[];
+};
