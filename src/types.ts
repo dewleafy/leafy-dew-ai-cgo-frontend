@@ -1178,12 +1178,24 @@ export type AplusCoverageScanResult = {
 // "which orders are actually losing money" view — estimated, not settled.
 export type OrderEconomicsProfitStatus = "PROFIT" | "LOSS" | "BREAKEVEN" | "NEEDS_COST_DATA";
 
+export type OrderEconomicsFeeBreakdown = {
+  landedCost: number;
+  referralFee: number;
+  closingFee: number;
+  shippingFee: number;
+  pickAndPackFee: number;
+  storageFee: number;
+  gstOnAmazonFees: number;
+  returnReservePerUnit: number;
+};
+
 export type OrderEconomicsLine = {
   amazonOrderId: string;
   orderItemId: string;
   sku: string | null;
   asin: string | null;
   productName: string | null;
+  imageUrl: string | null;
   purchaseDate: string | null;
   quantityOrdered: number;
   itemRevenue: number;
@@ -1192,6 +1204,8 @@ export type OrderEconomicsLine = {
   unitRevenue: number;
   nonAdCostPerUnit: number | null;
   nonAdCostTotal: number | null;
+  feeBreakdownPerUnit: OrderEconomicsFeeBreakdown | null;
+  feeBreakdownTotal: OrderEconomicsFeeBreakdown | null;
   allocatedAdSpend: number;
   hasAdSpendDataForAsinDate: boolean;
   estimatedProfit: number | null;
@@ -1203,6 +1217,12 @@ export type OrderEconomicsOrderRow = {
   amazonOrderId: string;
   purchaseDate: string | null;
   orderStatus: string | null;
+  fulfillmentChannel: string | null;
+  salesChannel: string | null;
+  shipToCity: string | null;
+  shipToState: string | null;
+  shipToPostalCode: string | null;
+  shipToCountry: string | null;
   isCancelled: boolean;
   lines: OrderEconomicsLine[];
   orderRevenue: number;
