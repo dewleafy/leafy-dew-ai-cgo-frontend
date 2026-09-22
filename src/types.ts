@@ -85,9 +85,17 @@ export type ProductPassport = {
   weight?: string | null;
   status?: string;
   complianceNotes?: string | null;
+  packageContents?: string | null;
 };
 
 export type BulkComplianceNotesResult = {
+  ok: boolean;
+  eligibleCount: number;
+  updatedCount: number;
+  failedCount: number;
+};
+
+export type BulkPackageContentsResult = {
   ok: boolean;
   eligibleCount: number;
   updatedCount: number;
