@@ -87,6 +87,7 @@ import type {
   AplusCoverageReport,
   AplusCoverageScanResult,
   BulkComplianceNotesResult,
+  BulkPackageContentsResult,
   ProductEconomics,
   ProductPassport,
   QaSmokeCheck,
@@ -2469,6 +2470,16 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const [isApplyingComplianceNotes, setIsApplyingComplianceNotes] = useState(false);
   const [complianceNotesMessage, setComplianceNotesMessage] = useState("");
 
+  const TEST_TUBE_PLANTER_FAMILY_NAME_PATTERN = /wooden wall hanging acrylic test tube planter/i;
+  const packageContentsMissingCount = (passports.data?.rows ?? []).filter(
+    (product) =>
+      !product.packageContents &&
+      product.status !== "ARCHIVED" &&
+      TEST_TUBE_PLANTER_FAMILY_NAME_PATTERN.test(product.productName ?? "")
+  ).length;
+  const [isApplyingPackageContents, setIsApplyingPackageContents] = useState(false);
+  const [packageContentsMessage, setPackageContentsMessage] = useState("");
+
   async function scanAplusContent() {
     setIsScanningAplus(true);
     setAplusScanMessage("");
@@ -2511,6 +2522,34 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
       setComplianceNotesMessage("Could not apply compliance notes. Try again in a moment.");
     } finally {
       setIsApplyingComplianceNotes(false);
+    }
+  }
+
+  // Founder-confirmed on 2026-09-22: these design/color variants are the same physical product as
+  // the already-documented Test Tube Planter wall-hanging siblings -- see
+  // bulkApplyTestTubePlanterPackageContents on the backend. Never overwrites a product that already
+  // has package contents on file, and only touches this one product family.
+  async function applyTestTubePlanterPackageContents() {
+    setIsApplyingPackageContents(true);
+    setPackageContentsMessage("");
+    try {
+      const result = await postJson<BulkPackageContentsResult>(
+        `/api/product-passports/package-contents/bulk-apply?sellerId=${SELLER_ID}`,
+        {}
+      );
+      setPackageContentsMessage(
+        result.eligibleCount === 0
+          ? "Every product in this family already has package contents on file."
+          : `Applied to ${result.updatedCount} of ${result.eligibleCount} eligible products.${
+              result.failedCount > 0 ? ` ${result.failedCount} could not be updated -- try again.` : ""
+            }`
+      );
+      passports.reload();
+      brandReadiness.reload();
+    } catch {
+      setPackageContentsMessage("Could not apply package contents. Try again in a moment.");
+    } finally {
+      setIsApplyingPackageContents(false);
     }
   }
 
@@ -2606,6 +2645,31 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
                 : `Apply to all ${complianceNotesMissingCount} eligible products`}
           </button>
           {complianceNotesMessage && <p className="brand-card-note">{complianceNotesMessage}</p>}
+        </article>
+        <article className="brand-card">
+          <h2>Package Contents — Test Tube Planter family</h2>
+          <p>
+            {packageContentsMissingCount === 0
+              ? "Every eligible product in this family already has package contents on file."
+              : `${packageContentsMissingCount} Wooden Wall Hanging Test Tube Planter variant${
+                  packageContentsMissingCount === 1 ? "" : "s"
+                } missing package contents.`}{" "}
+            These are the same physical product as the already-documented siblings in this family, just a
+            different print or color -- apply the same confirmed contents to all of them at once instead of
+            one at a time.
+          </p>
+          <button
+            type="button"
+            onClick={applyTestTubePlanterPackageContents}
+            disabled={isApplyingPackageContents || packageContentsMissingCount === 0}
+          >
+            {isApplyingPackageContents
+              ? "Applying…"
+              : packageContentsMissingCount === 0
+                ? "All products covered"
+                : `Apply to all ${packageContentsMissingCount} eligible products`}
+          </button>
+          {packageContentsMessage && <p className="brand-card-note">{packageContentsMessage}</p>}
         </article>
         <article className="brand-card creative-assets-card">
           <h2>Creative Assets</h2>
