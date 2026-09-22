@@ -326,6 +326,22 @@
   font-size: 14px;
 }
 
+.section-note-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #3f5148;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.section-note-list li {
+  margin-bottom: 8px;
+}
+
+.section-note-list li:last-child {
+  margin-bottom: 0;
+}
+
 .amazon-preview-disclaimer {
   padding: 8px 12px;
   background: #f0f2f2;
