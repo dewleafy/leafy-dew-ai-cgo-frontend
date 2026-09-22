@@ -33,6 +33,7 @@ import type {
   AmazonAdsRecommendationItem,
   AmazonSpSalesSummary,
   AmazonSpSalesSummaryBySku,
+  OrderEconomicsFeeBreakdown,
   OrderEconomicsOrderRow,
   OrderEconomicsProductRollup,
   OrderEconomicsResponse,
@@ -1298,7 +1299,7 @@ function App() {
           {activePage === "Reports" && <ReportsPage navigate={navigate} />}
           {activePage === "Advanced Admin" && <MoreToolsPage navigate={navigate} />}
           {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
-          {activePage === "Product Passport" && <ProductPassportPage />}
+          {activePage === "Product Passport" && <ProductPassportPage product={selectedProduct} />}
           {activePage === "Listing Readiness" && <ListingReadinessPage navigate={navigate} />}
           {activePage === "Product Economics" && <ProductEconomicsPage />}
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
@@ -2825,8 +2826,147 @@ function orderProfitTone(status: unknown): "good" | "watch" | "risk" | "neutral"
   return "neutral";
 }
 
+// A minimal, valid FounderProduct built from just a sku/asin/name — enough
+// to deep-link into Product Passport's Cost Completion Queue and have it
+// pre-filter to that exact product. The queue re-derives everything else
+// (price, fees, etc.) itself once it loads.
+function founderProductStub(sku: string | null, asin: string | null, productName: string | null): FounderProduct {
+  const key = sku ? `sku:${sku}` : asin ? `asin:${asin}` : "unknown";
+  return {
+    key,
+    name: productName ?? sku ?? asin ?? "Product",
+    brand: "",
+    sku: sku ?? "",
+    asin: asin ?? "",
+    category: "",
+    price: null,
+    netProfit: null,
+    margin: null,
+    profitStatus: null,
+    readiness: null,
+    costStatus: null,
+    listingScore: null,
+    inventory: null,
+    status: null,
+    bullets: [],
+    description: "",
+    dimensions: null,
+    weight: null,
+    material: null,
+    color: null,
+    supplierName: null,
+    raw: {}
+  };
+}
+
+function goToCostCompletion(navigate: FounderNavigate, sku: string | null, asin: string | null, productName: string | null) {
+  navigate("Product Passport", founderProductStub(sku, asin, productName));
+}
+
+function feeBreakdownRows(breakdown: OrderEconomicsFeeBreakdown | null): Array<[string, number]> {
+  if (!breakdown) return [];
+  return [
+    ["Landed / product cost", breakdown.landedCost],
+    ["Referral fee", breakdown.referralFee],
+    ["Closing fee", breakdown.closingFee],
+    ["Shipping fee", breakdown.shippingFee],
+    ["Pick & pack fee", breakdown.pickAndPackFee],
+    ["Storage fee", breakdown.storageFee],
+    ["GST on Amazon fees", breakdown.gstOnAmazonFees],
+    ["Return reserve", breakdown.returnReservePerUnit]
+  ];
+}
+
+function OrderDetailSheet({
+  order,
+  onClose,
+  navigate
+}: {
+  order: OrderEconomicsOrderRow;
+  onClose: () => void;
+  navigate: FounderNavigate;
+}) {
+  const shipTo = [order.shipToCity, order.shipToState, order.shipToPostalCode, order.shipToCountry].filter(Boolean).join(", ");
+
+  return (
+    <div className="sheet-overlay" onClick={onClose}>
+      <div className="sheet-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Order calculation detail">
+        <div className="sheet-header">
+          <div>
+            <strong>Order {formatShortId(order.amazonOrderId)}</strong>
+            <p className="section-note">{order.purchaseDate ? order.purchaseDate.slice(0, 10) : "—"} · <StatusBadge value={order.orderStatus} /></p>
+          </div>
+          <button type="button" className="secondary" onClick={onClose}>Close</button>
+        </div>
+
+        <div className="detail-grid">
+          <MetricRow label="Customer / ship-to" value={shipTo || "Not available from Amazon for this order"} />
+          <MetricRow label="Fulfillment channel" value={formatEmpty(order.fulfillmentChannel)} />
+          <MetricRow label="Sales channel" value={formatEmpty(order.salesChannel)} />
+          <MetricRow label="Order revenue" value={formatMoney(order.orderRevenue)} />
+          <MetricRow label="Estimated fees + cost" value={order.orderNonAdCost === null ? "Needs cost data" : formatMoney(order.orderNonAdCost)} />
+          <MetricRow label="Real ad spend (pooled)" value={formatMoney(order.orderAdSpend)} />
+          <MetricRow label="Estimated profit/loss" value={order.orderEstimatedProfit === null ? "Needs cost data" : formatMoney(order.orderEstimatedProfit)} />
+          <MetricRow label="Status" value={<Badge tone={orderProfitTone(order.profitStatus)}>{order.profitStatus.replace(/_/g, " ")}</Badge>} />
+        </div>
+
+        <div className="page-section-label">Products in this order</div>
+        {order.lines.map((line) => (
+          <div className="sheet-line-card" key={line.orderItemId}>
+            <div className="sheet-line-head">
+              <ProductThumb product={{ mainImageUrl: line.imageUrl, imageUrl: line.imageUrl, name: line.productName } as AnyRecord} className="product-thumb" variant="small" />
+              <div>
+                <strong>{cleanFounderText(line.productName, line.sku ?? line.asin ?? "Unknown product")}</strong>
+                <p className="section-note">SKU {cleanFounderText(line.sku, "—")} · ASIN {cleanFounderText(line.asin, "—")} · Qty {line.quantityOrdered}</p>
+              </div>
+              {line.profitStatus === "NEEDS_COST_DATA" ? (
+                <button type="button" className="secondary" onClick={() => goToCostCompletion(navigate, line.sku, line.asin, line.productName)}>
+                  Fill Cost Data
+                </button>
+              ) : (
+                <Badge tone={orderProfitTone(line.profitStatus)}>{line.profitStatus.replace(/_/g, " ")}</Badge>
+              )}
+            </div>
+
+            <div className="detail-grid">
+              <MetricRow label="Item price" value={formatMoney(line.itemRevenue + line.promotionDiscount)} />
+              <MetricRow label="Promotion discount" value={formatMoney(line.promotionDiscount)} />
+              <MetricRow label="Net revenue (this line)" value={formatMoney(line.itemRevenue)} />
+              <MetricRow label="Item tax collected" value={formatMoney(line.itemTax)} />
+              <MetricRow label="Real allocated ad spend" value={formatMoney(line.allocatedAdSpend)} />
+              {!line.hasAdSpendDataForAsinDate ? <MetricRow label="Ad spend note" value="No ad spend recorded for this product on this date" /> : null}
+            </div>
+
+            {line.feeBreakdownTotal ? (
+              <>
+                <p className="section-note">Estimated Amazon fees &amp; costs for this line (from Product Economics):</p>
+                <div className="detail-grid">
+                  {feeBreakdownRows(line.feeBreakdownTotal).map(([label, value]) => (
+                    <MetricRow key={label} label={label} value={formatMoney(value)} />
+                  ))}
+                  <MetricRow label="Total fees + cost (this line)" value={formatMoney(line.nonAdCostTotal)} />
+                </div>
+              </>
+            ) : (
+              <div className="warning-card">
+                <strong>No saved cost data for this product</strong>
+                <p>{cleanFounderText(line.missingCostDataReason, "Add cost data in Product Economics to see a real profit/loss number.")}</p>
+              </div>
+            )}
+
+            <div className="detail-grid">
+              <MetricRow label="Estimated profit/loss (this line)" value={line.estimatedProfit === null ? "Needs cost data" : formatMoney(line.estimatedProfit)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
   const [days, setDays] = useState(7);
+  const [selectedOrder, setSelectedOrder] = useState<OrderEconomicsOrderRow | null>(null);
   const orderEconomics = useApi<OrderEconomicsResponse>(
     () => getJson(`/api/order-economics/summary?sellerId=${SELLER_ID}&days=${days}`),
     [days]
@@ -2838,6 +2978,15 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
   const topProfitProducts = orderEconomics.data?.topProfitProducts ?? [];
   const productsNeedingCostData = orderEconomics.data?.productsNeedingCostData ?? [];
   const caveats = orderEconomics.data?.caveats ?? [];
+
+  function onStatusClick(order: OrderEconomicsOrderRow) {
+    if (order.profitStatus === "NEEDS_COST_DATA") {
+      const needsDataLine = order.lines.find((line) => line.profitStatus === "NEEDS_COST_DATA") ?? order.lines[0] ?? null;
+      goToCostCompletion(navigate, needsDataLine?.sku ?? null, needsDataLine?.asin ?? null, needsDataLine?.productName ?? null);
+      return;
+    }
+    setSelectedOrder(order);
+  }
 
   // Worst losses first, so the founder sees the orders that need attention
   // without having to sort a long list themselves.
@@ -2919,23 +3068,28 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
         </Card>
         <Card
           title="Products Needing Cost Data"
-          action={<button type="button" className="secondary" onClick={() => navigate("Product Economics")}>Add Cost Data</button>}
+          action={<button type="button" className="secondary" onClick={() => navigate("Product Passport")}>Open Cost Queue</button>}
         >
           {orderEconomics.loading ? <LoadingBlock /> : productsNeedingCostData.length === 0 ? <EmptyBlock text="Every product with a recent order has cost data on file." /> : (
             <div className="card-list">
               {productsNeedingCostData.map((product) => (
-                <article className="item-card compact-card" key={`${product.sku ?? product.asin}`}>
+                <button
+                  type="button"
+                  className="item-card compact-card clickable-card"
+                  key={`${product.sku ?? product.asin}`}
+                  onClick={() => goToCostCompletion(navigate, product.sku, product.asin, product.productName)}
+                >
                   <strong>{cleanFounderText(product.productName, product.sku ?? product.asin ?? "Unknown product")}</strong>
-                  <p>{product.orderCount} recent orders can't show real profit/loss yet.</p>
+                  <p>{product.orderCount} recent orders can't show real profit/loss yet. Click to fill in cost data.</p>
                   <span className="section-note">{cleanFounderText(product.sku, "No SKU on file")}</span>
-                </article>
+                </button>
               ))}
             </div>
           )}
         </Card>
       </div>
 
-      <Card title={`Orders (worst loss first, ${visibleOrders.length} of ${orders.length} shown)`}>
+      <Card title={`Orders (worst loss first, ${visibleOrders.length} of ${orders.length} shown) — click a status to see the full calculation`}>
         {orderEconomics.loading ? <LoadingBlock /> : visibleOrders.length === 0 ? <EmptyBlock text="No real orders found for this period." /> : (
           <div className="table-wrap">
             <table>
@@ -2952,14 +3106,22 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
               </thead>
               <tbody>
                 {visibleOrders.map((order: OrderEconomicsOrderRow) => (
-                  <tr key={order.amazonOrderId}>
+                  <tr key={order.amazonOrderId} className="clickable-row" onClick={() => onStatusClick(order)}>
                     <td>{formatShortId(order.amazonOrderId)}</td>
                     <td>{order.purchaseDate ? order.purchaseDate.slice(0, 10) : "—"}</td>
                     <td>{formatMoney(order.orderRevenue)}</td>
                     <td>{order.orderNonAdCost === null ? "—" : formatMoney(order.orderNonAdCost)}</td>
                     <td>{formatMoney(order.orderAdSpend)}</td>
                     <td>{order.orderEstimatedProfit === null ? "—" : formatMoney(order.orderEstimatedProfit)}</td>
-                    <td><Badge tone={orderProfitTone(order.profitStatus)}>{order.profitStatus.replace(/_/g, " ")}</Badge></td>
+                    <td>
+                      <button
+                        type="button"
+                        className="badge-button"
+                        onClick={(event) => { event.stopPropagation(); onStatusClick(order); }}
+                      >
+                        <Badge tone={orderProfitTone(order.profitStatus)}>{order.profitStatus.replace(/_/g, " ")}</Badge>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2975,6 +3137,8 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
           ))}
         </ul>
       </Card>
+
+      {selectedOrder ? <OrderDetailSheet order={selectedOrder} onClose={() => setSelectedOrder(null)} navigate={navigate} /> : null}
     </div>
   );
 }
@@ -3433,11 +3597,17 @@ function DailyTextList({ title, rows, emptyText }: { title: string; rows: unknow
   );
 }
 
-function ProductPassportPage() {
+function ProductPassportPage({ product }: { product?: FounderProduct | null } = {}) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const readiness = useApi<AnyRecord>(() => getJson(`/api/product-passports/readiness/summary?sellerId=${SELLER_ID}`));
   const readinessRef = useRef<HTMLDivElement | null>(null);
   const [section, setSection] = useState<ProductPassportSection>("COST_COMPLETION");
+  // Deep-link support: arriving here with a specific product (e.g. from Order
+  // Profit & Loss's "Needs Cost Data" status) always lands on the Cost
+  // Completion Queue, pre-filtered to that exact product.
+  useEffect(() => {
+    if (product?.sku || product?.asin) setSection("COST_COMPLETION");
+  }, [product]);
   const [openForm, setOpenForm] = useState(false);
   const [selectedPassport, setSelectedPassport] = useState<ProductPassport | null>(null);
   const [detail, setDetail] = useState<LoadState<AnyRecord>>({ data: null, loading: false, error: null });
@@ -3578,7 +3748,7 @@ function ProductPassportPage() {
           </div>
         </section>
       ) : (
-        <CostCompletionQueueSection />
+        <CostCompletionQueueSection initialSearchSku={product?.sku ?? null} />
       )}
     </div>
   );
@@ -3873,12 +4043,22 @@ function costCompletionSaveMessage(savedCount: number, response: unknown): strin
   return `Saved ${savedCount} row(s). Resolved ${resolvedCount} related COST_DATA_REQUIRED approval action(s).`;
 }
 
-function CostCompletionQueueSection() {
+function CostCompletionQueueSection({ initialSearchSku }: { initialSearchSku?: string | null } = {}) {
   const summary = useApi<AnyRecord>(() => getJson(`/api/product-passport/cost-completion/summary?sellerId=${SELLER_ID}`));
   const queue = useApi<unknown>(() => getJson(`/api/product-passport/cost-completion?sellerId=${SELLER_ID}&limit=200`));
   const [filter, setFilter] = useState<CostQueueFilter>("INCOMPLETE");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // Deep-link support: arriving here from Order Profit & Loss's "Needs Cost
+  // Data" status jumps straight to that exact product instead of leaving the
+  // founder to search the whole queue by hand.
+  useEffect(() => {
+    if (initialSearchSku) {
+      setSearch(initialSearchSku);
+      setFilter("ALL");
+      setPage(1);
+    }
+  }, [initialSearchSku]);
   const [edits, setEdits] = useState<Record<string, CostEditState>>({});
   const [dirtyRows, setDirtyRows] = useState<Record<string, DirtyCostFields>>({});
   const [savedOverrides, setSavedOverrides] = useState<Record<string, Partial<NormalizedCostCompletionRow>>>({});
