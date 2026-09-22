@@ -33,6 +33,9 @@ import type {
   AmazonAdsRecommendationItem,
   AmazonSpSalesSummary,
   AmazonSpSalesSummaryBySku,
+  OrderEconomicsOrderRow,
+  OrderEconomicsProductRollup,
+  OrderEconomicsResponse,
   AnyRecord,
   ApiRows,
   ApprovalExecutionSummary,
@@ -129,6 +132,7 @@ const technicalTabs = [
   "Listing Readiness",
   "Product Economics",
   "PPC Recommendations",
+  "Order Profit & Loss",
   "Approval Center",
   "Listing Drafts",
   "Image + A+",
@@ -1084,6 +1088,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Growth Engine", page: "Growth Engine" },
     { label: "Brand Center", page: "Brand Center" },
     { label: "PPC Recommendations", page: "PPC Recommendations" },
+    { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
     { label: "Experiments", page: "Experiments" },
     { label: "Business Alerts", page: "Alert Center" }
   ] },
@@ -1297,6 +1302,7 @@ function App() {
           {activePage === "Listing Readiness" && <ListingReadinessPage navigate={navigate} />}
           {activePage === "Product Economics" && <ProductEconomicsPage />}
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Center" && <ApprovalCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
@@ -2743,6 +2749,9 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <FounderMetric label="Real Net Profit (7d)" value={realProfitLoading ? "…" : formatMoney(realProfit.netProfitAfterAds)} trend="After real ad spend" tone="gold" />
       </div>
       <p className="section-note">{realProfitLoading ? "Loading real profit…" : realProfitTrendText(realProfit)}</p>
+      <div className="button-row">
+        <button type="button" className="secondary" onClick={() => navigate("Order Profit & Loss")}>See which orders are actually losing money</button>
+      </div>
 
       <Card title="Top Products by Real Sales (7d)">
         {salesSummary.loading ? <LoadingBlock /> : topSellingSku.length === 0 ? <EmptyBlock text="No real order data available yet for this period." /> : (
@@ -2804,6 +2813,168 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <button type="button" className="secondary" onClick={() => navigate("CEO Report")}>Open CEO Report</button>
         <button type="button" className="secondary" onClick={() => navigate("PPC Recommendations")}>Open PPC Recommendations</button>
       </div>
+    </div>
+  );
+}
+
+function orderProfitTone(status: unknown): "good" | "watch" | "risk" | "neutral" {
+  const label = formatEmpty(status).toUpperCase();
+  if (label === "PROFIT") return "good";
+  if (label === "LOSS") return "risk";
+  if (label === "BREAKEVEN") return "watch";
+  return "neutral";
+}
+
+function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
+  const [days, setDays] = useState(7);
+  const orderEconomics = useApi<OrderEconomicsResponse>(
+    () => getJson(`/api/order-economics/summary?sellerId=${SELLER_ID}&days=${days}`),
+    [days]
+  );
+
+  const summary = orderEconomics.data?.summary ?? null;
+  const orders = orderEconomics.data?.orders ?? [];
+  const topLossProducts = orderEconomics.data?.topLossProducts ?? [];
+  const topProfitProducts = orderEconomics.data?.topProfitProducts ?? [];
+  const productsNeedingCostData = orderEconomics.data?.productsNeedingCostData ?? [];
+  const caveats = orderEconomics.data?.caveats ?? [];
+
+  // Worst losses first, so the founder sees the orders that need attention
+  // without having to sort a long list themselves.
+  const sortedOrders = [...orders].sort((a, b) => {
+    const aProfit = a.orderEstimatedProfit ?? Number.POSITIVE_INFINITY;
+    const bProfit = b.orderEstimatedProfit ?? Number.POSITIVE_INFINITY;
+    return aProfit - bProfit;
+  });
+  const visibleOrders = sortedOrders.slice(0, 100);
+
+  return (
+    <div className="page founder-page">
+      <PageHeader
+        title="Order Profit & Loss"
+        subtitle="Every real order, with actual Amazon fees estimated and real ad spend added in — so you can see which orders actually made money."
+      />
+      {orderEconomics.error ? <SafetyBanner text="Order profit/loss could not be loaded right now. Showing whatever is available." /> : null}
+
+      <div className="button-row">
+        {[7, 14, 30].map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={days === option ? "" : "secondary"}
+            onClick={() => setDays(option)}
+          >
+            Last {option} days
+          </button>
+        ))}
+      </div>
+
+      <div className="quick-status-strip">
+        <FounderMetric label="Orders Considered" value={orderEconomics.loading ? "…" : cleanFounderText(summary?.ordersConsidered, "0")} />
+        <FounderMetric label="Total Revenue" value={orderEconomics.loading ? "…" : formatMoney(summary?.totalRevenue)} tone="green" />
+        <FounderMetric label="Total Ad Spend" value={orderEconomics.loading ? "…" : formatMoney(summary?.totalAdSpend)} />
+        <FounderMetric label="Estimated Net Profit" value={orderEconomics.loading ? "…" : formatMoney(summary?.totalEstimatedProfit)} tone="gold" />
+        <FounderMetric label="Loss-Making Orders" value={orderEconomics.loading ? "…" : cleanFounderText(summary?.lossOrderCount, "0")} />
+        <FounderMetric label="Needs Cost Data" value={orderEconomics.loading ? "…" : cleanFounderText(summary?.needsCostDataOrderCount, "0")} />
+      </div>
+      <p className="section-note">Cancelled orders are excluded ({orderEconomics.loading ? "…" : cleanFounderText(summary?.cancelledOrdersExcluded, "0")} excluded this period).</p>
+
+      {summary && summary.zeroConversionAdSpend > 0 ? (
+        <div className="warning-card">
+          <strong>{formatMoney(summary.zeroConversionAdSpend)} in ad spend had zero real orders</strong>
+          <p>
+            Across {summary.zeroConversionAsinDateCount} product/day combinations this period, ads spent money on a
+            product that got no real Amazon order that same day. This is the clearest sign of "ads spending all day
+            with no sale" — check these products' campaigns and dayparting first.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="sales-layout">
+        <Card title="Products Losing the Most Money">
+          {orderEconomics.loading ? <LoadingBlock /> : topLossProducts.length === 0 ? <EmptyBlock text="No loss-making products in this period." /> : (
+            <div className="card-list">
+              {topLossProducts.map((product: OrderEconomicsProductRollup) => (
+                <article className="item-card compact-card" key={`${product.sku ?? product.asin}`}>
+                  <strong>{cleanFounderText(product.productName, product.sku ?? product.asin ?? "Unknown product")}</strong>
+                  <p>{formatMoney(product.totalEstimatedProfit)} across {product.orderCount} orders ({product.unitsSold} units)</p>
+                  <span className="section-note">{cleanFounderText(product.sku, "No SKU on file")} · {formatMoney(product.totalAdSpend)} ad spend</span>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card title="Most Profitable Products">
+          {orderEconomics.loading ? <LoadingBlock /> : topProfitProducts.length === 0 ? <EmptyBlock text="No profitable products found yet." /> : (
+            <div className="card-list">
+              {topProfitProducts.map((product: OrderEconomicsProductRollup) => (
+                <article className="item-card compact-card" key={`${product.sku ?? product.asin}`}>
+                  <strong>{cleanFounderText(product.productName, product.sku ?? product.asin ?? "Unknown product")}</strong>
+                  <p>{formatMoney(product.totalEstimatedProfit)} across {product.orderCount} orders ({product.unitsSold} units)</p>
+                  <span className="section-note">{cleanFounderText(product.sku, "No SKU on file")} · {formatMoney(product.totalAdSpend)} ad spend</span>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card
+          title="Products Needing Cost Data"
+          action={<button type="button" className="secondary" onClick={() => navigate("Product Economics")}>Add Cost Data</button>}
+        >
+          {orderEconomics.loading ? <LoadingBlock /> : productsNeedingCostData.length === 0 ? <EmptyBlock text="Every product with a recent order has cost data on file." /> : (
+            <div className="card-list">
+              {productsNeedingCostData.map((product) => (
+                <article className="item-card compact-card" key={`${product.sku ?? product.asin}`}>
+                  <strong>{cleanFounderText(product.productName, product.sku ?? product.asin ?? "Unknown product")}</strong>
+                  <p>{product.orderCount} recent orders can't show real profit/loss yet.</p>
+                  <span className="section-note">{cleanFounderText(product.sku, "No SKU on file")}</span>
+                </article>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card title={`Orders (worst loss first, ${visibleOrders.length} of ${orders.length} shown)`}>
+        {orderEconomics.loading ? <LoadingBlock /> : visibleOrders.length === 0 ? <EmptyBlock text="No real orders found for this period." /> : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Date</th>
+                  <th>Revenue</th>
+                  <th>Est. Fees + Cost</th>
+                  <th>Ad Spend</th>
+                  <th>Est. Profit/Loss</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleOrders.map((order: OrderEconomicsOrderRow) => (
+                  <tr key={order.amazonOrderId}>
+                    <td>{formatShortId(order.amazonOrderId)}</td>
+                    <td>{order.purchaseDate ? order.purchaseDate.slice(0, 10) : "—"}</td>
+                    <td>{formatMoney(order.orderRevenue)}</td>
+                    <td>{order.orderNonAdCost === null ? "—" : formatMoney(order.orderNonAdCost)}</td>
+                    <td>{formatMoney(order.orderAdSpend)}</td>
+                    <td>{order.orderEstimatedProfit === null ? "—" : formatMoney(order.orderEstimatedProfit)}</td>
+                    <td><Badge tone={orderProfitTone(order.profitStatus)}>{order.profitStatus.replace(/_/g, " ")}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="How to read this page">
+        <ul className="section-note-list">
+          {caveats.map((caveat, index) => (
+            <li key={index}>{caveat}</li>
+          ))}
+        </ul>
+      </Card>
     </div>
   );
 }
