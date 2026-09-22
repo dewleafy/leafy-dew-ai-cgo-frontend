@@ -1230,6 +1230,14 @@ export type OrderEconomicsOrderRow = {
   orderAdSpend: number;
   orderEstimatedProfit: number | null;
   profitStatus: OrderEconomicsProfitStatus;
+  isRepeatShipTo: boolean;
+  shipToOrderCount: number;
+  otherOrdersAtAddress: Array<{
+    amazonOrderId: string;
+    purchaseDate: string | null;
+    orderRevenue: number;
+    productSummary: string | null;
+  }>;
 };
 
 export type OrderEconomicsProductRollup = {
