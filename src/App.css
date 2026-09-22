@@ -1368,6 +1368,11 @@ button.secondary:hover,
   background: #eef2ee;
 }
 
+.badge-repeat {
+  color: #33406e;
+  background: #e4e9fc;
+}
+
 .metric-tile {
   padding: 16px;
 }
