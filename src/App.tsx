@@ -2901,6 +2901,16 @@ function OrderDetailSheet({
 
         <div className="detail-grid">
           <MetricRow label="Customer / ship-to" value={shipTo || "Not available from Amazon for this order"} />
+          <MetricRow
+            label="Repeat customer"
+            value={
+              order.isRepeatShipTo ? (
+                <Badge tone="repeat">Same address, {order.shipToOrderCount} orders</Badge>
+              ) : (
+                "No other orders found at this ship-to address"
+              )
+            }
+          />
           <MetricRow label="Fulfillment channel" value={formatEmpty(order.fulfillmentChannel)} />
           <MetricRow label="Sales channel" value={formatEmpty(order.salesChannel)} />
           <MetricRow label="Order revenue" value={formatMoney(order.orderRevenue)} />
@@ -2909,6 +2919,27 @@ function OrderDetailSheet({
           <MetricRow label="Estimated profit/loss" value={order.orderEstimatedProfit === null ? "Needs cost data" : formatMoney(order.orderEstimatedProfit)} />
           <MetricRow label="Status" value={<Badge tone={orderProfitTone(order.profitStatus)}>{order.profitStatus.replace(/_/g, " ")}</Badge>} />
         </div>
+
+        {order.isRepeatShipTo ? (
+          <>
+            <div className="page-section-label">Buying history at this address</div>
+            <p className="section-note">
+              Matched by ship-to postal code + city/state, not by a confirmed Amazon buyer identity (Amazon
+              doesn't share buyer name/email with this app) — see the note at the bottom of this page.
+            </p>
+            <div className="card-list">
+              {order.otherOrdersAtAddress.map((other) => (
+                <article className="item-card compact-card" key={other.amazonOrderId}>
+                  <strong>{formatShortId(other.amazonOrderId)}</strong>
+                  <p>{cleanFounderText(other.productSummary, "Products unknown")}</p>
+                  <span className="section-note">
+                    {other.purchaseDate ? other.purchaseDate.slice(0, 10) : "—"} · {formatMoney(other.orderRevenue)}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </>
+        ) : null}
 
         <div className="page-section-label">Products in this order</div>
         {order.lines.map((line) => (
@@ -3006,7 +3037,7 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
       {orderEconomics.error ? <SafetyBanner text="Order profit/loss could not be loaded right now. Showing whatever is available." /> : null}
 
       <div className="button-row">
-        {[7, 14, 30].map((option) => (
+        {[7, 14, 30, 60, 90].map((option) => (
           <button
             key={option}
             type="button"
@@ -3101,6 +3132,7 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
                   <th>Est. Fees + Cost</th>
                   <th>Ad Spend</th>
                   <th>Est. Profit/Loss</th>
+                  <th>Customer</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -3113,6 +3145,13 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
                     <td>{order.orderNonAdCost === null ? "—" : formatMoney(order.orderNonAdCost)}</td>
                     <td>{formatMoney(order.orderAdSpend)}</td>
                     <td>{order.orderEstimatedProfit === null ? "—" : formatMoney(order.orderEstimatedProfit)}</td>
+                    <td>
+                      {order.isRepeatShipTo ? (
+                        <Badge tone="repeat">Repeat ({order.shipToOrderCount}x)</Badge>
+                      ) : (
+                        <span className="section-note">—</span>
+                      )}
+                    </td>
                     <td>
                       <button
                         type="button"
