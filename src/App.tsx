@@ -6132,6 +6132,44 @@ async function fetchActionLedgerData(): Promise<{ summary: ActionLedgerSummary; 
   };
 }
 
+// The Approval Center's main list only ever loads the most recent ACTION_LEDGER_FETCH_LIMIT
+// (200) actions, so any older action -- like a passport draft approved/completed weeks ago --
+// silently disappears from every client-side filter, the Action Type dropdown, and search, even
+// though the summary counters (Approved/Completed) still include it. The account can have 1000+
+// total actions, so "not in the most recent 200" is common, not rare.
+//
+// Fix: when the founder types something into search that looks like it could be a real SKU or
+// ASIN, also ask the server directly for that exact sku/asin (the same `&sku=`/`&asin=` filters
+// the Product Detail page's History tab already uses, so this isn't a new backend capability --
+// see ProductDetailPage's `ledgerFilter`). That bypasses the 200-row recency window entirely and
+// finds the action no matter how old it is. Harmless, cheap GETs -- exact-match filters, so a
+// query that isn't a real SKU/ASIN just comes back empty and costs nothing.
+async function fetchActionLedgerSearchMatches(query: string): Promise<ActionLedgerRow[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const [bySku, byAsin] = await Promise.all([
+    getJson<unknown>(`/api/action-ledger?sellerId=${SELLER_ID}&limit=200&sku=${encodeURIComponent(trimmed)}`).catch(() => null),
+    getJson<unknown>(`/api/action-ledger?sellerId=${SELLER_ID}&limit=200&asin=${encodeURIComponent(trimmed)}`).catch(() => null)
+  ]);
+
+  const merged = new Map<string, ActionLedgerRow>();
+  for (const row of [...actionLedgerRowsOf(bySku), ...actionLedgerRowsOf(byAsin)]) {
+    if (row?.id) merged.set(String(row.id), row);
+  }
+  return Array.from(merged.values());
+}
+
+function mergeActionLedgerRowLists(...lists: ActionLedgerRow[][]): ActionLedgerRow[] {
+  const merged = new Map<string, ActionLedgerRow>();
+  for (const list of lists) {
+    for (const row of list) {
+      if (row?.id) merged.set(String(row.id), row);
+    }
+  }
+  return Array.from(merged.values());
+}
+
 function formatBatchCounts(value: unknown): string {
   const root = recordOf(value);
   const nested = recordOf(root.result);
@@ -6506,6 +6544,11 @@ function ApprovalCenterPage() {
   const [rowsState, setRowsState] = useState<LoadState<ActionLedgerRow[]>>(emptyState<ActionLedgerRow[]>());
   const [workflowPanels, setWorkflowPanels] = useState<Record<string, WorkflowPanelState>>({});
   const [reopeningId, setReopeningId] = useState<string | null>(null);
+  // Exact sku/asin matches fetched directly from the server for whatever is currently typed in
+  // search, so an action older than the most recent ACTION_LEDGER_FETCH_LIMIT (200) rows is still
+  // findable -- see fetchActionLedgerSearchMatches's comment above for why this exists.
+  const [searchMatchRows, setSearchMatchRows] = useState<ActionLedgerRow[]>([]);
+  const [searchMatchLoading, setSearchMatchLoading] = useState(false);
   // Loaded so the page-level banner below can honestly reflect whether Live Execution is
   // actually ON for PPC/Listing content, instead of a static "shadow mode" claim that stayed on
   // screen even after a real live Amazon send (see the dedicated bug note in the project's
@@ -6556,14 +6599,44 @@ function ApprovalCenterPage() {
     };
   }, []);
 
+  // Debounced: waits 350ms after typing stops before asking the server for exact sku/asin
+  // matches, so this doesn't fire a request on every keystroke.
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchMatchRows([]);
+      setSearchMatchLoading(false);
+      return;
+    }
+    let alive = true;
+    setSearchMatchLoading(true);
+    const timer = setTimeout(() => {
+      fetchActionLedgerSearchMatches(trimmed)
+        .then((rows) => {
+          if (alive) setSearchMatchRows(rows);
+        })
+        .finally(() => {
+          if (alive) setSearchMatchLoading(false);
+        });
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
   const loadedRows = rowsState.data ?? [];
-  const allRows = dailyPriorityRows ?? loadedRows;
+  // Merge in any older actions the server-side sku/asin search above found, so search isn't
+  // limited to only the most recent ACTION_LEDGER_FETCH_LIMIT (200) rows.
+  const allRows = useMemo(() => (
+    mergeActionLedgerRowLists(dailyPriorityRows ?? loadedRows, searchMatchRows)
+  ), [dailyPriorityRows, loadedRows, searchMatchRows]);
   const sourceOptions = useMemo(() => (
-    Array.from(new Set([...defaultSourceFilters, ...uniqueSortedValues(loadedRows, "source")]))
-  ), [loadedRows]);
+    Array.from(new Set([...defaultSourceFilters, ...uniqueSortedValues([...loadedRows, ...searchMatchRows], "source")]))
+  ), [loadedRows, searchMatchRows]);
   const actionTypeOptions = useMemo(() => (
-    Array.from(new Set([...defaultActionTypeFilters, ...uniqueSortedValues(loadedRows, "actionType")]))
-  ), [loadedRows]);
+    Array.from(new Set([...defaultActionTypeFilters, ...uniqueSortedValues([...loadedRows, ...searchMatchRows], "actionType")]))
+  ), [loadedRows, searchMatchRows]);
   const rows = useMemo(() => {
     const statusRows = filterActionLedgerRows(allRows, activeFilter);
     const sourceRows = sourceFilter === "ALL SOURCES"
@@ -7152,6 +7225,15 @@ function ApprovalCenterPage() {
           }}
         />
       </div>
+      {searchQuery.trim() ? (
+        <p className="section-note">
+          {searchMatchLoading
+            ? "Also checking your full history for an exact SKU or ASIN match…"
+            : searchMatchRows.length > 0
+            ? `Found ${searchMatchRows.length} additional match${searchMatchRows.length === 1 ? "" : "es"} by exact SKU/ASIN outside your most recent 200 actions.`
+            : "Search covers your most recent 200 actions, plus an exact SKU or ASIN match anywhere in your history."}
+        </p>
+      ) : null}
       <div className="approval-quick-views" aria-label="Quick views">
         {quickViewFilters.map((filter) => (
           <button
