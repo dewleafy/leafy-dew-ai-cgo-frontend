@@ -1343,6 +1343,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
   const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
   const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
+  const alerts = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
   const data = todayCommandSummaryOf(today.data);
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const productCount = products.length;
@@ -1361,13 +1362,21 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
     ? brandReadinessBrands.map((brand) => brand.overallScore).join(" / ")
     : "-";
 
+  const openAlertCount = readNumber(alerts.data?.openAlerts);
+  const highAlertCount = readNumber(alerts.data?.highAlerts);
+
   const attentionItems = [
+    // Sourced from the Alert Center, which now refreshes automatically once a day alongside
+    // the Daily AI-CGO engine run (see background-sync.service.ts) — this is the one place on
+    // the founder's default landing page that surfaces what those 300 engines actually found,
+    // instead of it sitting unseen under Advanced Tools -> Business Alerts.
+    openAlertCount > 0 ? { icon: "bell" as FounderIconName, title: "Business alerts need review", text: `${openAlertCount} open alert${openAlertCount === 1 ? "" : "s"} from your Daily AI checks${highAlertCount > 0 ? ` (${highAlertCount} high severity)` : ""}.`, priority: "High", action: "Open Alerts", page: "Alert Center" as AppPage } : null,
     missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
     pendingApprovalCount > 0 ? { icon: "approval" as FounderIconName, title: "AI actions waiting", text: `${pendingApprovalCount} recommendations are waiting for your decision.`, priority: "High", action: "Review Now", page: "AI Actions" as AppPage } : null,
     ppcRisks > 0 ? { icon: "sales" as FounderIconName, title: "PPC risk high", text: "Ad spend or ACOS needs a founder review before changes are made.", priority: "Watch", action: "Open Growth Engine", page: "Growth Engine" as AppPage } : null,
     listingIdeas > 0 ? { icon: "spark" as FounderIconName, title: "Listing ideas ready", text: "Content improvements are drafted for review.", priority: "Ready", action: "View Ideas", page: "Growth Engine" as AppPage } : null,
     profitRisks > 0 ? { icon: "chart" as FounderIconName, title: "Profit risk", text: "Some products may need pricing, cost, or ads attention.", priority: "Watch", action: "Open Products", page: "Products" as AppPage } : null
-  ].filter(Boolean).slice(0, 5) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
+  ].filter(Boolean).slice(0, 6) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
 
   const previewProducts = products.slice(0, 3);
   const nextBestAction = pendingApprovalCount > 0 || missingCostCount > 0
