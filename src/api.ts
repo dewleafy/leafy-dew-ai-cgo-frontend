@@ -10,6 +10,10 @@ import type {
   AlertEvent,
   AlertSummary,
   ApiRows,
+  DaypartingCheckResult,
+  DaypartingHistoryResponse,
+  DaypartingSettingsResponse,
+  DaypartingStatusResponse,
   DataFreshnessSummary,
   Experiment,
   ExperimentSummary,
@@ -243,4 +247,14 @@ export const qaSmokeApi = {
   run: (sellerId: string) => postJson<unknown>(`/api/qa-smoke/run?sellerId=${sellerId}`, {}),
   runs: (sellerId: string, limit = 20) => getJson<ApiRows<QaSmokeRun>>(`/api/qa-smoke/runs?sellerId=${sellerId}&limit=${limit}`),
   latest: (sellerId: string) => getJson<QaSmokeLatest>(`/api/qa-smoke/latest?sellerId=${sellerId}`)
+};
+
+export const daypartingApi = {
+  settings: (sellerId: string) => getJson<DaypartingSettingsResponse>(`/api/amazon-ads/dayparting/settings?sellerId=${sellerId}`),
+  saveSettings: (sellerId: string, body: { enabled?: boolean; activeStartHour?: number; activeEndHour?: number }) =>
+    putJson<DaypartingSettingsResponse>(`/api/amazon-ads/dayparting/settings?sellerId=${sellerId}`, { sellerId, ...body }),
+  status: (sellerId: string) => getJson<DaypartingStatusResponse>(`/api/amazon-ads/dayparting/status?sellerId=${sellerId}`),
+  history: (sellerId: string, limit = 50) =>
+    getJson<DaypartingHistoryResponse>(`/api/amazon-ads/dayparting/history?sellerId=${sellerId}&limit=${limit}`),
+  runNow: (sellerId: string) => postJson<DaypartingCheckResult>(`/api/amazon-ads/dayparting/run-now?sellerId=${sellerId}`, {})
 };
