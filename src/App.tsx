@@ -6,6 +6,7 @@ import {
   approvalExecutionApi,
   aiGatewayApi,
   alertCenterApi,
+  daypartingApi,
   dataFreshnessApi,
   experimentsApi,
   getJson,
@@ -77,6 +78,9 @@ import type {
   NotificationMessage,
   NotificationSettings,
   NotificationSummary,
+  DaypartingHistoryResponse,
+  DaypartingSettingsResponse,
+  DaypartingStatusResponse,
   ProductionHealthModule,
   ProductionHealthSummary,
   PpcExecutionApiResult,
@@ -135,6 +139,7 @@ const technicalTabs = [
   "Product Economics",
   "PPC Recommendations",
   "Order Profit & Loss",
+  "Ad Dayparting",
   "Approval Center",
   "Listing Drafts",
   "Image + A+",
@@ -1091,6 +1096,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Brand Center", page: "Brand Center" },
     { label: "PPC Recommendations", page: "PPC Recommendations" },
     { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
+    { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
     { label: "Experiments", page: "Experiments" },
     { label: "Business Alerts", page: "Alert Center" }
   ] },
@@ -1305,6 +1311,7 @@ function App() {
           {activePage === "Product Economics" && <ProductEconomicsPage />}
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
+          {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Center" && <ApprovalCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
@@ -9961,6 +9968,205 @@ function SchedulerControlPage() {
           )}
         </Card>
       </div>
+    </div>
+  );
+}
+
+const DAYPARTING_HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
+
+function formatDaypartingHourLabel(hour: number): string {
+  const normalized = ((hour % 24) + 24) % 24;
+  const period = normalized < 12 ? "AM" : "PM";
+  const displayHour = normalized % 12 === 0 ? 12 : normalized % 12;
+  return `${displayHour}:00 ${period}`;
+}
+
+function AdDaypartingPage() {
+  const settings = useApi<DaypartingSettingsResponse>(() => daypartingApi.settings(SELLER_ID));
+  const status = useApi<DaypartingStatusResponse>(() => daypartingApi.status(SELLER_ID));
+  const history = useApi<DaypartingHistoryResponse>(() => daypartingApi.history(SELLER_ID, 50));
+
+  const [startHour, setStartHour] = useState<number | null>(null);
+  const [endHour, setEndHour] = useState<number | null>(null);
+  const [savedForHours, setSavedForHours] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isToggling, setIsToggling] = useState(false);
+  const [isRunningNow, setIsRunningNow] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const loadedSettings = settings.data?.settings ?? null;
+
+  useEffect(() => {
+    if (loadedSettings && savedForHours !== loadedSettings.sellerId) {
+      setStartHour(loadedSettings.activeStartHour);
+      setEndHour(loadedSettings.activeEndHour);
+      setSavedForHours(loadedSettings.sellerId);
+    }
+  }, [loadedSettings, savedForHours]);
+
+  function refresh() {
+    settings.reload();
+    status.reload();
+    history.reload();
+  }
+
+  async function saveHours() {
+    if (startHour === null || endHour === null) return;
+    setIsSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      await daypartingApi.saveSettings(SELLER_ID, { activeStartHour: startHour, activeEndHour: endHour });
+      setMessage("Active hours saved.");
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function toggleEnabled() {
+    if (!loadedSettings) return;
+    setIsToggling(true);
+    setMessage("");
+    setError("");
+    try {
+      await daypartingApi.saveSettings(SELLER_ID, { enabled: !loadedSettings.enabled });
+      setMessage(!loadedSettings.enabled ? "Dayparting turned on." : "Dayparting turned off.");
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setIsToggling(false);
+    }
+  }
+
+  async function runCheckNow() {
+    setIsRunningNow(true);
+    setMessage("");
+    setError("");
+    try {
+      const result = await daypartingApi.runNow(SELLER_ID);
+      setMessage(result.summary);
+      refresh();
+    } catch (requestError) {
+      setError(sanitizeActionError(requestError));
+    } finally {
+      setIsRunningNow(false);
+    }
+  }
+
+  const campaignStates = status.data?.campaignStates ?? [];
+  const systemPausedNow = campaignStates.filter((row) => row.pausedBySystem);
+  const historyRows = history.data?.history ?? [];
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Ad Dayparting"
+        subtitle="Automatically pause Sponsored Products campaigns outside your active hours, and resume them when the window opens."
+      />
+      <SafetyBanner text="This is the one automation in this app that writes directly to real Amazon Ads campaigns (pause/resume). It only ever pauses a campaign that's genuinely running, and only ever resumes a campaign it itself paused -- it never touches a campaign you paused yourself." />
+      {message ? <div className="soft-state success-state compact-state">{message}</div> : null}
+      {error ? <div className="soft-state error-state compact-state">{error}</div> : null}
+
+      <Card title="Schedule">
+        {settings.loading ? <LoadingBlock /> : settings.error ? <ErrorBlock text="Could not load dayparting settings. The backend may still be deploying, or dayparting.sql hasn't been run in Supabase yet." /> : loadedSettings ? (
+          <>
+            <div className="summary-strip command-summary">
+              <MetricTile label="Status" value={<StatusBadge value={loadedSettings.enabled ? "ENABLED" : "DISABLED"} />} />
+              <MetricTile label="Active Hours" value={`${formatDaypartingHourLabel(loadedSettings.activeStartHour)} – ${formatDaypartingHourLabel(loadedSettings.activeEndHour)}`} />
+              <MetricTile label="Timezone" value={loadedSettings.timezone} />
+              <MetricTile label="Currently Paused By This Feature" value={status.loading ? "…" : systemPausedNow.length} />
+            </div>
+            <div className="button-row">
+              <button type="button" onClick={toggleEnabled} disabled={isToggling}>
+                {isToggling ? "Working…" : loadedSettings.enabled ? "Turn dayparting off" : "Turn dayparting on"}
+              </button>
+              <button type="button" className="secondary" onClick={runCheckNow} disabled={isRunningNow}>
+                {isRunningNow ? "Running…" : "Run check now"}
+              </button>
+            </div>
+            <div className="detail-grid" style={{ marginTop: "12px" }}>
+              <label className="detail-grid-label">
+                Ads should run from
+                <select
+                  value={startHour ?? loadedSettings.activeStartHour}
+                  onChange={(event) => setStartHour(Number(event.target.value))}
+                >
+                  {DAYPARTING_HOUR_OPTIONS.map((hour) => (
+                    <option key={hour} value={hour}>{formatDaypartingHourLabel(hour)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="detail-grid-label">
+                until
+                <select
+                  value={endHour ?? loadedSettings.activeEndHour}
+                  onChange={(event) => setEndHour(Number(event.target.value))}
+                >
+                  {DAYPARTING_HOUR_OPTIONS.map((hour) => (
+                    <option key={hour} value={hour}>{formatDaypartingHourLabel(hour)}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="button-row compact">
+              <button type="button" onClick={saveHours} disabled={isSaving}>{isSaving ? "Saving…" : "Save hours"}</button>
+            </div>
+            <p className="brand-card-note">
+              Outside this window, every Sponsored Products campaign that's currently running (ENABLED) gets paused automatically. When the window opens again, only the campaigns this feature paused get resumed -- a campaign you paused yourself, for your own reason, is never touched or force-enabled. Checked automatically every 15 minutes; nothing changes until you turn this on.
+            </p>
+          </>
+        ) : <EmptyBlock text="No dayparting settings yet." />}
+      </Card>
+
+      <Card title="Campaigns currently paused by this feature">
+        {status.loading ? <LoadingBlock /> : status.error ? <ErrorBlock text="Could not load dayparting status." /> : systemPausedNow.length === 0 ? (
+          <EmptyBlock text="No campaigns are currently paused by dayparting." />
+        ) : (
+          <div className="card-list command-card-list">
+            {systemPausedNow.map((row) => (
+              <article className="item-card command-item-card" key={row.campaignId}>
+                <div className="item-top">
+                  <strong>{formatEmpty(row.campaignName ?? row.campaignId)}</strong>
+                  <StatusBadge value="PAUSED" />
+                </div>
+                <div className="detail-grid">
+                  <MetricRow label="Campaign ID" value={formatEmpty(row.campaignId)} />
+                  <MetricRow label="Last Action" value={formatEmpty(row.lastAction)} />
+                  <MetricRow label="Last Action At" value={formatLocalDateTime(row.lastActionAt)} />
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title="History">
+        {history.loading ? <LoadingBlock /> : history.error ? <ErrorBlock text="Could not load dayparting history." /> : historyRows.length === 0 ? (
+          <EmptyBlock text="No dayparting actions yet." />
+        ) : (
+          <div className="card-list command-card-list">
+            {historyRows.map((row) => (
+              <article className="item-card command-item-card" key={row.id}>
+                <div className="item-top">
+                  <strong>{formatEmpty(row.campaignName ?? row.campaignId)}</strong>
+                  <StatusBadge value={row.success ? row.action : `${row.action}_FAILED`} />
+                </div>
+                <div className="detail-grid">
+                  <MetricRow label="Action" value={formatEmpty(row.action)} />
+                  <MetricRow label="Reason" value={formatEmpty(row.reason)} />
+                  <MetricRow label="When" value={formatLocalDateTime(row.createdAt)} />
+                  {!row.success ? <MetricRow label="Error" value={<span className="long-text">{formatEmpty(row.errorMessage)}</span>} /> : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
