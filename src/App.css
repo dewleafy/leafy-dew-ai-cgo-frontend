@@ -1948,6 +1948,25 @@ textarea {
   gap: 0 18px;
 }
 
+.detail-grid-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #555);
+  margin-bottom: 12px;
+}
+
+.detail-grid-label select {
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #d8d8d8);
+  background: #fff;
+}
+
 .segmented {
   display: flex;
   gap: 8px;
