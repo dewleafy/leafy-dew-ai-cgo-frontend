@@ -1291,3 +1291,55 @@ export type OrderEconomicsResponse = {
   }>;
   caveats: string[];
 };
+
+export type DaypartingSettings = {
+  sellerId: string;
+  enabled: boolean;
+  timezone: string;
+  activeStartHour: number;
+  activeEndHour: number;
+  scope: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaypartingSettingsResponse = { ok: boolean; settings: DaypartingSettings };
+
+export type DaypartingCampaignState = AnyRecord & {
+  campaignId: string;
+  campaignName: string | null;
+  pausedBySystem: boolean;
+  lastAction: string | null;
+  lastActionAt: string | null;
+  lastError: string | null;
+};
+
+export type DaypartingStatusResponse = {
+  ok: boolean;
+  settings: DaypartingSettings;
+  systemPausedCount: number;
+  campaignStates: DaypartingCampaignState[];
+};
+
+export type DaypartingLogEntry = AnyRecord & {
+  id: string;
+  campaignId: string;
+  campaignName: string | null;
+  action: string;
+  reason: string | null;
+  success: boolean;
+  errorMessage: string | null;
+  createdAt: string;
+};
+
+export type DaypartingHistoryResponse = { ok: boolean; history: DaypartingLogEntry[] };
+
+export type DaypartingCheckResult = {
+  ok: boolean;
+  ran: boolean;
+  summary: string;
+  currentlyActiveHours: boolean | null;
+  pausedCount: number;
+  resumedCount: number;
+  failedCount: number;
+};
