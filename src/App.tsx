@@ -1654,16 +1654,45 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
 }
 
 function economicsDetailRows(row: ProductEconomics): Array<[string, ReactNode]> {
+  const adDataAvailable = Boolean(row.realAdSpendDataAvailable);
+  const realNetProfitAfterAds = readNumber(row.realNetProfitAfterAds);
+  const referralConfidenceTone = row.referralFeeConfidence === "CONFIRMED" ? "good" : "watch";
+
   return [
     ["Selling Price", formatMoney(row.sellingPrice)],
     ["Buying Cost", formatMoney(row.buyingCost)],
     ["Landed Cost", formatMoney(row.landedCost)],
+    ["Referral Fee", formatMoney(row.referralFee)],
+    ["Referral Fee Confidence", <Badge key="referral-confidence" tone={referralConfidenceTone}>{formatEmpty(row.referralFeeConfidence ?? "UNVERIFIED_LEGACY")}</Badge>],
+    ["Closing Fee", formatMoney(row.closingFee)],
+    ["Closing Fee Channel", labelize(String(row.closingFeeChannelUsed ?? "easy_ship"))],
+    ["Shipping Fee", formatMoney(row.shippingFee)],
+    ["Refund Commission / Return", formatMoney(row.refundCommissionPerReturn)],
     ["Total Amazon Fees", formatMoney(row.totalAmazonFees)],
     ["Gross Profit", formatMoney(row.grossProfit)],
     ["Required Profit", formatMoney(row.requiredProfit)],
     ["Net Profit", formatMoney(row.netProfit)],
     ["Net Profit Before Ads", formatMoney(row.netProfitBeforeAds)],
     ["Profit Margin", formatPercent(row.profitMargin ?? row.profitMarginPercent)],
+    ["Amazon Settlement Estimate", formatMoney(row.amazonSettlementEstimate)],
+    ["TCS (Reclaimable)", formatMoney(row.tcsAmount)],
+    ["Real Cash Today", formatMoney(row.realCashToday)],
+    [
+      "Real Ad Spend / Unit (30d)",
+      adDataAvailable ? formatMoney(row.realAdSpendPerUnit) : <span key="ad-spend-unavailable" className="muted-text">Not synced yet</span>
+    ],
+    [
+      "Real Net Profit After Ads",
+      adDataAvailable ? (
+        <span key="real-net-profit" className={realNetProfitAfterAds < 0 ? "value-negative" : undefined}>
+          {formatMoney(row.realNetProfitAfterAds)}
+          {realNetProfitAfterAds < 0 ? <Badge tone="risk"> LOSING MONEY</Badge> : null}
+        </span>
+      ) : (
+        <span key="real-net-profit-unavailable" className="muted-text">Waiting on real ad-spend data</span>
+      )
+    ],
+    ["Real Profit Margin", adDataAvailable ? formatPercent(row.realProfitMarginPercent) : "—"],
     ["Target ACOS", formatPercent(row.targetAcos)],
     ["Break-even ACOS", formatPercent(row.breakEvenAcos)],
     ["Profit Status", <StatusBadge key="profit-status" value={row.profitStatus ?? "NEEDS_INPUT"} />],
@@ -4726,6 +4755,7 @@ function ProductEconomicsPage() {
                   <th>Landed Cost</th>
                   <th>Required Profit</th>
                   <th>Profit Status</th>
+                  <th>Real Ad Profit</th>
                   <th>Target ACOS</th>
                   <th>Break-even ACOS</th>
                   <th>Action</th>
@@ -4734,6 +4764,8 @@ function ProductEconomicsPage() {
               <tbody>
                 {rows.map((row) => {
                   const open = selectedId === row.id;
+                  const adDataAvailable = Boolean(row.realAdSpendDataAvailable);
+                  const realNetProfitAfterAds = readNumber(row.realNetProfitAfterAds);
                   return (
                     <Fragment key={row.id}>
                       <tr className={open ? "edited-row" : ""}>
@@ -4745,6 +4777,15 @@ function ProductEconomicsPage() {
                         <td>{formatMoney(row.landedCost)}</td>
                         <td>{formatMoney(row.requiredProfit)}</td>
                         <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
+                        <td>
+                          {adDataAvailable ? (
+                            <Badge tone={realNetProfitAfterAds < 0 ? "risk" : "good"}>
+                              {formatMoney(row.realNetProfitAfterAds)}
+                            </Badge>
+                          ) : (
+                            <span className="muted-text">Not synced</span>
+                          )}
+                        </td>
                         <td>{formatPercent(row.targetAcos)}</td>
                         <td>{formatPercent(row.breakEvenAcos)}</td>
                         <td>
@@ -4755,7 +4796,7 @@ function ProductEconomicsPage() {
                       </tr>
                       {open ? (
                         <tr className="economics-inline-detail-row">
-                          <td colSpan={11}>
+                          <td colSpan={12}>
                             <div className="economics-inline-detail">
                               <div className="approval-card-head">
                                 <div className="approval-title-block">
