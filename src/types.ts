@@ -179,6 +179,39 @@ export type CostReductionOpportunitiesReport = {
   summary: string;
 };
 
+// Added 2026-09-28 - see action-ledger.service.ts's getPpcGuardrailTriage on the backend for
+// the full rationale (grouping the PPC_GUARDRAIL_REVIEW backlog by real pattern and ranking by
+// real rupees at risk, instead of reviewing hundreds of rows one at a time).
+export type PpcGuardrailCampaignGroup = {
+  campaignId: string | null;
+  campaignName: string;
+  adGroupId: string | null;
+  adGroupName: string | null;
+  recommendedAction: string | null;
+  keywordCount: number;
+  realCostAtRisk: number;
+  sampleKeywords: string[];
+  actionLedgerIds: string[];
+};
+
+export type PpcGuardrailProductGroup = {
+  asin: string | null;
+  sku: string | null;
+  productTitle: string | null;
+  recommendedAction: string | null;
+  realCostAtRisk: number;
+  actionLedgerId: string;
+};
+
+export type PpcGuardrailTriageReport = {
+  sellerId: string;
+  totalPendingRows: number;
+  rowsWithRealCostData: number;
+  totalRealCostAtRisk: number;
+  campaignGroups: PpcGuardrailCampaignGroup[];
+  productGroups: PpcGuardrailProductGroup[];
+};
+
 export type AmazonSpListing = CostCompletionQueueItem & {
   listingStatus?: string | null;
   fulfillmentChannel?: string | null;
