@@ -10369,6 +10369,13 @@ async function runPpcGuardrailBatchAction(action: PpcGuardrailBatchAction, ids: 
   return { updatedCount, skippedCount };
 }
 
+// recommendedAction values here are SCREAMING_SNAKE_CASE (e.g. "DO_NOT_SCALE_FIX_PRICE_COST_OR_BUNDLE").
+// labelize() assumes camelCase and inserts a space before every uppercase letter, which mangles an
+// all-caps string into single spaced-out letters -- this just turns underscores into spaces instead.
+function formatGuardrailAction(value: string): string {
+  return value.replace(/_/g, " ").trim();
+}
+
 function PpcGuardrailCampaignGroupCard({
   group,
   onAction,
@@ -10392,7 +10399,7 @@ function PpcGuardrailCampaignGroupCard({
       <div className="detail-grid">
         <MetricRow label="Ad Group" value={formatEmpty(group.adGroupName)} />
         <MetricRow label="Keywords Flagged" value={group.keywordCount} />
-        <MetricRow label="Guardrail Recommends" value={group.recommendedAction ? labelize(group.recommendedAction) : "—"} />
+        <MetricRow label="Guardrail Recommends" value={group.recommendedAction ? formatGuardrailAction(group.recommendedAction) : "—"} />
       </div>
       <p className="brand-card-note">
         Sample keywords: {group.sampleKeywords.join(", ")}
@@ -10434,7 +10441,7 @@ function PpcGuardrailProductGroupRow({
       <div className="detail-grid">
         {item.asin ? <MetricRow label="ASIN" value={item.asin} /> : null}
         {item.sku ? <MetricRow label="SKU" value={item.sku} /> : null}
-        <MetricRow label="Guardrail Recommends" value={item.recommendedAction ? labelize(item.recommendedAction) : "—"} />
+        <MetricRow label="Guardrail Recommends" value={item.recommendedAction ? formatGuardrailAction(item.recommendedAction) : "—"} />
       </div>
     </article>
   );
