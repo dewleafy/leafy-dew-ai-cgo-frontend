@@ -50,6 +50,8 @@ import type {
   AlertSummary,
   AplusContentReport,
   CostCompletionQueueItem,
+  CostReductionOpportunitiesReport,
+  CostReductionOpportunity,
   CreativeRecommendation,
   CreativeRecommendationSummary,
   DailyOrchestratorRun,
@@ -140,6 +142,7 @@ const technicalTabs = [
   "PPC Recommendations",
   "Order Profit & Loss",
   "Ad Dayparting",
+  "Cost Reduction Opportunities",
   "Approval Center",
   "Listing Drafts",
   "Image + A+",
@@ -1097,6 +1100,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "PPC Recommendations", page: "PPC Recommendations" },
     { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
     { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
+    { label: "Cost Reduction Opportunities", page: "Cost Reduction Opportunities", note: "Where the real numbers show room to cut cost, ranked by rupees at stake" },
     { label: "Experiments", page: "Experiments" },
     { label: "Business Alerts", page: "Alert Center" }
   ] },
@@ -1312,6 +1316,7 @@ function App() {
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
+          {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Center" && <ApprovalCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
@@ -10208,6 +10213,107 @@ function AdDaypartingPage() {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+function CostReductionOpportunityCard({ item, prefix, badge }: { item: CostReductionOpportunity; prefix: string; badge: ReactNode }) {
+  return (
+    <article className="item-card command-item-card" key={`${prefix}-${item.sku ?? item.asin ?? item.productName}`}>
+      <div className="item-top">
+        <strong>{formatEmpty(item.productName)}</strong>
+        {badge}
+      </div>
+      <div className="detail-grid">
+        <MetricRow label="Selling Price" value={formatMoney(item.sellingPrice)} />
+        <MetricRow label={item.metricLabel} value={item.confidence === "ASSUMPTION_INPUT" ? formatPercent(item.metricValue) : formatMoney(item.metricValue)} />
+        {item.sku ? <MetricRow label="SKU" value={formatEmpty(item.sku)} /> : null}
+      </div>
+      <p className="brand-card-note">{item.message}</p>
+    </article>
+  );
+}
+
+function CostReductionOpportunitiesPage() {
+  const report = useApi<CostReductionOpportunitiesReport>(() =>
+    getJson(`/api/product-economics/cost-reduction-opportunities?sellerId=${SELLER_ID}`)
+  );
+
+  const data = report.data;
+  const adSpend = data?.adSpendOpportunities ?? [];
+  const returnRate = data?.returnRateOpportunities ?? [];
+  const shippingFee = data?.shippingFeeOpportunities ?? [];
+  const totalFindings = adSpend.length + returnRate.length + shippingFee.length;
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Cost Reduction Opportunities"
+        subtitle="Where your real numbers show room to cut cost and protect profit -- ranked by rupees at stake, not just a percentage."
+      />
+      {report.loading ? <LoadingBlock /> : report.error ? <ErrorBlock text="Could not load cost reduction opportunities." /> : data ? (
+        <>
+          <div className="summary-strip command-summary">
+            <MetricTile label="Products Checked" value={data.productsWithCostData} />
+            <MetricTile label="With Real Ad-Spend Data" value={data.productsWithRealAdSpendData} />
+            <MetricTile label="Findings" value={totalFindings} />
+          </div>
+          <p className="brand-card-note">{data.summary}</p>
+
+          <Card title="Ad spend eating into profit (real data)">
+            {adSpend.length === 0 ? (
+              <EmptyBlock text="No product currently shows ad spend eating too much of its price, based on real attributed ad-spend data synced so far. This grows as more Sponsored Products orders get attributed." />
+            ) : (
+              <div className="card-list command-card-list">
+                {adSpend.map((item) => (
+                  <CostReductionOpportunityCard
+                    key={`ad-${item.sku ?? item.asin ?? item.productName}`}
+                    item={item}
+                    prefix="ad"
+                    badge={item.estimatedRupeeImpact !== null
+                      ? <span className="value-negative">-{formatMoney(item.estimatedRupeeImpact)}/unit</span>
+                      : <Badge tone="watch">Watch</Badge>}
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Above-baseline return-rate assumptions">
+            {returnRate.length === 0 ? (
+              <EmptyBlock text="No product's return-rate assumption is set above your 25% baseline." />
+            ) : (
+              <div className="card-list command-card-list">
+                {returnRate.map((item) => (
+                  <CostReductionOpportunityCard
+                    key={`return-${item.sku ?? item.asin ?? item.productName}`}
+                    item={item}
+                    prefix="return"
+                    badge={<Badge tone="watch">{formatPercent(item.metricValue)}</Badge>}
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Shipping fee outliers">
+            {shippingFee.length === 0 ? (
+              <EmptyBlock text="No product's shipping fee estimate is above the typical Easy Ship range confirmed this year." />
+            ) : (
+              <div className="card-list command-card-list">
+                {shippingFee.map((item) => (
+                  <CostReductionOpportunityCard
+                    key={`ship-${item.sku ?? item.asin ?? item.productName}`}
+                    item={item}
+                    prefix="ship"
+                    badge={<span className="value-negative">+{formatMoney(item.estimatedRupeeImpact)}</span>}
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
+        </>
+      ) : <EmptyBlock text="No data yet." />}
     </div>
   );
 }
