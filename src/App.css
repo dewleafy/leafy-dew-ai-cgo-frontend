@@ -1373,6 +1373,17 @@ button.secondary:hover,
   background: #e4e9fc;
 }
 
+.value-negative {
+  color: #a33c34;
+  font-weight: 800;
+}
+
+.muted-text {
+  color: #8a8f86;
+  font-style: italic;
+  font-weight: 500;
+}
+
 .metric-tile {
   padding: 16px;
 }
