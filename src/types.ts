@@ -153,6 +153,32 @@ export type CostCompletionQueueItem = {
   economics?: ProductEconomics | null;
 };
 
+// Added 2026-09-28 - see product-economics.service.ts's getCostReductionOpportunities on the
+// backend for the full rationale (Workstream 3 of the "real profit" plan).
+export type CostReductionOpportunityConfidence = "REAL" | "ASSUMPTION_INPUT" | "ESTIMATE";
+
+export type CostReductionOpportunity = {
+  sku: string | null;
+  asin: string | null;
+  productName: string | null;
+  sellingPrice: number;
+  metricLabel: string;
+  metricValue: number;
+  estimatedRupeeImpact: number | null;
+  confidence: CostReductionOpportunityConfidence;
+  message: string;
+};
+
+export type CostReductionOpportunitiesReport = {
+  sellerId: string;
+  productsWithCostData: number;
+  productsWithRealAdSpendData: number;
+  adSpendOpportunities: CostReductionOpportunity[];
+  returnRateOpportunities: CostReductionOpportunity[];
+  shippingFeeOpportunities: CostReductionOpportunity[];
+  summary: string;
+};
+
 export type AmazonSpListing = CostCompletionQueueItem & {
   listingStatus?: string | null;
   fulfillmentChannel?: string | null;
