@@ -87,6 +87,9 @@ import type {
   ProductionHealthSummary,
   PpcExecutionApiResult,
   PpcRecommendationResponse,
+  PpcGuardrailCampaignGroup,
+  PpcGuardrailProductGroup,
+  PpcGuardrailTriageReport,
   BrandReadinessBrandResult,
   BrandReadinessResponse,
   BrandReadinessSection,
@@ -143,6 +146,7 @@ const technicalTabs = [
   "Order Profit & Loss",
   "Ad Dayparting",
   "Cost Reduction Opportunities",
+  "PPC Guardrail Triage",
   "Approval Center",
   "Listing Drafts",
   "Image + A+",
@@ -1101,6 +1105,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
     { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
     { label: "Cost Reduction Opportunities", page: "Cost Reduction Opportunities", note: "Where the real numbers show room to cut cost, ranked by rupees at stake" },
+    { label: "PPC Guardrail Triage", page: "PPC Guardrail Triage", note: "The PPC guardrail backlog grouped by campaign/product, ranked by real rupees at risk" },
     { label: "Experiments", page: "Experiments" },
     { label: "Business Alerts", page: "Alert Center" }
   ] },
@@ -1317,6 +1322,7 @@ function App() {
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
+          {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Center" && <ApprovalCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
@@ -10310,6 +10316,293 @@ function CostReductionOpportunitiesPage() {
                   />
                 ))}
               </div>
+            )}
+          </Card>
+        </>
+      ) : <EmptyBlock text="No data yet." />}
+    </div>
+  );
+}
+
+type PpcGuardrailBatchAction = "reject" | "monitor" | "complete";
+
+const PPC_GUARDRAIL_BATCH_ACTIONS: Record<PpcGuardrailBatchAction, { path: string; note: string; label: string; workingLabel: string }> = {
+  reject: {
+    path: "/api/action-ledger/batch/reject",
+    note: "Rejected in batch from PPC Guardrail Triage",
+    label: "Reject",
+    workingLabel: "Rejecting..."
+  },
+  monitor: {
+    path: "/api/action-ledger/batch/monitor",
+    note: "Moved to monitoring in batch from PPC Guardrail Triage",
+    label: "Watch",
+    workingLabel: "Moving..."
+  },
+  complete: {
+    path: "/api/action-ledger/batch/complete",
+    note: "Marked reviewed in batch from PPC Guardrail Triage",
+    label: "Mark Reviewed",
+    workingLabel: "Saving..."
+  }
+};
+
+// Runs one of the three real batch endpoints the Approval Center already uses (there is no
+// batch-approve endpoint for PPC_GUARDRAIL_REVIEW rows -- see the backend's getPpcGuardrailTriage
+// comment) against an arbitrary list of ids, chunked to the API's 100-id batch cap.
+async function runPpcGuardrailBatchAction(action: PpcGuardrailBatchAction, ids: string[]): Promise<{ updatedCount: number; skippedCount: number }> {
+  const config = PPC_GUARDRAIL_BATCH_ACTIONS[action];
+  const chunks = chunkIds(ids, 100);
+  let updatedCount = 0;
+  let skippedCount = 0;
+  for (const chunk of chunks) {
+    const response = await postJson<BatchActionResult>(config.path, {
+      sellerId: SELLER_ID,
+      ids: chunk,
+      note: config.note,
+      actor: "founder"
+    });
+    const counts = batchCountsOf(response);
+    updatedCount += counts.updatedCount;
+    skippedCount += counts.skippedCount;
+  }
+  return { updatedCount, skippedCount };
+}
+
+function PpcGuardrailCampaignGroupCard({
+  group,
+  onAction,
+  processingAction
+}: {
+  group: PpcGuardrailCampaignGroup;
+  onAction: (group: PpcGuardrailCampaignGroup, action: PpcGuardrailBatchAction) => void;
+  processingAction: PpcGuardrailBatchAction | null;
+}) {
+  const disabled = processingAction !== null;
+  const extraKeywords = group.sampleKeywords.length < group.keywordCount
+    ? group.keywordCount - group.sampleKeywords.length
+    : 0;
+
+  return (
+    <article className="item-card command-item-card">
+      <div className="item-top">
+        <strong>{formatEmpty(group.campaignName)}</strong>
+        <span className="value-negative">{formatMoney(group.realCostAtRisk)} at risk</span>
+      </div>
+      <div className="detail-grid">
+        <MetricRow label="Ad Group" value={formatEmpty(group.adGroupName)} />
+        <MetricRow label="Keywords Flagged" value={group.keywordCount} />
+        <MetricRow label="Guardrail Recommends" value={group.recommendedAction ? labelize(group.recommendedAction) : "—"} />
+      </div>
+      <p className="brand-card-note">
+        Sample keywords: {group.sampleKeywords.join(", ")}
+        {extraKeywords > 0 ? ` (+${extraKeywords} more)` : ""}
+      </p>
+      <div className="button-row compact">
+        <button type="button" onClick={() => onAction(group, "reject")} disabled={disabled}>
+          {processingAction === "reject" ? PPC_GUARDRAIL_BATCH_ACTIONS.reject.workingLabel : `Reject all ${group.keywordCount}`}
+        </button>
+        <button type="button" onClick={() => onAction(group, "monitor")} disabled={disabled}>
+          {processingAction === "monitor" ? PPC_GUARDRAIL_BATCH_ACTIONS.monitor.workingLabel : `Watch all ${group.keywordCount}`}
+        </button>
+        <button type="button" onClick={() => onAction(group, "complete")} disabled={disabled}>
+          {processingAction === "complete" ? PPC_GUARDRAIL_BATCH_ACTIONS.complete.workingLabel : `Mark reviewed (${group.keywordCount})`}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function PpcGuardrailProductGroupRow({
+  item,
+  selected,
+  onToggle
+}: {
+  item: PpcGuardrailProductGroup;
+  selected: boolean;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <article className={`item-card command-item-card ${selected ? "selected" : ""}`}>
+      <div className="item-top">
+        <label className="batch-checkbox" aria-label={`Select ${item.asin ?? item.sku ?? item.actionLedgerId}`}>
+          <input type="checkbox" checked={selected} onChange={() => onToggle(item.actionLedgerId)} />
+        </label>
+        <strong>{formatEmpty(item.productTitle)}</strong>
+        <span className="value-negative">{formatMoney(item.realCostAtRisk)} at risk</span>
+      </div>
+      <div className="detail-grid">
+        {item.asin ? <MetricRow label="ASIN" value={item.asin} /> : null}
+        {item.sku ? <MetricRow label="SKU" value={item.sku} /> : null}
+        <MetricRow label="Guardrail Recommends" value={item.recommendedAction ? labelize(item.recommendedAction) : "—"} />
+      </div>
+    </article>
+  );
+}
+
+function PpcGuardrailTriagePage() {
+  const report = useApi<PpcGuardrailTriageReport>(() =>
+    getJson(`/api/action-ledger/ppc-guardrail-triage?sellerId=${SELLER_ID}`)
+  );
+  const [campaignProcessing, setCampaignProcessing] = useState<{ key: string; action: PpcGuardrailBatchAction } | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(() => new Set());
+  const [productBatchAction, setProductBatchAction] = useState<PpcGuardrailBatchAction | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const data = report.data;
+  const campaignGroups = data?.campaignGroups ?? [];
+  const productGroups = data?.productGroups ?? [];
+
+  function toggleProduct(id: string) {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function selectAllProducts() {
+    setSelectedProductIds(new Set(productGroups.map((item) => item.actionLedgerId)));
+  }
+
+  function clearProductSelection() {
+    setSelectedProductIds(new Set());
+  }
+
+  async function actOnCampaignGroup(group: PpcGuardrailCampaignGroup, action: PpcGuardrailBatchAction) {
+    const key = `${group.campaignId ?? group.campaignName}::${group.adGroupId ?? group.adGroupName ?? ""}`;
+    const confirmed = window.confirm(
+      `${PPC_GUARDRAIL_BATCH_ACTIONS[action].label} all ${group.keywordCount} flagged keywords in "${group.campaignName}"${group.adGroupName ? ` / ${group.adGroupName}` : ""}?`
+    );
+    if (!confirmed) return;
+
+    setCampaignProcessing({ key, action });
+    setMessage(null);
+    try {
+      const result = await runPpcGuardrailBatchAction(action, group.actionLedgerIds);
+      report.reload();
+      setMessage({ type: "success", text: `${PPC_GUARDRAIL_BATCH_ACTIONS[action].label} finished for "${group.campaignName}". Updated ${result.updatedCount}, skipped ${result.skippedCount}.` });
+    } catch (error) {
+      setMessage({ type: "error", text: `${PPC_GUARDRAIL_BATCH_ACTIONS[action].label} failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setCampaignProcessing(null);
+    }
+  }
+
+  async function actOnSelectedProducts(action: PpcGuardrailBatchAction) {
+    const ids = Array.from(selectedProductIds);
+    if (ids.length === 0) return;
+    const confirmed = window.confirm(`${PPC_GUARDRAIL_BATCH_ACTIONS[action].label} ${ids.length} selected product flag${ids.length === 1 ? "" : "s"}?`);
+    if (!confirmed) return;
+
+    setProductBatchAction(action);
+    setMessage(null);
+    try {
+      const result = await runPpcGuardrailBatchAction(action, ids);
+      setSelectedProductIds(new Set());
+      report.reload();
+      setMessage({ type: "success", text: `${PPC_GUARDRAIL_BATCH_ACTIONS[action].label} finished. Updated ${result.updatedCount}, skipped ${result.skippedCount}.` });
+    } catch (error) {
+      setMessage({ type: "error", text: `${PPC_GUARDRAIL_BATCH_ACTIONS[action].label} failed: ${sanitizeActionError(error)}` });
+    } finally {
+      setProductBatchAction(null);
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="PPC Guardrail Triage"
+        subtitle="The PPC profit-guardrail backlog grouped by real pattern and ranked by real rupees at risk, so you can act on a whole campaign or product at once instead of reviewing every row one by one."
+      />
+      {report.loading ? <LoadingBlock /> : report.error ? <ErrorBlock text="Could not load PPC guardrail triage." /> : data ? (
+        <>
+          <div className="summary-strip command-summary">
+            <MetricTile label="Pending Guardrail Rows" value={data.totalPendingRows} />
+            <MetricTile label="Real ₹ At Risk" value={formatMoney(data.totalRealCostAtRisk)} />
+            <MetricTile label="Rows With Real Cost Data" value={data.rowsWithRealCostData} />
+            <MetricTile label="Campaigns Flagged" value={campaignGroups.length} />
+            <MetricTile label="Products Flagged" value={productGroups.length} />
+          </div>
+          {message ? (
+            <div className={`soft-state ${message.type === "error" ? "error-state" : ""}`}>{message.text}</div>
+          ) : null}
+
+          <Card title="Campaign-level flags (keyword rows with no product ID)">
+            <p className="brand-card-note">
+              These rows have no ASIN or SKU -- Amazon only gives a keyword and a campaign/ad group for them. Fixing one
+              campaign&apos;s targeting or bids resolves every keyword flagged under it, so they are grouped by campaign here
+              instead of listed one row per keyword.
+            </p>
+            {campaignGroups.length === 0 ? (
+              <EmptyBlock text="No campaign-level (keyword) guardrail flags are pending right now." />
+            ) : (
+              <div className="card-list command-card-list">
+                {campaignGroups.map((group) => {
+                  const key = `${group.campaignId ?? group.campaignName}::${group.adGroupId ?? group.adGroupName ?? ""}`;
+                  return (
+                    <PpcGuardrailCampaignGroupCard
+                      key={key}
+                      group={group}
+                      onAction={actOnCampaignGroup}
+                      processingAction={campaignProcessing?.key === key ? campaignProcessing.action : null}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          <Card
+            title="Product-level flags (ranked by real rupees at risk)"
+            action={productGroups.length > 0 ? (
+              <div className="button-row compact">
+                <button type="button" className="secondary tiny-button" onClick={selectAllProducts} disabled={productBatchAction !== null}>
+                  Select All ({productGroups.length})
+                </button>
+                <button type="button" className="secondary tiny-button" onClick={clearProductSelection} disabled={productBatchAction !== null}>
+                  Clear
+                </button>
+              </div>
+            ) : null}
+          >
+            {productGroups.length === 0 ? (
+              <EmptyBlock text="No product-level (ASIN/SKU) guardrail flags are pending right now." />
+            ) : (
+              <>
+                {selectedProductIds.size > 0 ? (
+                  <div className="batch-action-bar" aria-label="Batch actions">
+                    <div>
+                      <strong>Selected: {selectedProductIds.size}</strong>
+                    </div>
+                    <div className="button-row compact">
+                      <button type="button" onClick={() => actOnSelectedProducts("reject")} disabled={productBatchAction !== null}>
+                        {productBatchAction === "reject" ? "Rejecting..." : "Reject Selected"}
+                      </button>
+                      <button type="button" onClick={() => actOnSelectedProducts("monitor")} disabled={productBatchAction !== null}>
+                        {productBatchAction === "monitor" ? "Moving..." : "Watch Selected"}
+                      </button>
+                      <button type="button" onClick={() => actOnSelectedProducts("complete")} disabled={productBatchAction !== null}>
+                        {productBatchAction === "complete" ? "Saving..." : "Mark Reviewed Selected"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="card-list command-card-list">
+                  {productGroups.map((item) => (
+                    <PpcGuardrailProductGroupRow
+                      key={item.actionLedgerId}
+                      item={item}
+                      selected={selectedProductIds.has(item.actionLedgerId)}
+                      onToggle={toggleProduct}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </Card>
         </>
