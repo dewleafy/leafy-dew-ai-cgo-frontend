@@ -267,6 +267,23 @@ export type ProductEconomics = {
   profitDataStatus?: string | null;
   reason?: string | null;
   notes?: string | null;
+  // Added 2026-09-28 - "real profit" fields (return-cost model, TCS, and real Amazon Ads spend).
+  // See product-economics.service.ts on the backend for how these are calculated.
+  returnPenaltyFractionPercent?: number | string | null;
+  returnRecoverable?: boolean | null;
+  repackagingCost?: number | string | null;
+  tcsPercent?: number | string | null;
+  tcsAmount?: number | string | null;
+  amazonSettlementEstimate?: number | string | null;
+  realCashToday?: number | string | null;
+  referralFeeConfidence?: "CONFIRMED" | "UNVERIFIED_LEGACY" | string | null;
+  closingFeeChannelUsed?: string | null;
+  refundCommissionPerReturn?: number | string | null;
+  realAdSpendPerUnit?: number | string | null;
+  realAdSpendWindowDays?: number | string | null;
+  realAdSpendDataAvailable?: boolean | null;
+  realNetProfitAfterAds?: number | string | null;
+  realProfitMarginPercent?: number | string | null;
 };
 
 export type Experiment = {
