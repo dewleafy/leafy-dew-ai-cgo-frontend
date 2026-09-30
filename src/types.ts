@@ -1418,4 +1418,26 @@ export type DaypartingCheckResult = {
   pausedCount: number;
   resumedCount: number;
   failedCount: number;
+  // Campaigns Amazon has marked ENDED (end date already passed) that dayparting
+  // skipped instead of attempting to pause/resume and counting as a failure.
+  skippedEndedCount?: number;
+};
+
+export type SocialContentPlatform = "INSTAGRAM" | "FACEBOOK" | "YOUTUBE" | "PINTEREST" | "OTHER";
+export type SocialContentStatus = "PLANNED" | "POSTED" | "SKIPPED";
+
+export type SocialContentLogRow = {
+  id: string;
+  sellerId: string;
+  platform: SocialContentPlatform;
+  contentType: string | null;
+  title: string | null;
+  sku: string | null;
+  asin: string | null;
+  status: SocialContentStatus;
+  plannedDate: string | null;
+  postedDate: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

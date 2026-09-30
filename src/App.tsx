@@ -22,7 +22,8 @@ import {
   rollbackApi,
   safetyControlApi,
   schedulerControlApi,
-  securityGuardrailsApi
+  securityGuardrailsApi,
+  socialContentLogApi
 } from "./api";
 import type {
   ActionLedgerRow,
@@ -112,6 +113,9 @@ import type {
   SchemaReadinessReport,
   SecurityAuditEvent,
   SecurityGuardrailSummary,
+  SocialContentLogRow,
+  SocialContentPlatform,
+  SocialContentStatus,
   TodayCommandSummary
 } from "./types";
 
@@ -147,6 +151,7 @@ const technicalTabs = [
   "Ad Dayparting",
   "Cost Reduction Opportunities",
   "PPC Guardrail Triage",
+  "Social Content Calendar",
   "Approval Center",
   "Listing Drafts",
   "Image + A+",
@@ -1106,6 +1111,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
     { label: "Cost Reduction Opportunities", page: "Cost Reduction Opportunities", note: "Where the real numbers show room to cut cost, ranked by rupees at stake" },
     { label: "PPC Guardrail Triage", page: "PPC Guardrail Triage", note: "The PPC guardrail backlog grouped by campaign/product, ranked by real rupees at risk" },
+    { label: "Social Content Calendar", page: "Social Content Calendar", note: "Log what's posted or planned so the Social Content engines can check real gaps" },
     { label: "Experiments", page: "Experiments" },
     { label: "Business Alerts", page: "Alert Center" }
   ] },
@@ -1323,6 +1329,7 @@ function App() {
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
+          {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Center" && <ApprovalCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
@@ -10614,6 +10621,147 @@ function PpcGuardrailTriagePage() {
           </Card>
         </>
       ) : <EmptyBlock text="No data yet." />}
+    </div>
+  );
+}
+
+const SOCIAL_CONTENT_PLATFORM_OPTIONS: SocialContentPlatform[] = ["INSTAGRAM", "FACEBOOK", "YOUTUBE", "PINTEREST", "OTHER"];
+const SOCIAL_CONTENT_STATUS_OPTIONS: SocialContentStatus[] = ["PLANNED", "POSTED", "SKIPPED"];
+
+const emptySocialContentForm = {
+  platform: "INSTAGRAM" as SocialContentPlatform,
+  contentType: "",
+  title: "",
+  sku: "",
+  status: "PLANNED" as SocialContentStatus,
+  plannedDate: "",
+  postedDate: "",
+  notes: ""
+};
+
+function SocialContentCalendarPage() {
+  const entries = useApi<ApiRows<SocialContentLogRow>>(() => socialContentLogApi.list(SELLER_ID));
+  const rows = rowsOf<SocialContentLogRow>(entries.data);
+  const [form, setForm] = useState(emptySocialContentForm);
+  const [actionState, setActionState] = useState({ id: "", message: "", error: "" });
+
+  const sortedRows = [...rows].sort((a, b) => {
+    const aDate = a.postedDate ?? a.plannedDate ?? a.createdAt;
+    const bDate = b.postedDate ?? b.plannedDate ?? b.createdAt;
+    return new Date(bDate).getTime() - new Date(aDate).getTime();
+  });
+
+  const postedCount = rows.filter((row) => row.status === "POSTED").length;
+  const plannedCount = rows.filter((row) => row.status === "PLANNED").length;
+  const mostRecentPosted = rows
+    .filter((row) => row.status === "POSTED" && row.postedDate)
+    .sort((a, b) => new Date(b.postedDate as string).getTime() - new Date(a.postedDate as string).getTime())[0];
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setActionState({ id: "create", message: "", error: "" });
+    try {
+      await socialContentLogApi.create({
+        sellerId: SELLER_ID,
+        platform: form.platform,
+        contentType: form.contentType || null,
+        title: form.title || null,
+        sku: form.sku || null,
+        status: form.status,
+        plannedDate: form.plannedDate || null,
+        postedDate: form.postedDate || null,
+        notes: form.notes || null
+      });
+      setForm(emptySocialContentForm);
+      setActionState({ id: "", message: "Entry logged.", error: "" });
+      entries.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not save this entry. Check the dates are in YYYY-MM-DD format." });
+    }
+  }
+
+  async function markPosted(row: SocialContentLogRow) {
+    setActionState({ id: row.id, message: "", error: "" });
+    try {
+      await socialContentLogApi.update(row.id, {
+        status: "POSTED",
+        postedDate: row.postedDate ?? new Date().toISOString().slice(0, 10)
+      });
+      setActionState({ id: "", message: "Marked as posted.", error: "" });
+      entries.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not update this entry." });
+    }
+  }
+
+  async function remove(row: SocialContentLogRow) {
+    if (!window.confirm("Delete this log entry? This only removes this one row you logged.")) return;
+    setActionState({ id: row.id, message: "", error: "" });
+    try {
+      await socialContentLogApi.remove(row.id);
+      setActionState({ id: "", message: "Entry deleted.", error: "" });
+      entries.reload();
+    } catch {
+      setActionState({ id: "", message: "", error: "Could not delete this entry." });
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Social Content Calendar"
+        subtitle="Log what you've posted (or plan to post) so the Social Content engines can flag real gaps instead of guessing."
+      />
+      <SafetyBanner text="This only stores your own log entries. It never posts anything to Instagram, Facebook, or anywhere else." />
+      <div className="summary-strip command-summary">
+        <MetricTile label="Logged Posts" value={postedCount} />
+        <MetricTile label="Planned" value={plannedCount} />
+        <MetricTile label="Last Posted" value={mostRecentPosted?.postedDate ? formatEmpty(mostRecentPosted.postedDate) : "Never logged"} />
+      </div>
+      <Card title="Log a Post or Plan">
+        <form className="form-grid" onSubmit={submit}>
+          <SelectField label="Platform" value={form.platform} options={SOCIAL_CONTENT_PLATFORM_OPTIONS} onChange={(value) => setForm({ ...form, platform: value as SocialContentPlatform })} />
+          <SelectField label="Status" value={form.status} options={SOCIAL_CONTENT_STATUS_OPTIONS} onChange={(value) => setForm({ ...form, status: value as SocialContentStatus })} />
+          <TextInput label="Content Type (post, reel, story, video)" value={form.contentType} onChange={(value) => setForm({ ...form, contentType: value })} />
+          <TextInput label="Title / What it's about" value={form.title} onChange={(value) => setForm({ ...form, title: value })} />
+          <TextInput label="Related SKU (optional)" value={form.sku} onChange={(value) => setForm({ ...form, sku: value })} />
+          <TextInput label="Planned Date" type="date" value={form.plannedDate} onChange={(value) => setForm({ ...form, plannedDate: value })} />
+          <TextInput label="Posted Date (fill in once it's live)" type="date" value={form.postedDate} onChange={(value) => setForm({ ...form, postedDate: value })} />
+          <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+          <div className="button-row"><button type="submit" disabled={actionState.id === "create"}>Log Entry</button></div>
+        </form>
+      </Card>
+      {actionState.message ? <div className="soft-state success-state">{actionState.message}</div> : null}
+      {actionState.error ? <div className="soft-state error-state">{actionState.error}</div> : null}
+      <Card title="Log History">
+        {entries.loading ? <LoadingBlock /> : entries.error ? <ErrorBlock text="Could not load the social content log." /> : sortedRows.length === 0 ? (
+          <EmptyBlock text="Nothing logged yet. Once you log your first post or plan, the Social Content engines will start checking real gaps against it." />
+        ) : (
+          <div className="card-list command-card-list">
+            {sortedRows.map((row) => (
+              <article className="item-card command-item-card" key={row.id}>
+                <div className="item-top"><strong>{formatEmpty(row.title) === "-" ? row.platform : row.title}</strong><StatusBadge value={row.status} /></div>
+                <div className="badge-row">
+                  <StatusBadge value={row.platform} />
+                  {row.contentType ? <StatusBadge value={row.contentType} /> : null}
+                </div>
+                <div className="detail-grid">
+                  <MetricRow label="SKU" value={formatEmpty(row.sku)} />
+                  <MetricRow label="Planned Date" value={formatEmpty(row.plannedDate)} />
+                  <MetricRow label="Posted Date" value={formatEmpty(row.postedDate)} />
+                  <MetricRow label="Notes" value={formatEmpty(row.notes)} />
+                </div>
+                <div className="button-row compact">
+                  {row.status !== "POSTED" ? (
+                    <button type="button" onClick={() => markPosted(row)} disabled={actionState.id === row.id}>Mark Posted</button>
+                  ) : null}
+                  <button type="button" className="danger-button secondary" onClick={() => remove(row)} disabled={actionState.id === row.id}>Delete</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

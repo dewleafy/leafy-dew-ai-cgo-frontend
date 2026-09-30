@@ -37,7 +37,8 @@ import type {
   SchedulerJob,
   SchedulerSummary,
   SecurityAuditEvent,
-  SecurityGuardrailSummary
+  SecurityGuardrailSummary,
+  SocialContentLogRow
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "" : "https://api.leafydew.in");
@@ -247,6 +248,15 @@ export const qaSmokeApi = {
   run: (sellerId: string) => postJson<unknown>(`/api/qa-smoke/run?sellerId=${sellerId}`, {}),
   runs: (sellerId: string, limit = 20) => getJson<ApiRows<QaSmokeRun>>(`/api/qa-smoke/runs?sellerId=${sellerId}&limit=${limit}`),
   latest: (sellerId: string) => getJson<QaSmokeLatest>(`/api/qa-smoke/latest?sellerId=${sellerId}`)
+};
+
+export const socialContentLogApi = {
+  list: (sellerId: string, limit = 200) =>
+    getJson<ApiRows<SocialContentLogRow>>(`/api/social-content-log?sellerId=${sellerId}&limit=${limit}`),
+  create: (body: Record<string, unknown>) => postJson<{ ok: boolean; row: SocialContentLogRow }>("/api/social-content-log", body),
+  update: (id: string, body: Record<string, unknown>) =>
+    patchJson<{ ok: boolean; row: SocialContentLogRow }>(`/api/social-content-log/${encodeURIComponent(id)}`, body),
+  remove: (id: string) => deleteJson<{ ok: boolean }>(`/api/social-content-log/${encodeURIComponent(id)}`)
 };
 
 export const daypartingApi = {
