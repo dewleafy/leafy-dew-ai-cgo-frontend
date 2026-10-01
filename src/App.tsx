@@ -1153,86 +1153,39 @@ function isAdvancedNavPage(page: AppPage): boolean {
   return advancedNavGroups.some((group) => group.items.some((item) => item.page === page));
 }
 
-function GrowthRing({ size = 16 }: { size?: number }) {
+function TopNav({ activePage, onNavigate }: { activePage: AppPage; onNavigate: FounderNavigate }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => { setMoreOpen(false); }, [activePage]);
+  const moreActive = isAdvancedNavPage(activePage);
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" className="growth-ring">
-      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.4" />
-      <circle cx="8" cy="8" r="3.6" stroke="currentColor" strokeOpacity="0.65" strokeWidth="1.4" />
-      <circle cx="8" cy="8" r="1.3" fill="currentColor" />
-    </svg>
-  );
-}
-
-function SideNavItemButton({
-  item,
-  activePage,
-  onNavigate
-}: {
-  item: NavItem;
-  activePage: AppPage;
-  onNavigate: FounderNavigate;
-}) {
-  const isActive = activePage === item.page || (item.page === "Products" && activePage === "Product Detail");
-  return (
-    <button
-      type="button"
-      key={item.page}
-      className={`side-nav-item ${isActive ? "side-nav-item-active" : ""}`}
-      onClick={() => onNavigate(item.page)}
-      title={item.note}
-    >
-      {isActive ? <GrowthRing size={14} /> : null}
-      <span>{item.label}</span>
-    </button>
-  );
-}
-
-function SideNav({
-  activePage,
-  onNavigate
-}: {
-  activePage: AppPage;
-  onNavigate: FounderNavigate;
-}) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  // If navigation elsewhere in the app lands on a page that only lives under "Advanced Tools"
-  // (e.g. a "View in Approval Center" style deep link, or a page that isn't in the everyday
-  // list), auto-expand the section so the active item is visible and highlighted instead of
-  // looking like nothing is selected.
-  useEffect(() => {
-    if (isAdvancedNavPage(activePage)) setAdvancedOpen(true);
-  }, [activePage]);
-
-  return (
-    <nav className="side-nav" aria-label="Primary navigation">
-      <div className="side-nav-group">
-        {essentialNavItems.map((item) => (
-          <SideNavItemButton key={item.page} item={item} activePage={activePage} onNavigate={onNavigate} />
-        ))}
+    <nav className="g8-nav" aria-label="Primary navigation">
+      {essentialNavItems.map((item) => {
+        const isActive = activePage === item.page || (item.page === "Products" && activePage === "Product Detail");
+        return (
+          <button key={item.page} type="button" className={`g8-tab ${isActive ? "g8-tab-active" : ""}`} onClick={() => onNavigate(item.page)} title={item.note}>
+            {isActive ? <i className="g8-dot" /> : null}{item.label}
+          </button>
+        );
+      })}
+      <div className="g8-more">
+        <button type="button" className={`g8-tab ${moreActive || moreOpen ? "g8-tab-active" : ""}`} onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen}>
+          More tools ▾
+        </button>
+        {moreOpen ? (
+          <div className="g8-mega">
+            {advancedNavGroups.map((group) => (
+              <div className="g8-mega-col" key={group.title}>
+                <span className="g8-mega-title">{group.title}</span>
+                {group.items.map((item) => (
+                  <button key={item.page} type="button" className={`g8-mega-item ${activePage === item.page ? "g8-mega-item-active" : ""}`} onClick={() => onNavigate(item.page)} title={item.note}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
-      <button
-        type="button"
-        className="side-nav-advanced-toggle"
-        onClick={() => setAdvancedOpen((open) => !open)}
-        aria-expanded={advancedOpen}
-        title="More tools: catalog detail, growth/ads detail, approvals safety controls, automation, and system pages. Most days you won't need these."
-      >
-        <span>{advancedOpen ? "▾" : "▸"}</span>
-        <span>Advanced Tools</span>
-      </button>
-      {advancedOpen ? (
-        <div className="side-nav-advanced">
-          {advancedNavGroups.map((group) => (
-            <div className="side-nav-group" key={group.title}>
-              <span className="side-nav-group-label">{group.title}</span>
-              {group.items.map((item) => (
-                <SideNavItemButton key={item.page} item={item} activePage={activePage} onNavigate={onNavigate} />
-              ))}
-            </div>
-          ))}
-        </div>
-      ) : null}
     </nav>
   );
 }
@@ -1253,32 +1206,24 @@ function AppShell({
   contentRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="app-shell-v2">
-      <aside className="side-nav-rail">
-        <Button className="side-nav-brand" onClick={() => onNavigate("Today")} aria-label="Open Today">
-          {logoFailed ? (
-            <div className="logo-fallback">LD</div>
-          ) : (
-            <img src="/ld-logo.png" alt="Leafy Dew" onError={onLogoFailed} />
-          )}
-          <span>
-            <strong>Leafy Dew</strong>
-            <small>AI-CGO</small>
-          </span>
-        </Button>
-        <SideNav activePage={activePage} onNavigate={onNavigate} />
-        <Button className="side-nav-settings" onClick={() => onNavigate("Settings")}>
-          <FounderIcon name="shield" />
-          <span>Founder Settings</span>
-        </Button>
-      </aside>
-
+    <div className="app-shell-v2 g8-shell">
       <div className="side-nav-main">
-        <header className="top-bar-slim">
-          <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks."><FounderIcon name="shield" />Safe Mode ON</span>
-          <div className="top-bar-slim-actions">
+        <header className="g8-topbar">
+          <Button className="g8-brand" onClick={() => onNavigate("Today")} aria-label="Open Today">
+            {logoFailed ? (
+              <div className="logo-fallback">LD</div>
+            ) : (
+              <img src="/ld-logo.png" alt="Leafy Dew" onError={onLogoFailed} />
+            )}
+            <span><strong>Leafy Dew</strong><small>AI-CGO</small></span>
+          </Button>
+          <TopNav activePage={activePage} onNavigate={onNavigate} />
+          <div className="g8-topbar-right">
+            <span className="g8-sync"><i />AMAZON IN · SYNCED</span>
+            <span className="safe-mode-pill" title="Nothing changes on Amazon without your approval and safety checks."><FounderIcon name="shield" />Safe Mode ON</span>
             <Button className="ai-status-pill" onClick={() => onNavigate("Safety Control")} title="Open advanced safety status">AI Status</Button>
             <Button className="icon-button" onClick={() => onNavigate("Notification Outbox")} aria-label="Notifications"><FounderIcon name="bell" /></Button>
+            <Button className="icon-button" onClick={() => onNavigate("Settings")} aria-label="Settings" title="Founder Settings"><FounderIcon name="shield" /></Button>
           </div>
         </header>
         <main className="main-panel founder-main-panel">
