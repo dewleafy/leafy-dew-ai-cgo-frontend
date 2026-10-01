@@ -1323,7 +1323,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const costQueue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
   const adsSummary = useApi<AmazonAdsDashboardSummary>(() => getJson(`/api/amazon-ads/dashboard-summary?sellerId=${SELLER_ID}&days=7`));
   const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
-  const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
   const alerts = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
   const strategy = useApi<StrategyResponse>(() => getJson(`/api/strategy/weekly?sellerId=${SELLER_ID}`));
   const strategyCounts = strategy.data?.data?.counts ?? {};
