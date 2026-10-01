@@ -1379,6 +1379,11 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
   const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
   const alerts = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
+  const strategy = useApi<StrategyResponse>(() => getJson(`/api/strategy/weekly?sellerId=${SELLER_ID}`));
+  const strategyCounts = strategy.data?.data?.counts ?? {};
+  const losingMoneyCount = readNumber(strategyCounts.LOSING_MONEY);
+  const needsFixCount = readNumber(strategyCounts.FIX_LISTING) + readNumber(strategyCounts.INVESTIGATE);
+  const pushCount = readNumber(strategyCounts.PUSH);
   const data = todayCommandSummaryOf(today.data);
   const products = mergeFounderProducts(passports.data, economics.data, costQueue.data);
   const productCount = products.length;
@@ -1406,6 +1411,9 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
     // the founder's default landing page that surfaces what those 300 engines actually found,
     // instead of it sitting unseen under Advanced Tools -> Business Alerts.
     openAlertCount > 0 ? { icon: "bell" as FounderIconName, title: "Business alerts need review", text: `${openAlertCount} open alert${openAlertCount === 1 ? "" : "s"} from your Daily AI checks${highAlertCount > 0 ? ` (${highAlertCount} high severity)` : ""}.`, priority: "High", action: "Open Alerts", page: "Alert Center" as AppPage } : null,
+    losingMoneyCount > 0 ? { icon: "cost" as FounderIconName, title: "Products losing money", text: `${losingMoneyCount} product${losingMoneyCount === 1 ? "" : "s"} lose money on every sale even with no ads. Fix the price or cost, or stop selling.`, priority: "High", action: "See Strategy", page: "Weekly Strategy" as AppPage } : null,
+    needsFixCount > 0 ? { icon: "sales" as FounderIconName, title: "Products need a fix", text: `${needsFixCount} product${needsFixCount === 1 ? "" : "s"} have visitors not buying, or sales falling.`, priority: "Watch", action: "See Strategy", page: "Weekly Strategy" as AppPage } : null,
+    pushCount > 0 ? { icon: "spark" as FounderIconName, title: "Ready to grow", text: `${pushCount} product${pushCount === 1 ? "" : "s"} have healthy profit room for ads.`, priority: "Ready", action: "See Strategy", page: "Weekly Strategy" as AppPage } : null,
     missingCostCount > 0 ? { icon: "cost" as FounderIconName, title: "Missing cost data", text: `${missingCostCount} products need cost or fee data before profit guidance is reliable.`, priority: "High", action: "Fix Now", page: "Products" as AppPage } : null,
     pendingApprovalCount > 0 ? { icon: "approval" as FounderIconName, title: "AI actions waiting", text: `${pendingApprovalCount} recommendations are waiting for your decision.`, priority: "High", action: "Review Now", page: "AI Actions" as AppPage } : null,
     ppcRisks > 0 ? { icon: "sales" as FounderIconName, title: "PPC risk high", text: "Ad spend or ACOS needs a founder review before changes are made.", priority: "Watch", action: "Open Growth Engine", page: "Growth Engine" as AppPage } : null,
