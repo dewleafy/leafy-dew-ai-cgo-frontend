@@ -3168,6 +3168,36 @@ const STRATEGY_LABEL: Record<string, string> = {
   FIX_LISTING: "Fix listing", INVESTIGATE: "Investigate", FIX_COSTS: "Fill costs"
 };
 
+const STRATEGY_COLOR: Record<string, string> = {
+  LOSING_MONEY: "#e11d48", INVESTIGATE: "#f97316", FIX_LISTING: "#fb923c", FIX_COSTS: "#a1a1aa",
+  ORGANIC_ONLY: "#f5b84b", HOLD: "#45a2f6", PUSH: "#23d2a0"
+};
+
+function ProductHeatMap({ products }: { products: StrategyRowView[] }) {
+  const legend = ["LOSING_MONEY", "INVESTIGATE", "FIX_LISTING", "FIX_COSTS", "ORGANIC_ONLY", "HOLD", "PUSH"];
+  return (
+    <div className="card heatmap-card">
+      <h2>Catalogue heat map</h2>
+      <p className="section-note">One hexagon is one product. Hover to see what to do.</p>
+      <div className="heatmap-grid">
+        {products.map((p) => (
+          <div
+            key={`${p.asin}-${p.sku}`}
+            className="heatmap-hex"
+            style={{ background: STRATEGY_COLOR[p.verdict] ?? "#d4d4d8" }}
+            title={`${p.productName ?? p.sku ?? p.asin} — ${STRATEGY_LABEL[p.verdict] ?? p.verdict}: ${p.action}`}
+          />
+        ))}
+      </div>
+      <div className="heatmap-legend">
+        {legend.map((k) => (
+          <span key={k}><i style={{ background: STRATEGY_COLOR[k] }} />{STRATEGY_LABEL[k]}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function WeeklyStrategyPage() {
   const st = useApi<StrategyResponse>(() => getJson(`/api/strategy/weekly?sellerId=${SELLER_ID}`));
   const d = st.data?.data ?? null;
@@ -3180,6 +3210,7 @@ function WeeklyStrategyPage() {
           <FounderMetric key={k} label={STRATEGY_LABEL[k]} value={st.loading ? "…" : String(d?.counts[k] ?? 0)} />
         ))}
       </div>
+      {d && d.products.length > 0 ? <ProductHeatMap products={d.products} /> : null}
       {d && d.products.length > 0 ? (
         <div className="table-wrap">
           <table>
