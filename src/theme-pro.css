@@ -89,8 +89,8 @@ input::placeholder, textarea::placeholder { color: var(--text-soft); }
 input:focus, select:focus, textarea:focus { outline: 2px solid rgba(45, 212, 191, 0.5); outline-offset: 1px; }
 
 button { border-radius: 10px; }
-button:not(.secondary):not(.nav-tab):not([class*="ghost"]):not([class*="link"]) { background: var(--green-900); color: #fff; border-color: transparent; }
-button:not(.secondary):not(.nav-tab):not([class*="ghost"]):not([class*="link"]):hover:not(:disabled) { background: var(--green-800); }
+button:not(.secondary):not(.nav-tab):not([class*="ghost"]):not([class*="link"]):not([class*="side-nav"]) { background: var(--green-900); color: #fff; border-color: transparent; }
+button:not(.secondary):not(.nav-tab):not([class*="ghost"]):not([class*="link"]):not([class*="side-nav"]):hover:not(:disabled) { background: var(--green-800); }
 button.secondary { background: rgba(255, 255, 255, 0.05); color: var(--text-main); border: 1px solid var(--border-card); }
 button.secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); }
 button:disabled { opacity: 0.5; }
@@ -101,3 +101,19 @@ a { color: #5eead4; }
 hr { border-color: var(--border-soft); }
 ::selection { background: rgba(45, 212, 191, 0.35); }
 * { scrollbar-color: #2a3550 transparent; }
+
+/* Sidebar and top bar */
+.side-nav-rail { background: #0a0f1d; border-right: 1px solid var(--border-soft); color: #cbd5e1; }
+.side-nav-brand { background: transparent !important; border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important; color: #fff; }
+.side-nav-brand strong { color: #fff; }
+.side-nav-brand small { color: var(--text-muted); }
+.side-nav-item, .side-nav-advanced-toggle, .side-nav-settings {
+  background: transparent !important; color: #94a3b8 !important; border: 0 !important; box-shadow: none !important;
+}
+.side-nav-item:hover, .side-nav-advanced-toggle:hover, .side-nav-settings:hover { background: rgba(255, 255, 255, 0.06) !important; color: #fff !important; }
+.side-nav-item-active { background: rgba(45, 212, 191, 0.14) !important; color: #99f6e4 !important; font-weight: 600; }
+.side-nav-group-label { color: #64748b; }
+.side-nav-settings { border-top: 1px solid rgba(255, 255, 255, 0.08) !important; border-radius: 10px !important; justify-content: flex-start; }
+.side-nav-settings svg { width: 18px; height: 18px; flex: 0 0 18px; }
+.top-bar-slim { background: rgba(11, 16, 32, 0.85) !important; border-bottom: 1px solid var(--border-soft); }
+.side-nav-main { background: transparent; }
