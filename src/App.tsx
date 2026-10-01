@@ -2,6 +2,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, FormEvent, ReactNode, RefObject } from "react";
 import "./App.css";
+import "./theme-pro.css";
 import {
   activityLogsApi,
   approvalExecutionApi,
