@@ -6513,6 +6513,9 @@ function ActionLedgerCard({
   const draftCurrentValue = typeof row.payload?.currentValue === "string" ? row.payload.currentValue.trim() : "";
   const draftProposedValue = typeof row.payload?.proposedValue === "string" ? row.payload.proposedValue.trim() : "";
   const hasDraftContent = Boolean(draftCurrentValue || draftProposedValue);
+  const complianceFindings = Array.isArray(row.payload?.complianceFindings)
+    ? (row.payload.complianceFindings as Array<{ severity?: string; message?: string }>).filter((f) => f && typeof f.message === "string")
+    : [];
   const draftPreviewLimit = 220;
   const draftPreviewText = draftProposedValue
     ? draftProposedValue.length > draftPreviewLimit
@@ -6639,6 +6642,14 @@ function ActionLedgerCard({
         </div>
       </div>
       <p className="approval-summary-text">{formatEmpty(row.summary)}</p>
+      {complianceFindings.length > 0 ? (
+        <div className="approval-draft-preview" style={{ borderLeft: "3px solid #c2410c" }}>
+          <span className="approval-draft-preview-label">Compliance check</span>
+          {complianceFindings.map((f, i) => (
+            <p key={i}>{f.severity === "BLOCKER" ? "Must fix: " : "Check: "}{f.message}</p>
+          ))}
+        </div>
+      ) : null}
       {draftPreviewText ? (
         <div className="approval-draft-preview">
           <span className="approval-draft-preview-label">AI Draft Preview</span>
