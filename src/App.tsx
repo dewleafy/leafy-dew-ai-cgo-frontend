@@ -1540,6 +1540,12 @@ function BackgroundSyncStatusBar() {
   );
 }
 
+// Second brand: Ziro kart SKUs start with "Ziro" or "ZK-"; everything else is Leafy Dew.
+function isZiroKartProduct(product: { sku?: string | null; name?: string | null }): boolean {
+  const sku = String(product.sku ?? "").trim().toLowerCase();
+  return sku.startsWith("ziro") || sku.startsWith("zk-");
+}
+
 function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
@@ -1555,6 +1561,8 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
     if (!productMatches(product, query)) return false;
     if (subTab === "Missing Costs" && !productNeedsCost(product)) return false;
     if (filter === "Active" && !normalizeState(product.status).includes("ACTIVE")) return false;
+    if (filter === "Leafy Dew" && isZiroKartProduct(product)) return false;
+    if (filter === "Ziro kart" && !isZiroKartProduct(product)) return false;
     if (filter === "Missing Cost" && !productNeedsCost(product)) return false;
     if (filter === "Low Profit" && !productLowProfit(product)) return false;
     if (filter === "PPC Risk" && !normalizeState(product.profitStatus).includes("PPC")) return false;
@@ -1595,7 +1603,7 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
       </div>
       <BackgroundSyncStatusBar />
       <div className="filter-pills">
-        {["All", "Active", "Missing Cost", "Low Profit", "PPC Risk", "Listing Needs Work"].map((label) => (
+        {["All", "Leafy Dew", "Ziro kart", "Active", "Missing Cost", "Low Profit", "PPC Risk", "Listing Needs Work"].map((label) => (
           <button type="button" key={label} className={filter === label ? "active" : ""} onClick={() => { setFilter(label); setPage(1); }}>{label}</button>
         ))}
       </div>
