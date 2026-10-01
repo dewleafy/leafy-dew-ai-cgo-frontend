@@ -45,11 +45,33 @@ export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 
 
 type Body = Record<string, unknown> | undefined;
 
+const AUTH_TOKEN_KEY = "leafy-dew-auth-token";
+export const AUTH_REQUIRED_EVENT = "leafy-auth-required";
+
+export function getAuthToken(): string | null {
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthToken(token: string | null): void {
+  try {
+    if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+    else window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    // Storage can be blocked (private window); the app then simply asks to sign in again.
+  }
+}
+
 async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getAuthToken();
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers ?? {})
     }
   });
@@ -62,6 +84,12 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
     } catch {
       data = { message: text };
     }
+  }
+
+  if (response.status === 401 && data && typeof data === "object" && (data as Record<string, unknown>).code === "AUTH_REQUIRED") {
+    // The server wants a login (never signed in, or the token expired): show the sign-in screen.
+    setAuthToken(null);
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
   }
 
   if (!response.ok) {
@@ -267,4 +295,12 @@ export const daypartingApi = {
   history: (sellerId: string, limit = 50) =>
     getJson<DaypartingHistoryResponse>(`/api/amazon-ads/dayparting/history?sellerId=${sellerId}&limit=${limit}`),
   runNow: (sellerId: string) => postJson<DaypartingCheckResult>(`/api/amazon-ads/dayparting/run-now?sellerId=${sellerId}`, {})
+};
+
+export type AuthStatus = { ok: true; enabled: boolean; authenticated: boolean };
+export type AuthLoginResult = { ok: true; enabled: boolean; token?: string; expiresAt?: string };
+
+export const authApi = {
+  status: () => getJson<AuthStatus>("/api/auth/status"),
+  login: (password: string) => postJson<AuthLoginResult>("/api/auth/login", { password })
 };
