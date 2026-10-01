@@ -1327,6 +1327,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const alerts = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
   const strategy = useApi<StrategyResponse>(() => getJson(`/api/strategy/weekly?sellerId=${SELLER_ID}`));
   const strategyCounts = strategy.data?.data?.counts ?? {};
+  const strategyProducts = strategy.data?.data?.products ?? [];
   const losingMoneyCount = readNumber(strategyCounts.LOSING_MONEY);
   const needsFixCount = readNumber(strategyCounts.FIX_LISTING) + readNumber(strategyCounts.INVESTIGATE);
   const pushCount = readNumber(strategyCounts.PUSH);
@@ -1340,14 +1341,6 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const ppcRisks = todayCommandNumber(data, ["ppcRisks", "highRiskApprovals", "highRiskCount"]);
   const profitRisks = products.filter(productLowProfit).length;
   const realProfit = computeRealProfitSummary(salesSummary.data?.bySku ?? [], rowsOf<ProductEconomics>(economics.data), readNumber(adsSummary.data?.totals?.cost));
-  const brandReadinessBrands = brandReadiness.data?.brands ?? [];
-  const brandReadinessTrend = brandReadinessBrands.length
-    ? brandReadinessBrands.map((brand) => `${brand.brandName} ${brand.overallScore}`).join(" · ")
-    : "See Brand Center";
-  const brandReadinessValue = brandReadinessBrands.length
-    ? brandReadinessBrands.map((brand) => brand.overallScore).join(" / ")
-    : "-";
-
   const openAlertCount = readNumber(alerts.data?.openAlerts);
   const highAlertCount = readNumber(alerts.data?.highAlerts);
 
@@ -1368,55 +1361,70 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   ].filter(Boolean).slice(0, 6) as Array<{ icon: FounderIconName; title: string; text: string; priority: string; action: string; page: AppPage }>;
 
   const previewProducts = products.slice(0, 3);
-  const nextBestAction = pendingApprovalCount > 0 || missingCostCount > 0
-    ? "Review high-priority approvals and fix missing cost data first."
-    : "Run Daily AI to refresh growth, catalog, ads, and brand recommendations.";
   const heroCopy = founderHeroCopy(timeOfDayGreeting(), attentionItems);
 
   return (
     <div className="page founder-page today-page">
-      <div className="page-header founder-hero">
-        <div className="hero-copy">
-          <span className="eyebrow">Leafy Dew AI-CGO Command Center</span>
+      <div className="g8-pagehead">
+        <div>
+          <span className="eyebrow">Command Center · Amazon IN</span>
           <h1>{heroCopy.headline}</h1>
           <p>{heroCopy.subtext}</p>
-          <div className="hero-helper"><FounderIcon name="shield" />Safe Mode is ON. No Amazon change is made without your approval and safety checks.</div>
-          <div className="next-best-action">
-            <span>Next Best Action</span>
-            <strong>{nextBestAction}</strong>
-            <div className="next-best-action-buttons">
-              <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "AI Actions" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
-              <button type="button" className="secondary" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
-            </div>
-          </div>
         </div>
-        <div className="hero-status-panel">
-          <div><span>AI Ready</span><FounderBadge value={today.error ? "Needs data" : "Ready"} /></div>
-          <div><span>Safe Mode</span><FounderBadge value="ON" tone="good" /></div>
-          <div><span>Last Run</span><strong>{cleanFounderText(readFirst(data, ["lastRunAt", "latestRunAt", "latestDailyRunAt"]), "Not available yet")}</strong></div>
-          <div><span>Seller</span><strong>Leafy Dew</strong></div>
+        <div className="g8-pagehead-actions">
+          <button type="button" onClick={() => navigate(pendingApprovalCount > 0 ? "AI Actions" : missingCostCount > 0 ? "Products" : "Daily AI-CGO")}>Start with Priority Work</button>
+          <button type="button" className="secondary" onClick={() => navigate("Daily AI-CGO")}>Run Daily AI</button>
         </div>
       </div>
 
-      <section className="founder-section business-pulse-section">
-        <div className="section-heading split-heading">
-          <div>
-            <h2>Business Pulse</h2>
-            <p>Executive signals from products, sales, profit, and safe automation.</p>
-          </div>
-          <Badge tone="good">Protected</Badge>
-        </div>
-      <section className="quick-status-strip">
-        <FounderMetric label="Total Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? "Catalog connected" : "No product data available"} />
-        <FounderMetric label="Active Listings" value={activeListings || "-"} icon="check" trend={activeListings ? "Live catalog signal" : "Waiting for sync"} />
-        <FounderMetric label="Ad Sales (7d)" value={adsSummary.loading ? "…" : formatMoney(adsSummary.data?.totals?.sales)} icon="sales" trend="Ad-attributed, not total store sales" tone="blue" />
+      <section className="quick-status-strip g8-kpis">
+        <FounderMetric label="Products" value={today.loading || passports.loading ? "..." : productCount || "-"} icon="box" trend={productCount ? `${activeListings || 0} active listings` : "No product data available"} />
         <FounderMetric label="Total Sales (7d)" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.totalSales)} icon="sales" trend={salesSummary.error ? "Could not load real sales" : "Real store sales, all orders"} tone="green" />
         <FounderMetric label="Real Profit (7d)" value={salesSummary.loading || economics.loading || adsSummary.loading ? "…" : formatMoney(realProfit.netProfitAfterAds)} icon="chart" trend={realProfitTrendText(realProfit)} tone="gold" />
-        <FounderMetric label="Profit Risk Products" value={profitRisks || "0"} icon="chart" trend={profitRisks ? "Products flagged low-profit" : "None flagged right now"} />
-        <FounderMetric label="ACOS 7D" value={adsSummary.loading ? "…" : formatPercent(adsSummary.data?.totals?.acos)} icon="growth" trend="Ads efficiency" tone="gold" />
-        <FounderMetric label="Brand Health" value={brandReadiness.loading ? "…" : brandReadinessValue} icon="shield" trend={brandReadiness.loading ? "Loading…" : brandReadinessTrend} tone="blue" />
-        <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="All actions locked" />
+        <FounderMetric label="Ad Spend vs ACOS (7d)" value={adsSummary.loading ? "…" : formatPercent(adsSummary.data?.totals?.acos)} icon="growth" trend={`Ad sales ${adsSummary.loading ? "…" : formatMoney(adsSummary.data?.totals?.sales)}`} tone="blue" />
+        <FounderMetric label="Waiting for you" value={pendingApprovalCount || "0"} icon="approval" trend={pendingApprovalCount ? "Recommendations to decide" : "Nothing pending"} />
       </section>
+
+      <section className="g8-two-col">
+        <div className="card g8-health">
+          <h2>Profit health</h2>
+          <p className="section-note">Every product, grouped by what it needs from you.</p>
+          <div className="g8-health-body">
+            <div
+              className="g8-donut"
+              style={{
+                background: (() => {
+                  const keys = ["PUSH", "HOLD", "ORGANIC_ONLY", "FIX_COSTS", "FIX_LISTING", "INVESTIGATE", "LOSING_MONEY"];
+                  const total = keys.reduce((a, k) => a + readNumber(strategyCounts[k]), 0);
+                  if (!total) return "#ececf1";
+                  let acc = 0;
+                  const stops = keys.map((k) => {
+                    const start = (acc / total) * 100;
+                    acc += readNumber(strategyCounts[k]);
+                    return `${STRATEGY_COLOR[k]} ${start}% ${(acc / total) * 100}%`;
+                  });
+                  return `conic-gradient(${stops.join(", ")})`;
+                })()
+              }}
+            >
+              <div className="g8-donut-hole">
+                <strong>{strategyProducts.length ? Math.round((readNumber(strategyCounts.PUSH) + readNumber(strategyCounts.HOLD)) / strategyProducts.length * 100) : 0}%</strong>
+                <span>HEALTHY</span>
+              </div>
+            </div>
+            <ul className="g8-buckets">
+              {["LOSING_MONEY", "INVESTIGATE", "FIX_LISTING", "FIX_COSTS", "ORGANIC_ONLY", "HOLD", "PUSH"].map((k) => (
+                <li key={k}>
+                  <i style={{ background: STRATEGY_COLOR[k] }} />
+                  <span>{STRATEGY_LABEL[k]}</span>
+                  <b>{readNumber(strategyCounts[k])}</b>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <button type="button" className="secondary" onClick={() => navigate("Weekly Strategy" as AppPage)}>Open weekly strategy →</button>
+        </div>
+        <ProductHeatMap products={strategyProducts} />
       </section>
 
       <section className="founder-section">

@@ -134,3 +134,28 @@ a { color: #0d8f79; }
   .g8-topbar-right { margin-left: auto; }
   .g8-topbar-right .safe-mode-pill, .g8-topbar-right .ai-status-pill { display: none; }
 }
+
+/* Today: Grow8-style page head, KPI strip, two-column health + heat map */
+.g8-pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 18px; }
+.g8-pagehead h1 { font-size: 28px; margin: 4px 0 4px; }
+.g8-pagehead p { color: var(--text-muted); margin: 0; }
+.g8-pagehead-actions { display: flex; gap: 10px; }
+.g8-kpis { display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+@media (max-width: 1000px) { .g8-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.g8-two-col { display: grid; grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.4fr); gap: 16px; margin-bottom: 22px; align-items: start; }
+@media (max-width: 900px) { .g8-two-col { grid-template-columns: 1fr; } }
+.g8-health { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.g8-health-body { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin: 6px 0 10px; }
+.g8-donut { width: 128px; height: 128px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 128px; }
+.g8-donut-hole { width: 92px; height: 92px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.g8-donut-hole strong { font-family: var(--font-display); font-size: 22px; color: var(--text-strong); }
+.g8-donut-hole span { font-size: 9.5px; letter-spacing: 0.1em; color: var(--text-muted); font-weight: 700; }
+.g8-buckets { list-style: none; margin: 0; padding: 0; flex: 1 1 160px; display: flex; flex-direction: column; gap: 8px; }
+.g8-buckets li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-main); }
+.g8-buckets li i { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
+.g8-buckets li span { flex: 1; }
+.g8-buckets li b { font-family: var(--font-display); }
+.g8-topbar { gap: 14px; padding: 0 20px; }
+.g8-brand strong { white-space: nowrap; }
+.g8-tab { padding: 8px 11px; font-size: 13.5px; }
+@media (max-width: 1500px) { .g8-sync { display: none; } }
