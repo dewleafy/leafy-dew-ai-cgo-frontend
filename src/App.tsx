@@ -150,6 +150,7 @@ const technicalTabs = [
   "PPC Recommendations",
   "Order Profit & Loss",
   "Sales & Traffic",
+  "Weekly Strategy",
   "Ad Dayparting",
   "Cost Reduction Opportunities",
   "PPC Guardrail Triage",
@@ -1111,6 +1112,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Brand Center", page: "Brand Center" },
     { label: "PPC Recommendations", page: "PPC Recommendations" },
     { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
+    { label: "Weekly Strategy", page: "Weekly Strategy", note: "What to do with each product this week" },
     { label: "Sales & Traffic", page: "Sales & Traffic", note: "Visits, conversion and sales per product from Amazon" },
     { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
     { label: "Cost Reduction Opportunities", page: "Cost Reduction Opportunities", note: "Where the real numbers show room to cut cost, ranked by rupees at stake" },
@@ -1332,6 +1334,7 @@ function App() {
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
           {activePage === "Sales & Traffic" && <SalesTrafficPage />}
+          {activePage === "Weekly Strategy" && <WeeklyStrategyPage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
@@ -3148,6 +3151,48 @@ const SALES_TRAFFIC_FLAG_TEXT: Record<string, string> = {
   TRAFFIC_DROP: "Visits dropped",
   LOW_BUY_BOX: "Losing the Buy Box"
 };
+
+type StrategyRowView = { verdict: string; headline: string; action: string; sku: string | null; asin: string | null; productName: string | null; sessions: number; unitsOrdered: number };
+type StrategyResponse = { data?: { counts: Record<string, number>; products: StrategyRowView[] } };
+const STRATEGY_LABEL: Record<string, string> = {
+  PUSH: "Push with ads", HOLD: "Hold, small ad budget", ORGANIC_ONLY: "Organic only, no ads", LOSING_MONEY: "Losing money",
+  FIX_LISTING: "Fix listing", INVESTIGATE: "Investigate", FIX_COSTS: "Fill costs"
+};
+
+function WeeklyStrategyPage() {
+  const st = useApi<StrategyResponse>(() => getJson(`/api/strategy/weekly?sellerId=${SELLER_ID}`));
+  const d = st.data?.data ?? null;
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Weekly Strategy" subtitle="One clear recommendation for every product, based on its real profit room and how visitors behave. Advice only — nothing is changed on Amazon." />
+      {st.error ? <SafetyBanner text="Strategy could not be loaded right now." /> : null}
+      <div className="quick-status-strip">
+        {Object.keys(STRATEGY_LABEL).map((k) => (
+          <FounderMetric key={k} label={STRATEGY_LABEL[k]} value={st.loading ? "…" : String(d?.counts[k] ?? 0)} />
+        ))}
+      </div>
+      {d && d.products.length > 0 ? (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Product</th><th>Verdict</th><th>Why</th><th>What to do</th><th>Visits (7d)</th><th>Units (7d)</th></tr></thead>
+            <tbody>
+              {d.products.map((p) => (
+                <tr key={`${p.asin}-${p.sku}`}>
+                  <td>{p.productName ?? p.sku ?? p.asin}</td>
+                  <td><StatusBadge value={STRATEGY_LABEL[p.verdict] ?? p.verdict} /></td>
+                  <td>{p.headline}</td>
+                  <td>{p.action}</td>
+                  <td>{p.sessions}</td>
+                  <td>{p.unitsOrdered}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function SalesTrafficPage() {
   const [days, setDays] = useState(14);
