@@ -49,7 +49,7 @@ h1, h2, h3, .founder-page > h1, .product-info-panel h1 { font-family: var(--font
 }
 
 /* Gradient pill primary buttons */
-button:not(.secondary):not([class*="side-nav"]):not([class*="nav-tab"]):not([class*="ghost"]):not([class*="link"]):not([class*="chip"]):not([class*="filter"]) {
+button:not(.secondary):not([class*="side-nav"]):not([class*="nav-tab"]):not([class*="ghost"]):not([class*="link"]):not([class*="chip"]):not([class*="filter"]):not([class*="card"]):not([class*="glance"]) {
   background: var(--g8-gradient); color: #fff; border: 0; border-radius: 999px; font-weight: 600; box-shadow: 0 6px 16px rgba(0, 163, 38, 0.28);
 }
 button:not(.secondary):not([class*="side-nav"]):not([class*="nav-tab"]):not([class*="ghost"]):not([class*="link"]):hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
@@ -194,3 +194,12 @@ a { color: #008a20; }
 .approval-draft-preview { background: #eef8f0; border: 1px solid #cfe9d5; border-radius: 12px; padding: 10px 12px; }
 .approval-draft-preview-label { color: #007a1e; font-weight: 700; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
 .approval-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-muted); }
+
+/* Card-like buttons must not pick up the primary pill style */
+.today-glance-card, .today-glance-more {
+  background: #fff !important; color: var(--text-main) !important; border: 1px solid var(--border-card) !important; border-radius: 18px !important;
+  box-shadow: var(--premium-shadow) !important; filter: none !important; font-weight: 500;
+}
+.today-glance-more { background: #eaf7ed !important; border: 1px dashed rgba(0, 163, 38, 0.45) !important; }
+.today-glance-card:hover, .today-glance-more:hover { box-shadow: var(--premium-shadow-hover) !important; }
+.today-glance-more em, .today-glance-more .preview-metric { color: #007a1e !important; }
