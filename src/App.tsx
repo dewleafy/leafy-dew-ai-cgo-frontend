@@ -3123,7 +3123,7 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 const STRATEGY_COLOR: Record<string, string> = {
   LOSING_MONEY: "#e11d48", INVESTIGATE: "#f97316", FIX_LISTING: "#fb923c", FIX_COSTS: "#a1a1aa",
-  ORGANIC_ONLY: "#f5b84b", HOLD: "#45a2f6", PUSH: "#23d2a0"
+  ORGANIC_ONLY: "#f5b84b", HOLD: "#45a2f6", PUSH: "#00a326"
 };
 
 function ProductHeatMap({ products }: { products: StrategyRowView[] }) {
