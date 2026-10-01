@@ -149,6 +149,7 @@ const technicalTabs = [
   "Product Economics",
   "PPC Recommendations",
   "Order Profit & Loss",
+  "Sales & Traffic",
   "Ad Dayparting",
   "Cost Reduction Opportunities",
   "PPC Guardrail Triage",
@@ -1110,6 +1111,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Brand Center", page: "Brand Center" },
     { label: "PPC Recommendations", page: "PPC Recommendations" },
     { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
+    { label: "Sales & Traffic", page: "Sales & Traffic", note: "Visits, conversion and sales per product from Amazon" },
     { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
     { label: "Cost Reduction Opportunities", page: "Cost Reduction Opportunities", note: "Where the real numbers show room to cut cost, ranked by rupees at stake" },
     { label: "PPC Guardrail Triage", page: "PPC Guardrail Triage", note: "The PPC guardrail backlog grouped by campaign/product, ranked by real rupees at risk" },
@@ -1329,6 +1331,7 @@ function App() {
           {activePage === "Product Economics" && <ProductEconomicsPage />}
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
+          {activePage === "Sales & Traffic" && <SalesTrafficPage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
@@ -3122,6 +3125,81 @@ function OrderDetailSheet({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+type SalesTrafficProduct = {
+  asin: string; sku: string | null; sessions: number; pageViews: number; unitsOrdered: number; orderedSales: number;
+  conversionPct: number | null; avgBuyBoxPct: number | null; sessionsChangePct: number | null; unitsChangePct: number | null; flags: string[];
+};
+type SalesTrafficResponse = {
+  data?: {
+    days: number; hasData: boolean; lastSnapshotDate: string | null;
+    totals: { sessions: number; pageViews: number; unitsOrdered: number; orderedSales: number; conversionPct: number | null };
+    products: SalesTrafficProduct[];
+  };
+};
+
+const SALES_TRAFFIC_FLAG_TEXT: Record<string, string> = {
+  LOW_CONVERSION: "Visitors are not buying",
+  SALES_DROP: "Sales dropped",
+  TRAFFIC_DROP: "Visits dropped",
+  LOW_BUY_BOX: "Losing the Buy Box"
+};
+
+function SalesTrafficPage() {
+  const [days, setDays] = useState(14);
+  const st = useApi<SalesTrafficResponse>(() => getJson(`/api/sales-traffic/summary?sellerId=${SELLER_ID}&days=${days}`), [days]);
+  const d = st.data?.data ?? null;
+  const fmtPct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v}%`);
+  const fmtChange = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v > 0 ? "+" : ""}${v}%`);
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Sales & Traffic" subtitle="How many people visit each product on Amazon, and how many buy. Data comes straight from Amazon's own report." />
+      {st.error ? <SafetyBanner text="Sales & traffic could not be loaded right now." /> : null}
+      <div className="button-row">
+        {[7, 14, 30].map((option) => (
+          <button key={option} type="button" className={days === option ? "" : "secondary"} onClick={() => setDays(option)}>Last {option} days</button>
+        ))}
+      </div>
+      {!st.loading && d && !d.hasData ? (
+        <div className="warning-card">
+          <strong>No Amazon traffic data yet</strong>
+          <p>The first report is requested by the daily Amazon sync. Numbers will appear here after it runs.</p>
+        </div>
+      ) : null}
+      <div className="quick-status-strip">
+        <FounderMetric label="Visits (sessions)" value={st.loading ? "…" : String(d?.totals.sessions ?? 0)} />
+        <FounderMetric label="Page Views" value={st.loading ? "…" : String(d?.totals.pageViews ?? 0)} />
+        <FounderMetric label="Units Ordered" value={st.loading ? "…" : String(d?.totals.unitsOrdered ?? 0)} />
+        <FounderMetric label="Ordered Sales" value={st.loading ? "…" : formatMoney(d?.totals.orderedSales)} tone="green" />
+        <FounderMetric label="Conversion" value={st.loading ? "…" : fmtPct(d?.totals.conversionPct)} tone="gold" />
+      </div>
+      {d && d.products.length > 0 ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Product (ASIN)</th><th>Visits</th><th>vs before</th><th>Units</th><th>vs before</th><th>Sales</th><th>Conversion</th><th>Buy Box</th><th>Watch</th></tr>
+            </thead>
+            <tbody>
+              {d.products.map((p) => (
+                <tr key={p.asin}>
+                  <td>{p.sku ? `${p.sku} · ` : ""}{p.asin}</td>
+                  <td>{p.sessions}</td>
+                  <td>{fmtChange(p.sessionsChangePct)}</td>
+                  <td>{p.unitsOrdered}</td>
+                  <td>{fmtChange(p.unitsChangePct)}</td>
+                  <td>{formatMoney(p.orderedSales)}</td>
+                  <td>{fmtPct(p.conversionPct)}</td>
+                  <td>{fmtPct(p.avgBuyBoxPct)}</td>
+                  <td>{p.flags.length ? p.flags.map((f) => SALES_TRAFFIC_FLAG_TEXT[f] ?? f).join(", ") : "OK"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </div>
   );
 }
