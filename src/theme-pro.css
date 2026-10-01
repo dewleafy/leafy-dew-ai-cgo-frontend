@@ -1,119 +1,82 @@
-/* Professional dark theme (SaaS dashboard look). Loaded after App.css; remaps design tokens
-   and overrides the hard-coded light surfaces. Revert by removing the import in App.tsx. */
+/* Light, airy SaaS theme inspired by modern AI dashboards: soft grey canvas, white cards,
+   teal-to-violet gradient accents, Poppins headings. Loaded after App.css. */
 :root {
-  --app-bg: #0b1020;
-  --app-bg-alt: #0f1528;
-  --card-bg: #121a2e;
-  --green-950: #e8edf7;
-  --green-900: #0d9488;
-  --green-800: #14b8a6;
-  --green-700: #2dd4bf;
-  --green-600: #5eead4;
-  --green-soft: rgba(45, 212, 191, 0.12);
-  --green-soft-2: rgba(45, 212, 191, 0.16);
-  --gold: #fbbf24;
-  --gold-soft: rgba(251, 191, 36, 0.14);
-  --text-main: #dbe2f0;
-  --text-strong: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-soft: #64748b;
-  --border-soft: #222c44;
-  --border-card: #243049;
-  --amber: #fbbf24;
-  --amber-soft: rgba(251, 191, 36, 0.14);
-  --red: #f87171;
-  --red-soft: rgba(248, 113, 113, 0.14);
-  --blue: #60a5fa;
-  --blue-soft: rgba(96, 165, 250, 0.14);
-  --premium-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.28);
-  --premium-shadow-hover: 0 4px 10px rgba(0, 0, 0, 0.45), 0 18px 44px rgba(0, 0, 0, 0.38);
-  --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  color-scheme: dark;
+  --app-bg: #f5f5f7;
+  --app-bg-alt: #fafafc;
+  --card-bg: #ffffff;
+  --green-950: #18181b;
+  --green-900: #0f9f86;
+  --green-800: #0d8f79;
+  --green-700: #14a58b;
+  --green-600: #23d2a0;
+  --green-soft: #e8faf4;
+  --green-soft-2: #def6ee;
+  --gold: #b7791f;
+  --gold-soft: #fff4dc;
+  --text-main: #27272a;
+  --text-strong: #18181b;
+  --text-muted: #6b7280;
+  --text-soft: #9ca3af;
+  --border-soft: #ececf1;
+  --border-card: #e9e9f0;
+  --amber: #d97706;
+  --amber-soft: #fff4dc;
+  --red: #e11d48;
+  --red-soft: #ffe8ed;
+  --blue: #2563eb;
+  --blue-soft: #eaf2ff;
+  --g8-gradient: linear-gradient(105deg, #23d2a0, #32bdc6 30%, #45a2f6 60%, #b387ff);
+  --premium-shadow: 0 1px 2px rgba(24, 24, 27, 0.04), 0 10px 30px rgba(24, 24, 27, 0.06);
+  --premium-shadow-hover: 0 4px 10px rgba(24, 24, 27, 0.06), 0 16px 40px rgba(24, 24, 27, 0.09);
+  --font-display: "Poppins", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 html, body, #root { background: var(--app-bg); color: var(--text-main); }
-h1, h2, h3, h4, .founder-page > h1, .product-info-panel h1 { font-family: var(--font-body); letter-spacing: -0.02em; color: var(--text-strong); font-weight: 700; }
+h1, h2, h3, .founder-page > h1, .product-info-panel h1 { font-family: var(--font-display); letter-spacing: -0.02em; color: var(--text-strong); font-weight: 700; }
 
-.founder-app-shell,
-.app-shell {
-  background:
-    radial-gradient(circle at 10% -10%, rgba(20, 184, 166, 0.14), transparent 34%),
-    radial-gradient(circle at 95% 0%, rgba(99, 102, 241, 0.14), transparent 30%),
-    var(--app-bg);
-  color: var(--text-main);
+.founder-app-shell, .app-shell { background: var(--app-bg); color: var(--text-main); }
+
+/* Cards: white, rounded, soft shadow */
+.card, .metric-tile, .founder-metric, .approval-card, .product-card {
+  background: #fff; border: 1px solid var(--border-card); border-radius: 18px; box-shadow: var(--premium-shadow);
 }
 
-.top-header, .topbar, .sidebar {
-  background: rgba(11, 16, 32, 0.85);
-  border-color: var(--border-soft);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(16px);
-}
-.brand-left strong { color: var(--text-strong); }
-.brand-left small { color: var(--text-muted); }
-
-.nav-tab { color: var(--text-muted); border-radius: 10px; }
-.nav-tab:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-strong); }
-.nav-tab-active {
-  background: linear-gradient(180deg, rgba(45, 212, 191, 0.18), rgba(45, 212, 191, 0.08));
-  border-color: rgba(45, 212, 191, 0.35);
-  color: #99f6e4;
-  box-shadow: none;
+/* KPI tiles: thin coloured bar underneath, like a dashboard */
+.quick-status-strip > *, .founder-metric, .metric-tile { position: relative; overflow: hidden; }
+.quick-status-strip > *::after, .founder-metric::after, .metric-tile::after {
+  content: ""; position: absolute; left: 16px; right: 16px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--g8-gradient); opacity: 0.85;
 }
 
-.card, .metric-tile, .founder-metric, .approval-card, .warning-card, .product-card, .panel,
-[class*="-card"], [class*="-panel"], [class*="metric"] {
-  background-color: var(--card-bg);
-  border-color: var(--border-card);
-  color: var(--text-main);
-  box-shadow: var(--premium-shadow);
+/* Gradient pill primary buttons */
+button:not(.secondary):not([class*="side-nav"]):not([class*="nav-tab"]):not([class*="ghost"]):not([class*="link"]):not([class*="chip"]):not([class*="filter"]) {
+  background: var(--g8-gradient); color: #fff; border: 0; border-radius: 999px; font-weight: 600; box-shadow: 0 6px 16px rgba(50, 189, 198, 0.28);
 }
-.warning-card { background: var(--amber-soft); border-color: rgba(251, 191, 36, 0.35); }
+button:not(.secondary):not([class*="side-nav"]):not([class*="nav-tab"]):not([class*="ghost"]):not([class*="link"]):hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
+button.secondary { background: #fff; color: var(--text-main); border: 1px solid var(--border-card); border-radius: 999px; box-shadow: none; }
+button.secondary:hover:not(:disabled) { background: #f7f7fa; }
+button:disabled { opacity: 0.5; box-shadow: none; }
 
-p, li, span, label, small, td, th, dd, dt { color: inherit; }
-.section-note, .page-title p, .page-subtitle { color: var(--text-muted); }
+/* Sidebar: clean white rail */
+.side-nav-rail { background: #fff !important; color: var(--text-main) !important; border-right: 1px solid var(--border-soft); }
+.side-nav-brand { background: transparent !important; color: var(--text-strong) !important; border-bottom: 1px solid var(--border-soft) !important; }
+.side-nav-brand strong { color: var(--text-strong) !important; font-family: var(--font-display); }
+.side-nav-brand small { color: var(--text-muted) !important; }
+.side-nav-item, .side-nav-advanced-toggle, .side-nav-settings { background: transparent !important; color: #52525b !important; border: 0 !important; box-shadow: none !important; border-radius: 10px !important; filter: none !important; transform: none !important; }
+.side-nav-item:hover, .side-nav-advanced-toggle:hover, .side-nav-settings:hover { background: #f4f4f7 !important; color: var(--text-strong) !important; }
+.side-nav-item-active { background: linear-gradient(90deg, rgba(35,210,160,0.14), rgba(179,135,255,0.12)) !important; color: #0b7f6b !important; font-weight: 600; }
+.side-nav-group-label { color: #9ca3af !important; }
+.side-nav-settings { border-top: 1px solid var(--border-soft) !important; }
+.top-bar-slim { background: rgba(245, 245, 247, 0.85) !important; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-soft); }
 
-table { background: transparent; color: var(--text-main); }
-th { background: rgba(255, 255, 255, 0.04); color: var(--text-muted); border-color: var(--border-soft); text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.06em; }
-td { border-color: var(--border-soft); }
-tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
-.table-wrap { border-color: var(--border-soft); background: var(--card-bg); border-radius: 14px; }
+/* Tables */
+th { background: #fafafc; color: var(--text-muted); text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.06em; }
+.table-wrap { background: #fff; border: 1px solid var(--border-card); border-radius: 16px; box-shadow: var(--premium-shadow); overflow: auto; }
+tbody tr:hover td { background: #fafafe; }
 
-input, select, textarea {
-  background: #0d1426;
-  color: var(--text-strong);
-  border: 1px solid var(--border-card);
-  border-radius: 10px;
-}
-input::placeholder, textarea::placeholder { color: var(--text-soft); }
-input:focus, select:focus, textarea:focus { outline: 2px solid rgba(45, 212, 191, 0.5); outline-offset: 1px; }
+/* Inputs */
+input, select, textarea { background: #fff; border: 1px solid var(--border-card); border-radius: 12px; color: var(--text-strong); }
+input:focus, select:focus, textarea:focus { outline: 2px solid rgba(50, 189, 198, 0.45); outline-offset: 1px; }
 
-button { border-radius: 10px; }
-button:not(.secondary):not(.nav-tab):not([class*="ghost"]):not([class*="link"]):not([class*="side-nav"]) { background: var(--green-900); color: #fff; border-color: transparent; }
-button:not(.secondary):not(.nav-tab):not([class*="ghost"]):not([class*="link"]):not([class*="side-nav"]):hover:not(:disabled) { background: var(--green-800); }
-button.secondary { background: rgba(255, 255, 255, 0.05); color: var(--text-main); border: 1px solid var(--border-card); }
-button.secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); }
-button:disabled { opacity: 0.5; }
-
-.status-badge, [class*="badge"], [class*="pill"] { border-radius: 999px; }
-
-a { color: #5eead4; }
-hr { border-color: var(--border-soft); }
-::selection { background: rgba(45, 212, 191, 0.35); }
-* { scrollbar-color: #2a3550 transparent; }
-
-/* Sidebar and top bar */
-.side-nav-rail { background: #0a0f1d; border-right: 1px solid var(--border-soft); color: #cbd5e1; }
-.side-nav-brand { background: transparent !important; border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important; color: #fff; }
-.side-nav-brand strong { color: #fff; }
-.side-nav-brand small { color: var(--text-muted); }
-.side-nav-item, .side-nav-advanced-toggle, .side-nav-settings {
-  background: transparent !important; color: #94a3b8 !important; border: 0 !important; box-shadow: none !important;
-}
-.side-nav-item:hover, .side-nav-advanced-toggle:hover, .side-nav-settings:hover { background: rgba(255, 255, 255, 0.06) !important; color: #fff !important; }
-.side-nav-item-active { background: rgba(45, 212, 191, 0.14) !important; color: #99f6e4 !important; font-weight: 600; }
-.side-nav-group-label { color: #64748b; }
-.side-nav-settings { border-top: 1px solid rgba(255, 255, 255, 0.08) !important; border-radius: 10px !important; justify-content: flex-start; }
-.side-nav-settings svg { width: 18px; height: 18px; flex: 0 0 18px; }
-.top-bar-slim { background: rgba(11, 16, 32, 0.85) !important; border-bottom: 1px solid var(--border-soft); }
-.side-nav-main { background: transparent; }
+a { color: #0d8f79; }
+::selection { background: rgba(50, 189, 198, 0.3); }
