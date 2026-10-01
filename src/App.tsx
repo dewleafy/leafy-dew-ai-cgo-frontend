@@ -4761,9 +4761,36 @@ function ReturnRateCard() {
   const data = returns.data;
   // Only products that actually had returns, worst first; products with no returns are not interesting here.
   const rows = (data?.products ?? []).filter((row) => row.unitsReturned > 0);
+  const [undoStep, setUndoStep] = useState<"idle" | "confirm" | "working">("idle");
+  const [undoMessage, setUndoMessage] = useState("");
+
+  async function undoSwitch() {
+    setUndoStep("working");
+    try {
+      const result = await postJson<{ reverted: number }>(`/api/product-economics/return-rate-undo?sellerId=${SELLER_ID}`, {});
+      setUndoMessage(result.reverted > 0 ? `Restored the earlier return rates on ${result.reverted} product(s). Refresh to see the old profit status.` : "Nothing to undo: no measured rate is currently switched on.");
+    } catch {
+      setUndoMessage("Could not undo. Nothing was changed.");
+    }
+    setUndoStep("idle");
+  }
 
   return (
     <Card title="Measured Return Rate">
+      <div className="button-row">
+        {undoStep === "confirm" ? (
+          <>
+            <span className="muted">Put back the assumed return rates on products that switched to measured?</span>
+            <button type="button" onClick={undoSwitch}>Yes, undo</button>
+            <button type="button" onClick={() => setUndoStep("idle")}>Cancel</button>
+          </>
+        ) : (
+          <button type="button" disabled={undoStep === "working"} onClick={() => { setUndoMessage(""); setUndoStep("confirm"); }}>
+            Undo measured-rate switch
+          </button>
+        )}
+        {undoMessage ? <span className="muted">{undoMessage}</span> : null}
+      </div>
       {returns.loading ? <LoadingBlock /> : returns.error || !data ? (
         <ErrorBlock text="Could not load return rates. Backend may still be deploying." />
       ) : rows.length === 0 ? (
