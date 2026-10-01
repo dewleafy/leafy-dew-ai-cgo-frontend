@@ -3131,7 +3131,8 @@ function OrderDetailSheet({
 
 type SalesTrafficProduct = {
   asin: string; sku: string | null; sessions: number; pageViews: number; unitsOrdered: number; orderedSales: number;
-  conversionPct: number | null; avgBuyBoxPct: number | null; sessionsChangePct: number | null; unitsChangePct: number | null; flags: string[];
+  conversionPct: number | null; avgBuyBoxPct: number | null; sessionsChangePct: number | null; unitsChangePct: number | null;
+  adSpend: number; adSales: number; organicSalesEstimate: number; tacosPct: number | null; flags: string[];
 };
 type SalesTrafficResponse = {
   data?: {
@@ -3177,10 +3178,13 @@ function SalesTrafficPage() {
         <FounderMetric label="Conversion" value={st.loading ? "…" : fmtPct(d?.totals.conversionPct)} tone="gold" />
       </div>
       {d && d.products.length > 0 ? (
+        <p className="section-note">Organic is an estimate: total ordered sales minus sales Amazon credits to ads. "Ad cost / total sales" shows how much of your sales money goes back into ads.</p>
+      ) : null}
+      {d && d.products.length > 0 ? (
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Product (ASIN)</th><th>Visits</th><th>vs before</th><th>Units</th><th>vs before</th><th>Sales</th><th>Conversion</th><th>Buy Box</th><th>Watch</th></tr>
+              <tr><th>Product (ASIN)</th><th>Visits</th><th>vs before</th><th>Units</th><th>vs before</th><th>Sales</th><th>Conversion</th><th>Buy Box</th><th>Ad spend</th><th>Ad sales</th><th>Organic (est.)</th><th>Ad cost / total sales</th><th>Watch</th></tr>
             </thead>
             <tbody>
               {d.products.map((p) => (
@@ -3193,6 +3197,10 @@ function SalesTrafficPage() {
                   <td>{formatMoney(p.orderedSales)}</td>
                   <td>{fmtPct(p.conversionPct)}</td>
                   <td>{fmtPct(p.avgBuyBoxPct)}</td>
+                  <td>{formatMoney(p.adSpend)}</td>
+                  <td>{formatMoney(p.adSales)}</td>
+                  <td>{formatMoney(p.organicSalesEstimate)}</td>
+                  <td>{fmtPct(p.tacosPct)}</td>
                   <td>{p.flags.length ? p.flags.map((f) => SALES_TRAFFIC_FLAG_TEXT[f] ?? f).join(", ") : "OK"}</td>
                 </tr>
               ))}
