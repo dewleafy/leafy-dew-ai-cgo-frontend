@@ -80,3 +80,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(50, 189, 198
 
 a { color: #0d8f79; }
 ::selection { background: rgba(50, 189, 198, 0.3); }
+
+.side-nav-settings { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; padding: 10px 12px !important; margin-top: auto; min-height: 0 !important; height: auto !important; }
+.side-nav-settings svg { width: 18px !important; height: 18px !important; flex: 0 0 18px; color: #52525b; }
+.side-nav-settings span { font-size: 13.5px; font-weight: 500; }
