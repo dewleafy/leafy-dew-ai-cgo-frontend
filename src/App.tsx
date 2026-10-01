@@ -1575,12 +1575,13 @@ function ProductsPage({ navigate }: { navigate: FounderNavigate }) {
           <button type="button" key={label} className={subTab === label ? "active" : ""} onClick={() => { setSubTab(label); setPage(1); }}>{label}</button>
         ))}
       </div>
-      <div className="catalog-summary-chips">
-        <span><FounderIcon name="box" />{products.length} products</span>
-        <span><FounderIcon name="cost" />{products.filter(productNeedsCost).length} missing cost</span>
-        <span><FounderIcon name="chart" />{products.filter(productLowProfit).length} profit watch</span>
-        <span><FounderIcon name="shield" />Safe Mode ON</span>
-      </div>
+      <section className="quick-status-strip g8-kpis">
+        <FounderMetric label="Products" value={products.length} icon="box" trend="In your catalog" />
+        <FounderMetric label="Active" value={products.filter((p) => normalizeState(p.status).includes("ACTIVE")).length} icon="check" trend="Live listings" tone="green" />
+        <FounderMetric label="Missing Cost" value={products.filter(productNeedsCost).length} icon="cost" trend="Fill to unlock profit" tone="gold" />
+        <FounderMetric label="Profit Watch" value={products.filter(productLowProfit).length} icon="chart" trend="Low or negative profit" />
+        <FounderMetric label="Safe Mode" value={<span className="safe-inline">ON</span>} icon="shield" trend="Amazon changes locked" tone="blue" />
+      </section>
       {subTab === "Profit Calculator" ? (
         <div className="soft-state">Use the advanced profit calculator when you need fee-level inputs. It keeps Amazon changes locked.</div>
       ) : null}
