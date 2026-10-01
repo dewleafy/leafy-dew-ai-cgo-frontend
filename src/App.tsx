@@ -4738,6 +4738,77 @@ function ListingReadinessPage({ navigate }: { navigate: FounderNavigate }) {
   );
 }
 
+type MeasuredReturnRateRow = {
+  asin: string;
+  sku: string | null;
+  unitsSold: number;
+  unitsReturned: number;
+  returnRatePercent: number;
+  enoughData: boolean;
+  isReturnRisk: boolean;
+  topReasons: Array<{ reason: string; units: number }>;
+};
+
+type MeasuredReturnRatesResponse = {
+  lookbackDays: number;
+  minUnitsForVerdict: number;
+  riskThresholdPercent: number;
+  products: MeasuredReturnRateRow[];
+};
+
+function ReturnRateCard() {
+  const returns = useApi<MeasuredReturnRatesResponse>(() => getJson(`/api/product-economics/measured-return-rates?sellerId=${SELLER_ID}`));
+  const data = returns.data;
+  // Only products that actually had returns, worst first; products with no returns are not interesting here.
+  const rows = (data?.products ?? []).filter((row) => row.unitsReturned > 0);
+
+  return (
+    <Card title="Measured Return Rate">
+      {returns.loading ? <LoadingBlock /> : returns.error || !data ? (
+        <ErrorBlock text="Could not load return rates. Backend may still be deploying." />
+      ) : rows.length === 0 ? (
+        <EmptyBlock text={`No returns recorded in the last ${data.lookbackDays} days.`} />
+      ) : (
+        <>
+          <p className="muted">
+            Real units returned / units sold over the last {data.lookbackDays} days (from Amazon orders and returns).
+            Products at {data.riskThresholdPercent}% or more with at least {data.minUnitsForVerdict} units sold are treated as a return risk,
+            and the PPC logic will not suggest scaling their ads.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>ASIN</th>
+                  <th>Sold</th>
+                  <th>Returned</th>
+                  <th>Return rate</th>
+                  <th>Verdict</th>
+                  <th>Top reasons</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.asin}>
+                    <td className="identity-cell">{formatEmpty(row.sku)}</td>
+                    <td className="identity-cell">{row.asin}</td>
+                    <td>{row.unitsSold}</td>
+                    <td>{row.unitsReturned}</td>
+                    <td>{row.returnRatePercent.toFixed(1)}%</td>
+                    <td>{row.isReturnRisk ? "Return risk" : row.enoughData ? "OK" : "Too few sales to judge"}</td>
+                    <td>{row.topReasons.map((item) => `${item.reason.replace(/^CR-/, "")} (${item.units})`).join(", ") || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function ProductEconomicsPage() {
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const rows = rowsOf<ProductEconomics>(economics.data);
@@ -4758,6 +4829,8 @@ function ProductEconomicsPage() {
         <MetricTile label="Needs input" value={economics.loading ? "..." : needsInputCount} />
         <MetricTile label="Selected SKU" value={selectedRow ? formatEmpty(selectedRow.sku) : "-"} />
       </div>
+
+      <ReturnRateCard />
 
       <Card title="Profitability Readiness">
         {economics.loading ? <LoadingBlock /> : economics.error ? (
