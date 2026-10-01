@@ -1,3 +1,4 @@
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, FormEvent, ReactNode, RefObject } from "react";
 import "./App.css";
@@ -181,8 +182,9 @@ function useApi<T>(loader: () => Promise<T>, deps: unknown[] = []) {
       .then((data) => {
         if (alive) setState({ data, loading: false, error: null });
       })
-      .catch(() => {
-        if (alive) setState({ data: null, loading: false, error: "Unable to load this section." });
+      .catch((err: unknown) => {
+        const message = err instanceof Error && err.message ? err.message : "Unable to load this section.";
+        if (alive) setState({ data: null, loading: false, error: message });
       });
 
     return () => {
@@ -1311,6 +1313,7 @@ function App() {
       onNavigate={navigate}
       contentRef={mainContentRef}
     >
+      <ErrorBoundary resetKey={activePage} label={activePage}>
           {activePage === "Today" && <TodayDashboard navigate={navigate} />}
           {activePage === "Products" && <ProductsPage navigate={navigate} />}
           {activePage === "Product Detail" && <ProductDetailPage product={selectedProduct} navigate={navigate} />}
@@ -1355,6 +1358,7 @@ function App() {
           {activePage === "Learning" && <LearningPage />}
           {activePage === "Activity Logs" && <ActivityLogsPage />}
           {activePage === "Settings" && <SettingsPage />}
+      </ErrorBoundary>
     </AppShell>
   );
 }
@@ -2660,7 +2664,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
                 {isScanningAplus ? "Scanning…" : aplusTotalUnchecked === 0 ? "All products checked" : `Scan next batch (${Math.min(20, aplusTotalUnchecked)})`}
               </button>
               {aplusScanMessage && <p className="brand-card-note">{aplusScanMessage}</p>}
-              {(aplusCoverage.data?.missingProducts.length ?? 0) > 0 && (
+              {(aplusCoverage.data?.missingProducts?.length ?? 0) > 0 && (
                 <>
                   <ul className={showAllAplusMissing ? "brand-card-list brand-card-list-scroll" : "brand-card-list"}>
                     {(aplusCoverage.data?.missingProducts ?? [])
@@ -2671,7 +2675,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
                         </li>
                       ))}
                   </ul>
-                  {(aplusCoverage.data?.missingProducts.length ?? 0) > 6 && (
+                  {(aplusCoverage.data?.missingProducts?.length ?? 0) > 6 && (
                     <button
                       type="button"
                       className="link-button"
@@ -2679,7 +2683,7 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
                     >
                       {showAllAplusMissing
                         ? "Show fewer"
-                        : `Show all ${aplusCoverage.data?.missingProducts.length ?? 0} missing products`}
+                        : `Show all ${aplusCoverage.data?.missingProducts?.length ?? 0} missing products`}
                     </button>
                   )}
                 </>
