@@ -1331,6 +1331,8 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const salesSummary = useApi<AmazonSpSalesSummary>(() => getJson(`/api/amazon-sp/sales-summary?sellerId=${SELLER_ID}&days=7`));
   const alerts = useApi<AlertSummary>(() => alertCenterApi.summary(SELLER_ID));
   const strategy = useApi<StrategyResponse>(() => getJson(`/api/strategy/weekly?sellerId=${SELLER_ID}`));
+  const brandHealthToday = useApi<BrandHealthResponse>(() => getJson(`/api/brand-health/summary?sellerId=${SELLER_ID}`));
+  const poorTrustBrands = (brandHealthToday.data?.data?.brands ?? []).filter((b) => b.trustLabel === "POOR");
   const strategyCounts = strategy.data?.data?.counts ?? {};
   const strategyProducts = strategy.data?.data?.products ?? [];
   const losingMoneyCount = readNumber(strategyCounts.LOSING_MONEY);
@@ -1350,6 +1352,7 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
   const highAlertCount = readNumber(alerts.data?.highAlerts);
 
   const attentionItems = [
+    poorTrustBrands.length > 0 ? { icon: "cost" as FounderIconName, title: "Returns are hurting a brand", text: `${poorTrustBrands.map((b) => `${b.brandName} (${b.trustDefectRatePct}% quality/mismatch returns)`).join(", ")}. Check the products with the most returns in Brand Center.`, priority: "High", action: "See Brand Center", page: "Brand Center" as AppPage } : null,
     // Sourced from the Alert Center, which now refreshes automatically once a day alongside
     // the Daily AI-CGO engine run (see background-sync.service.ts) — this is the one place on
     // the founder's default landing page that surfaces what those 300 engines actually found,
