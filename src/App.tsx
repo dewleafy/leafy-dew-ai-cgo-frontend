@@ -2303,7 +2303,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
       <div className="warning-card founder-safety-banner">
         <p>Approving does not automatically change Amazon unless live execution is enabled and all safety checks pass.</p>
       </div>
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         <FounderMetric label="Pending" value={approvals.loading ? "..." : readNumber(summary.pendingCount)} icon="approval" trend="Waiting for your decision" />
         <FounderMetric label="High Priority" value={readNumber(summary.highRiskCount)} icon="shield" trend="Review carefully" tone="gold" />
         <FounderMetric label="Approved Today" value={readNumber(summary.approvedCount)} icon="check" trend="Still safety-gated" />
@@ -2823,7 +2823,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
     <div className="page founder-page">
       <PageHeader title="Sales & Ads" subtitle="Ad-attributed sales, spend, and ACOS from Amazon Ads (last 7 days)." />
       {hasAdsError ? <SafetyBanner text="Amazon Ads data could not be loaded right now. Showing whatever is available." /> : null}
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         <FounderMetric label="Ad Sales (7d)" value={adsSummary.loading ? "…" : formatMoney(totals?.sales)} />
         <FounderMetric label="Ad Orders (7d)" value={adsSummary.loading ? "…" : cleanFounderText(totals?.orders, "0")} />
         <FounderMetric label="Ad Spend (7d)" value={adsSummary.loading ? "…" : formatMoney(totals?.cost)} />
@@ -2838,7 +2838,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <p>Real orders from your Amazon Seller account (not just ad-attributed).</p>
       </div>
       {salesSummary.error ? <SafetyBanner text="Real store sales could not be loaded right now. Showing whatever is available." /> : null}
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         <FounderMetric label="Total Sales (7d)" value={salesSummary.loading ? "…" : formatMoney(salesSummary.data?.totalSales)} tone="green" />
         <FounderMetric label="Total Orders (7d)" value={salesSummary.loading ? "…" : cleanFounderText(salesSummary.data?.totalOrders, "0")} />
         <FounderMetric label="Total Units (7d)" value={salesSummary.loading ? "…" : cleanFounderText(salesSummary.data?.confirmedUnits, "0")} />
@@ -2852,7 +2852,7 @@ function SalesAdsPage({ navigate }: { navigate: FounderNavigate }) {
         <h2>Real Profit</h2>
         <p>Real sales minus per-unit product costs minus real ad spend (last 7 days).</p>
       </div>
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         <FounderMetric label="Real Gross Profit (7d)" value={realProfitLoading ? "…" : formatMoney(realProfit.grossProfitBeforeAds)} trend="Before ad spend" tone="gold" />
         <FounderMetric label="Real Net Profit (7d)" value={realProfitLoading ? "…" : formatMoney(realProfit.netProfitAfterAds)} trend="After real ad spend" tone="gold" />
       </div>
@@ -3166,7 +3166,7 @@ function WeeklyStrategyPage() {
     <div className="page founder-page">
       <PageHeader title="Weekly Strategy" subtitle="One clear recommendation for every product, based on its real profit room and how visitors behave. Advice only — nothing is changed on Amazon." />
       {st.error ? <SafetyBanner text="Strategy could not be loaded right now." /> : null}
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         {Object.keys(STRATEGY_LABEL).map((k) => (
           <FounderMetric key={k} label={STRATEGY_LABEL[k]} value={st.loading ? "…" : String(d?.counts[k] ?? 0)} />
         ))}
@@ -3216,7 +3216,7 @@ function SalesTrafficPage() {
           <p>The first report is requested by the daily Amazon sync. Numbers will appear here after it runs.</p>
         </div>
       ) : null}
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         <FounderMetric label="Visits (sessions)" value={st.loading ? "…" : String(d?.totals.sessions ?? 0)} />
         <FounderMetric label="Page Views" value={st.loading ? "…" : String(d?.totals.pageViews ?? 0)} />
         <FounderMetric label="Units Ordered" value={st.loading ? "…" : String(d?.totals.unitsOrdered ?? 0)} />
@@ -3312,7 +3312,7 @@ function OrderEconomicsPage({ navigate }: { navigate: FounderNavigate }) {
         ))}
       </div>
 
-      <div className="quick-status-strip">
+      <div className="quick-status-strip g8-kpis">
         <FounderMetric label="Orders Considered" value={orderEconomics.loading ? "…" : cleanFounderText(summary?.ordersConsidered, "0")} />
         <FounderMetric label="Total Revenue" value={orderEconomics.loading ? "…" : formatMoney(summary?.totalRevenue)} tone="green" />
         <FounderMetric label="Total Ad Spend" value={orderEconomics.loading ? "…" : formatMoney(summary?.totalAdSpend)} />
@@ -11625,9 +11625,12 @@ function QaSmokePage() {
 
 function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div className="page-title">
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
+    <div className="page-title g8-pagehead">
+      <div>
+        <span className="eyebrow">Leafy Dew AI-CGO · Amazon IN</span>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
     </div>
   );
 }
