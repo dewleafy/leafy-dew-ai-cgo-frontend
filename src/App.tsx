@@ -2491,12 +2491,16 @@ function BrandReadinessCard({ brand }: { brand: BrandReadinessBrandResult }) {
   );
 }
 
+type BrandHealthRowView = { brandName: string; unitsSold: number; returnedUnits: number; returnRatePct: number | null; trustDefectRatePct: number | null; aplusCoveragePct: number | null; trustLabel: string; notMeasured: string[] };
+type BrandHealthResponse = { data?: { days: number; brands: BrandHealthRowView[] } };
+
 function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const creative = useApi<CreativeRecommendationSummary>(() => getJson(`/api/creative-recommendations/summary?sellerId=${SELLER_ID}`));
   const brandReadiness = useApi<BrandReadinessResponse>(() => getJson(`/api/brand-readiness?sellerId=${SELLER_ID}`));
   const aplusCoverage = useApi<AplusCoverageReport>(() => getJson(`/api/aplus-content/coverage?sellerId=${SELLER_ID}`));
+  const brandHealth = useApi<BrandHealthResponse>(() => getJson(`/api/brand-health/summary?sellerId=${SELLER_ID}`));
   const products = mergeFounderProducts(passports.data, economics.data);
   const topProducts = products.slice(0, 4);
   const creativeAssetCount = readNumber(readFirst(creative.data, ["totalRecommendations", "total"]));
@@ -2605,6 +2609,19 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
   return (
     <div className="page founder-page">
       <PageHeader title="Brand Center" subtitle="Track brand health, content, assets, and top products." />
+      {brandHealth.data?.data && brandHealth.data.data.brands.length > 0 ? (
+        <Card title="Brand health (last 30 days)">
+          <div className="card-list">
+            {brandHealth.data.data.brands.map((b) => (
+              <article className="item-card compact-card" key={b.brandName}>
+                <div className="item-top"><strong>{b.brandName}</strong><StatusBadge value={b.trustLabel === "GOOD" ? "Trust good" : b.trustLabel === "WATCH" ? "Trust: watch" : b.trustLabel === "POOR" ? "Trust: poor" : "Not enough data"} /></div>
+                <p>Units sold: {b.unitsSold} · Returned: {b.returnedUnits} · Return rate: {b.returnRatePct === null ? "—" : `${b.returnRatePct}%`} · Quality/mismatch returns: {b.trustDefectRatePct === null ? "—" : `${b.trustDefectRatePct}%`} · A+ coverage: {b.aplusCoveragePct === null ? "not checked yet" : `${b.aplusCoveragePct}%`}</p>
+              </article>
+            ))}
+          </div>
+          <p className="section-note">Not measured yet: {brandHealth.data.data.brands[0].notMeasured.join(", ")}.</p>
+        </Card>
+      ) : null}
       <section className="brand-hero-card">
         <div>
           <span className="eyebrow">{primaryBrand ? `${primaryBrand.brandName} Brand Workspace` : "Leafy Dew Brand Workspace"}</span>
