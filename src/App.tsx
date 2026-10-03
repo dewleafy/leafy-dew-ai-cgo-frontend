@@ -153,6 +153,7 @@ const technicalTabs = [
   "Sales & Traffic",
   "Weekly Strategy",
   "Engine Coverage",
+  "Playbooks",
   "Ad Dayparting",
   "Cost Reduction Opportunities",
   "PPC Guardrail Triage",
@@ -1115,6 +1116,7 @@ const advancedNavGroups: NavGroup[] = [
     { label: "PPC Recommendations", page: "PPC Recommendations" },
     { label: "Order Profit & Loss", page: "Order Profit & Loss", note: "Real per-order profit/loss, with real ad spend" },
     { label: "Weekly Strategy", page: "Weekly Strategy", note: "What to do with each product this week" },
+    { label: "Playbooks", page: "Playbooks", note: "Ready-made fixes for low clicks, high ad cost, low sales, returns" },
     { label: "Sales & Traffic", page: "Sales & Traffic", note: "Visits, conversion and sales per product from Amazon" },
     { label: "Ad Dayparting", page: "Ad Dayparting", note: "Auto pause/resume Sponsored Products campaigns by hour" },
     { label: "Cost Reduction Opportunities", page: "Cost Reduction Opportunities", note: "Where the real numbers show room to cut cost, ranked by rupees at stake" },
@@ -1284,6 +1286,7 @@ function App() {
           {activePage === "Sales & Traffic" && <SalesTrafficPage />}
           {activePage === "Weekly Strategy" && <WeeklyStrategyPage />}
           {activePage === "Engine Coverage" && <EngineCoveragePage />}
+          {activePage === "Playbooks" && <PlaybooksPage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
@@ -3219,6 +3222,40 @@ function WeeklyStrategyPage() {
 type CoverageEngine = { engine_no: number; engine_name: string; brain_group: string; mapped_template: string | null; build_status: string; status_note: string | null };
 type CoverageResponse = { data?: { total: number; byStatus: Record<string, number>; byBrain: Record<string, Record<string, number>>; engines: CoverageEngine[] } };
 const COVERAGE_LABEL: Record<string, string> = { PARTIAL_CHECK: "Partly covered", WAITING_FOR_DATA: "Waiting for data", PLANNED: "Planned", LIVE: "Built" };
+
+type PlaybookHitView = { key: string; title: string; trigger: string; actions: string[]; approvalTier: string };
+type PlaybooksResponse = { data?: { counts: Record<string, number>; products: Array<{ asin: string; sku: string | null; productName: string | null; hits: PlaybookHitView[] }> } };
+const PLAYBOOK_LABEL: Record<string, string> = { LOW_CTR: "Low click rate", HIGH_ACOS: "Ads cost too much", LOW_CONVERSION: "Visitors not buying", RETURN_REDUCTION: "Too many returns" };
+
+function PlaybooksPage() {
+  const pb = useApi<PlaybooksResponse>(() => getJson(`/api/playbooks/weekly?sellerId=${SELLER_ID}`));
+  const d = pb.data?.data ?? null;
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Playbooks" subtitle="Ready-made fixes for products that match a known problem. Advice only — nothing is changed on Amazon without your approval." />
+      {pb.error ? <SafetyBanner text="Playbooks could not be loaded right now." /> : null}
+      <div className="quick-status-strip g8-kpis">
+        {Object.keys(PLAYBOOK_LABEL).map((k) => (
+          <FounderMetric key={k} label={PLAYBOOK_LABEL[k]} value={pb.loading ? "…" : String(d?.counts[k] ?? 0)} />
+        ))}
+      </div>
+      {!pb.loading && d && d.products.length === 0 ? <EmptyBlock text="No product matches a playbook right now. This uses the last 7 days of ads, visits and returns." /> : null}
+      <div className="card-list">
+        {(d?.products ?? []).map((p) => (
+          <article className="item-card" key={p.asin}>
+            <div className="item-top"><strong>{p.productName ?? p.sku ?? p.asin}</strong></div>
+            {p.hits.map((h) => (
+              <div key={h.key}>
+                <p><StatusBadge value={PLAYBOOK_LABEL[h.key] ?? h.title} /> {h.trigger}</p>
+                <ul>{h.actions.map((a) => <li key={a}>{a}</li>)}</ul>
+              </div>
+            ))}
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function EngineCoveragePage() {
   const cov = useApi<CoverageResponse>(() => getJson("/api/blueprint-engines/coverage"));
