@@ -152,6 +152,7 @@ const technicalTabs = [
   "Order Profit & Loss",
   "Sales & Traffic",
   "Weekly Strategy",
+  "Engine Coverage",
   "Ad Dayparting",
   "Cost Reduction Opportunities",
   "PPC Guardrail Triage",
@@ -1134,6 +1135,7 @@ const advancedNavGroups: NavGroup[] = [
   { title: "Automation", items: [
     { label: "Daily AI Run", page: "Daily AI-CGO" },
     { label: "AI Control Room", page: "Engine Command Center" },
+    { label: "Engine Coverage", page: "Engine Coverage", note: "How much of the blueprint's 300 engines is built" },
     { label: "Automation Calendar", page: "Scheduler" },
     { label: "Learning", page: "Learning" }
   ] },
@@ -1281,6 +1283,7 @@ function App() {
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
           {activePage === "Sales & Traffic" && <SalesTrafficPage />}
           {activePage === "Weekly Strategy" && <WeeklyStrategyPage />}
+          {activePage === "Engine Coverage" && <EngineCoveragePage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
@@ -3213,6 +3216,53 @@ function WeeklyStrategyPage() {
   );
 }
 
+type CoverageEngine = { engine_no: number; engine_name: string; brain_group: string; mapped_template: string | null; build_status: string; status_note: string | null };
+type CoverageResponse = { data?: { total: number; byStatus: Record<string, number>; byBrain: Record<string, Record<string, number>>; engines: CoverageEngine[] } };
+const COVERAGE_LABEL: Record<string, string> = { PARTIAL_CHECK: "Partly covered", WAITING_FOR_DATA: "Waiting for data", PLANNED: "Planned", LIVE: "Built" };
+
+function EngineCoveragePage() {
+  const cov = useApi<CoverageResponse>(() => getJson("/api/blueprint-engines/coverage"));
+  const [brain, setBrain] = useState("All");
+  const d = cov.data?.data ?? null;
+  const brains = d ? Object.keys(d.byBrain) : [];
+  const shown = d ? d.engines.filter((e) => brain === "All" || e.brain_group === brain) : [];
+  return (
+    <div className="page founder-page">
+      <PageHeader title="Engine Coverage" subtitle="The blueprint lists 300 engines in six groups. This shows how much of each group is built, partly covered by shared checks, waiting for data, or still planned." />
+      {cov.error ? <SafetyBanner text="Engine coverage could not be loaded right now." /> : null}
+      <div className="quick-status-strip g8-kpis">
+        <FounderMetric label="Blueprint engines" value={cov.loading ? "…" : String(d?.total ?? 0)} />
+        {Object.keys(COVERAGE_LABEL).map((k) => (
+          <FounderMetric key={k} label={COVERAGE_LABEL[k]} value={cov.loading ? "…" : String(d?.byStatus[k] ?? 0)} />
+        ))}
+      </div>
+      <div className="button-row">
+        {["All", ...brains].map((b) => (
+          <button key={b} type="button" className={brain === b ? "" : "secondary"} onClick={() => setBrain(b)}>{b}</button>
+        ))}
+      </div>
+      {d ? (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>No.</th><th>Engine</th><th>Group</th><th>Status</th><th>Note</th></tr></thead>
+            <tbody>
+              {shown.map((e) => (
+                <tr key={e.engine_no}>
+                  <td>{e.engine_no}</td>
+                  <td>{e.engine_name}</td>
+                  <td>{e.brain_group}</td>
+                  <td><StatusBadge value={COVERAGE_LABEL[e.build_status] ?? e.build_status} /></td>
+                  <td>{e.status_note ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SalesTrafficPage() {
   const [days, setDays] = useState(14);
   const st = useApi<SalesTrafficResponse>(() => getJson(`/api/sales-traffic/summary?sellerId=${SELLER_ID}&days=${days}`), [days]);
@@ -3506,6 +3556,7 @@ function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
     { title: "Automation", tools: [
       { label: "Daily AI Run", page: "Daily AI-CGO", note: "Generate safe recommendations" },
       { label: "AI Control Room", page: "Engine Command Center", note: "Advanced AI controls" },
+      { label: "Engine Coverage", page: "Engine Coverage", note: "Blueprint engines built vs planned" },
       { label: "Automation Calendar", page: "Scheduler", note: "Automation schedule" },
       { label: "Learning", page: "Learning", note: "Recommendation feedback" }
     ] },
