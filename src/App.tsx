@@ -2491,7 +2491,7 @@ function BrandReadinessCard({ brand }: { brand: BrandReadinessBrandResult }) {
   );
 }
 
-type BrandHealthRowView = { brandName: string; unitsSold: number; returnedUnits: number; returnRatePct: number | null; trustDefectRatePct: number | null; aplusCoveragePct: number | null; trustLabel: string; notMeasured: string[] };
+type BrandHealthRowView = { worstReturnProducts?: Array<{ asin: string; sku: string | null; unitsSold: number; unitsReturned: number; returnRatePercent: number; topReason: string | null }>; brandName: string; unitsSold: number; returnedUnits: number; returnRatePct: number | null; trustDefectRatePct: number | null; aplusCoveragePct: number | null; trustLabel: string; notMeasured: string[] };
 type BrandHealthResponse = { data?: { days: number; brands: BrandHealthRowView[] } };
 
 function BrandPage({ navigate }: { navigate: FounderNavigate }) {
@@ -2616,6 +2616,12 @@ function BrandPage({ navigate }: { navigate: FounderNavigate }) {
               <article className="item-card compact-card" key={b.brandName}>
                 <div className="item-top"><strong>{b.brandName}</strong><StatusBadge value={b.trustLabel === "GOOD" ? "Trust good" : b.trustLabel === "WATCH" ? "Trust: watch" : b.trustLabel === "POOR" ? "Trust: poor" : "Not enough data"} /></div>
                 <p>Units sold: {b.unitsSold} · Returned: {b.returnedUnits} · Return rate: {b.returnRatePct === null ? "—" : `${b.returnRatePct}%`} · Quality/mismatch returns: {b.trustDefectRatePct === null ? "—" : `${b.trustDefectRatePct}%`} · A+ coverage: {b.aplusCoveragePct === null ? "not checked yet" : `${b.aplusCoveragePct}%`}</p>
+                {b.worstReturnProducts && b.worstReturnProducts.length > 0 ? (
+                  <>
+                    <p className="section-note">Products with the most returns (last 90 days):</p>
+                    <ul>{b.worstReturnProducts.map((w) => <li key={w.asin}>{w.sku ?? w.asin}: {w.unitsReturned} of {w.unitsSold} returned ({w.returnRatePercent}%){w.topReason ? `, mostly ${w.topReason}` : ""}</li>)}</ul>
+                  </>
+                ) : null}
               </article>
             ))}
           </div>
