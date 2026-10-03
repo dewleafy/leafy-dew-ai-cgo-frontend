@@ -3122,8 +3122,10 @@ const SALES_TRAFFIC_FLAG_TEXT: Record<string, string> = {
   LOW_BUY_BOX: "Losing the Buy Box"
 };
 
-type StrategyRowView = { verdict: string; headline: string; action: string; sku: string | null; asin: string | null; productName: string | null; sessions: number; unitsOrdered: number };
-type StrategyResponse = { data?: { counts: Record<string, number>; products: StrategyRowView[] } };
+type StrategicView = { score: number | null; positioning: string; positioningNote: string; doNot: string[]; notMeasured: string[] };
+type FestivalView = { name: string; daysAway: number; inPrepWindow: boolean; advice: string };
+type StrategyRowView = { verdict: string; headline: string; action: string; sku: string | null; asin: string | null; productName: string | null; sessions: number; unitsOrdered: number; strategic?: StrategicView };
+type StrategyResponse = { data?: { counts: Record<string, number>; products: StrategyRowView[]; festivals?: FestivalView[] } };
 const STRATEGY_LABEL: Record<string, string> = {
   PUSH: "Push with ads", HOLD: "Hold, small ad budget", ORGANIC_ONLY: "Organic only, no ads", LOSING_MONEY: "Losing money",
   FIX_LISTING: "Fix listing", INVESTIGATE: "Investigate", FIX_COSTS: "Fill costs"
@@ -3171,11 +3173,24 @@ function WeeklyStrategyPage() {
           <FounderMetric key={k} label={STRATEGY_LABEL[k]} value={st.loading ? "…" : String(d?.counts[k] ?? 0)} />
         ))}
       </div>
+      {d && d.festivals && d.festivals.length > 0 ? (
+        <Card title="Festival calendar (India)">
+          <div className="card-list">
+            {d.festivals.map((f) => (
+              <article className="item-card compact-card" key={f.name}>
+                <div className="item-top"><strong>{f.name}</strong><StatusBadge value={f.inPrepWindow ? "Prepare now" : `${f.daysAway} days`} /></div>
+                <p>{f.advice}</p>
+              </article>
+            ))}
+          </div>
+          <p className="section-note">Dates are approximate. Confirm each year before planning stock.</p>
+        </Card>
+      ) : null}
       {d && d.products.length > 0 ? <ProductHeatMap products={d.products} /> : null}
       {d && d.products.length > 0 ? (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Product</th><th>Verdict</th><th>Why</th><th>What to do</th><th>Visits (7d)</th><th>Units (7d)</th></tr></thead>
+            <thead><tr><th>Product</th><th>Verdict</th><th>Why</th><th>What to do</th><th>Approach</th><th>Do not</th><th>Score</th><th>Visits (7d)</th><th>Units (7d)</th></tr></thead>
             <tbody>
               {d.products.map((p) => (
                 <tr key={`${p.asin}-${p.sku}`}>
@@ -3183,6 +3198,9 @@ function WeeklyStrategyPage() {
                   <td><StatusBadge value={STRATEGY_LABEL[p.verdict] ?? p.verdict} /></td>
                   <td>{p.headline}</td>
                   <td>{p.action}</td>
+                  <td>{p.strategic ? (p.strategic.positioning === "DIFFERENTIATE" ? "Differentiate" : p.strategic.positioning === "COST_EFFICIENCY" ? "Cost efficiency" : "Not decided") : "—"}</td>
+                  <td>{p.strategic && p.strategic.doNot.length ? p.strategic.doNot.join(" ") : "—"}</td>
+                  <td>{p.strategic?.score ?? "—"}</td>
                   <td>{p.sessions}</td>
                   <td>{p.unitsOrdered}</td>
                 </tr>
