@@ -1164,7 +1164,20 @@ function isAdvancedNavPage(page: AppPage): boolean {
 
 function TopNav({ activePage, onNavigate }: { activePage: AppPage; onNavigate: FounderNavigate }) {
   const [moreOpen, setMoreOpen] = useState(false);
+  // The dropdown needs to render outside .g8-nav's own box: that element has overflow-x: auto
+  // (so the tab row can scroll on narrow screens), and per the CSS overflow spec that silently
+  // forces overflow-y to auto too -- which clips anything that pops out below the 34px-tall nav
+  // bar, including this dropdown. Rendering it `position: fixed` and computing its coordinates
+  // from the button's own rect (instead of `position: absolute` inside the clipped ancestor)
+  // sidesteps that clipping entirely; see .g8-mega in theme-pro.css for the matching CSS.
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [megaPosition, setMegaPosition] = useState<{ top: number; left: number } | null>(null);
   useEffect(() => { setMoreOpen(false); }, [activePage]);
+  useEffect(() => {
+    if (!moreOpen || !moreButtonRef.current) return;
+    const rect = moreButtonRef.current.getBoundingClientRect();
+    setMegaPosition({ top: rect.bottom + 6, left: rect.left });
+  }, [moreOpen]);
   const moreActive = isAdvancedNavPage(activePage);
   return (
     <nav className="g8-nav" aria-label="Primary navigation">
@@ -1177,11 +1190,17 @@ function TopNav({ activePage, onNavigate }: { activePage: AppPage; onNavigate: F
         );
       })}
       <div className="g8-more">
-        <button type="button" className={`g8-tab ${moreActive || moreOpen ? "g8-tab-active" : ""}`} onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen}>
+        <button
+          type="button"
+          ref={moreButtonRef}
+          className={`g8-tab ${moreActive || moreOpen ? "g8-tab-active" : ""}`}
+          onClick={() => setMoreOpen((o) => !o)}
+          aria-expanded={moreOpen}
+        >
           More tools ▾
         </button>
-        {moreOpen ? (
-          <div className="g8-mega">
+        {moreOpen && megaPosition ? (
+          <div className="g8-mega" style={{ top: megaPosition.top, left: megaPosition.left }}>
             {advancedNavGroups.map((group) => (
               <div className="g8-mega-col" key={group.title}>
                 <span className="g8-mega-title">{group.title}</span>
