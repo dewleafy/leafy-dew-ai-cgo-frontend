@@ -1492,6 +1492,7 @@ export type CompetitorBenchmarkImageBrief = {
   ownSku: string;
   recommendedChanges: string[];
   basedOnAsins: string[];
+  contentGapNotes: string[];
   updatedAt: string;
 } | null;
 
