@@ -10725,6 +10725,7 @@ function CompetitorBenchmarkToolPage() {
   const runsState = useApi<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(() => competitorBenchmarkApi.listRuns(SELLER_ID));
 
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
+  const [pendingSku, setPendingSku] = useState("");
   const [activeRun, setActiveRun] = useState<CompetitorBenchmarkRun | null>(null);
   const [skippedSkus, setSkippedSkus] = useState<{ sku: string; reason: string }[]>([]);
   const [creating, setCreating] = useState(false);
@@ -10842,25 +10843,57 @@ function CompetitorBenchmarkToolPage() {
         {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock text="Could not load your product catalog." /> : ownSkuOptions.length === 0 ? (
           <EmptyBlock text="No product passports with a SKU yet. Add products under Product Passport first." />
         ) : (
-          <div className="card-list command-card-list">
-            {ownSkuOptions.map((product) => {
-              const sku = product.sku as string;
-              const checked = selectedSkus.includes(sku);
-              return (
-                <label key={sku} className="command-card" style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={!checked && selectedSkus.length >= 20}
-                    onChange={() => toggleSku(sku)}
-                  />
-                  <span>
-                    <strong>{sku}</strong> -- {product.productName ?? "Unnamed product"} {product.asin ? <span className="brand-card-note">({product.asin})</span> : <Badge tone="watch">No ASIN</Badge>}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+          <>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <select
+                value={pendingSku}
+                onChange={(event) => setPendingSku(event.target.value)}
+                disabled={selectedSkus.length >= 20}
+              >
+                <option value="">
+                  {selectedSkus.length >= 20 ? "Limit of 20 SKUs reached" : "Select a SKU to add..."}
+                </option>
+                {ownSkuOptions
+                  .filter((product) => !selectedSkus.includes(product.sku as string))
+                  .map((product) => {
+                    const sku = product.sku as string;
+                    return (
+                      <option key={sku} value={sku}>
+                        {sku} -- {product.productName ?? "Unnamed product"}{product.asin ? ` (${product.asin})` : " (no ASIN)"}
+                      </option>
+                    );
+                  })}
+              </select>
+              <Button
+                className="secondary"
+                disabled={!pendingSku || selectedSkus.length >= 20}
+                onClick={() => {
+                  if (!pendingSku) return;
+                  toggleSku(pendingSku);
+                  setPendingSku("");
+                }}
+              >
+                Add SKU
+              </Button>
+            </div>
+            {selectedSkus.length > 0 ? (
+              <div className="card-list command-card-list" style={{ marginTop: 12 }}>
+                {selectedSkus.map((sku) => {
+                  const product = ownSkuOptions.find((p) => p.sku === sku);
+                  return (
+                    <div key={sku} className="command-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>
+                        <strong>{sku}</strong> -- {product?.productName ?? "Unnamed product"} {product?.asin ? <span className="brand-card-note">({product.asin})</span> : <Badge tone="watch">No ASIN</Badge>}
+                      </span>
+                      <Button className="secondary" onClick={() => toggleSku(sku)}>Remove</Button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="soft-state" style={{ marginTop: 12 }}>No SKUs selected yet -- pick one from the dropdown above.</div>
+            )}
+          </>
         )}
         <div style={{ marginTop: 12 }}>
           <Button onClick={handleCreateRun} disabled={selectedSkus.length === 0 || creating}>
