@@ -113,7 +113,12 @@ a { color: #008a20; }
 .g8-tab-active { background: #eaf7ed !important; color: #007a1e !important; font-weight: 600; }
 .g8-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--g8-gradient); display: inline-block; }
 .g8-more { position: relative; }
-.g8-mega { position: absolute; top: 46px; left: 0; z-index: 80; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 1fr); gap: 4px 18px; padding: 18px; width: max-content; max-width: 90vw; background: #fff; border: 1px solid var(--border-card); border-radius: 18px; box-shadow: 0 20px 60px rgba(24,24,27,0.16); max-height: 70vh; overflow: auto; }
+/* position: fixed (not absolute) on purpose -- .g8-nav has overflow-x: auto so its tab row can
+   scroll on narrow screens, and that silently forces overflow-y to auto too (CSS overflow spec),
+   which would clip an absolutely-positioned dropdown popping out below the 34px-tall nav bar.
+   Fixed positioning escapes that clipping; TopNav in App.tsx sets its top/left inline from the
+   "More tools" button's own getBoundingClientRect(). */
+.g8-mega { position: fixed; z-index: 80; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 1fr); gap: 4px 18px; padding: 18px; width: max-content; max-width: 90vw; background: #fff; border: 1px solid var(--border-card); border-radius: 18px; box-shadow: 0 20px 60px rgba(24,24,27,0.16); max-height: 70vh; overflow: auto; }
 .g8-mega-col { display: flex; flex-direction: column; gap: 2px; }
 .g8-mega-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; padding: 4px 10px 6px; }
 .g8-mega-item { text-align: left; background: transparent !important; color: #3f3f46 !important; border: 0 !important; box-shadow: none !important; border-radius: 10px !important; padding: 7px 10px; font-size: 13.5px; font-weight: 500; filter: none !important; transform: none !important; }
