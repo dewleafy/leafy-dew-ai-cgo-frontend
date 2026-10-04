@@ -10855,7 +10855,13 @@ function CompetitorBenchmarkToolPage() {
         subtitle="Enter up to 20 of your own SKUs, confirm comparable competitor ASINs, and see where your real listing data differs -- price, images, bullets, title length, category sales rank."
       />
       <div className="brand-card-note" style={{ marginBottom: 16 }}>
-        Nothing on this page has been applied to your Amazon listing or to this app's saved listing data. Every result here is a report you can act on manually -- it only ever reads Amazon's official Catalog Items and Pricing APIs (no scraping) and writes to this tool's own tables.
+        Nothing on this page has been applied to your Amazon listing or to this app's saved listing data. Every result here is a report you can act on manually -- it only ever reads Amazon's official Catalog Items, Listings Items, and Pricing APIs (no scraping) and writes to this tool's own tables.
+      </div>
+      <div className="brand-card-note" style={{ marginBottom: 16 }}>
+        <strong>Two different limits, don't confuse them:</strong> the "20" below caps how many of <em>your own</em> products can be benchmarked in one run (keeps each run fast within Amazon's rate limits) -- it is not a cap on competitors. Amazon's catalog search auto-suggests up to 15 competitor ASINs per own SKU, and you can add as many more manually as you want on the next screen for any SKU.
+      </div>
+      <div className="brand-card-note" style={{ marginBottom: 16 }}>
+        <strong>Not shown anywhere on this page: customer ratings or review counts</strong>, for your own SKUs or competitors'. Amazon's Seller Partner API does not expose that data to any seller for any ASIN (there is no endpoint for it) -- so it can't be pulled here without scraping Amazon's pages, which this tool deliberately never does. Everything else here (price, image count, bullet count, title length, category sales rank, and real listing-copy text) is real, directly-pulled Amazon data.
       </div>
 
       <Card title={`1. Pick up to 20 of your own SKUs (${selectedSkus.length}/20 selected)`}>
@@ -11026,6 +11032,17 @@ function CompetitorBenchmarkToolPage() {
                       {group.imageMockups[group.imageMockups.length - 1].note}
                     </div>
                   ) : null}
+                </div>
+              ) : null}
+
+              {group.imageBrief && group.imageBrief.contentGapNotes.length > 0 ? (
+                <div style={{ marginTop: 16 }}>
+                  <strong>Listing copy ideas (real competitor text, not keyword/search data)</strong>
+                  <ul>
+                    {group.imageBrief.contentGapNotes.map((note, index) => (
+                      <li key={index}>{note}</li>
+                    ))}
+                  </ul>
                 </div>
               ) : null}
             </Card>
