@@ -38,7 +38,8 @@ import type {
   SchedulerSummary,
   SecurityAuditEvent,
   SecurityGuardrailSummary,
-  SocialContentLogRow
+  SocialContentLogRow,
+  CompetitorBenchmarkRun
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "" : "https://api.leafydew.in");
@@ -295,6 +296,37 @@ export const daypartingApi = {
   history: (sellerId: string, limit = 50) =>
     getJson<DaypartingHistoryResponse>(`/api/amazon-ads/dayparting/history?sellerId=${sellerId}&limit=${limit}`),
   runNow: (sellerId: string) => postJson<DaypartingCheckResult>(`/api/amazon-ads/dayparting/run-now?sellerId=${sellerId}`, {})
+};
+
+export const competitorBenchmarkApi = {
+  listRuns: (sellerId: string, limit = 20) =>
+    getJson<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(`/api/competitor-benchmark/runs?sellerId=${sellerId}&limit=${limit}`),
+  createRun: (sellerId: string, skus: string[]) =>
+    postJson<{ ok: boolean; run: CompetitorBenchmarkRun; skippedSkus: { sku: string; reason: string }[] }>(
+      `/api/competitor-benchmark/runs?sellerId=${sellerId}`,
+      { skus }
+    ),
+  getRun: (sellerId: string, runId: string) =>
+    getJson<{ ok: boolean; run: CompetitorBenchmarkRun }>(`/api/competitor-benchmark/runs/${encodeURIComponent(runId)}?sellerId=${sellerId}`),
+  confirmCandidates: (
+    sellerId: string,
+    runId: string,
+    body: { ownSku: string; confirmedAsins: string[]; removedAsins: string[]; addedAsins: string[] }
+  ) =>
+    postJson<{ ok: boolean; run: CompetitorBenchmarkRun }>(
+      `/api/competitor-benchmark/runs/${encodeURIComponent(runId)}/candidates/confirm?sellerId=${sellerId}`,
+      body
+    ),
+  compare: (sellerId: string, runId: string) =>
+    postJson<{ ok: boolean; run: CompetitorBenchmarkRun }>(
+      `/api/competitor-benchmark/runs/${encodeURIComponent(runId)}/compare?sellerId=${sellerId}`,
+      {}
+    ),
+  requestImageMockup: (sellerId: string, runId: string, body: { ownSku: string; imageSlot: number }) =>
+    postJson<{ ok: boolean; configured: boolean; message: string }>(
+      `/api/competitor-benchmark/runs/${encodeURIComponent(runId)}/image-mockup?sellerId=${sellerId}`,
+      body
+    )
 };
 
 export type AuthStatus = { ok: true; enabled: boolean; authenticated: boolean };
