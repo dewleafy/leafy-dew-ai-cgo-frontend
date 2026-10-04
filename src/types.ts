@@ -1441,3 +1441,85 @@ export type SocialContentLogRow = {
   createdAt: string;
   updatedAt: string;
 };
+
+// Added 2026-10-04 - Competitor Benchmark Tool (claude/competitor-benchmark-tool-spec.md).
+// Report-only: nothing this page shows has been applied to any real Amazon listing. See
+// CompetitorBenchmarkToolPage for the "nothing has been applied" banner shown throughout.
+export type CompetitorBenchmarkRunStatus = "DISCOVERING" | "AWAITING_CONFIRMATION" | "COMPARING" | "DONE" | "FAILED";
+export type CompetitorBenchmarkCandidateSource = "CATALOG_SEARCH" | "MANUAL" | "OWN_BASELINE" | "EXISTING_PASSPORT";
+export type CompetitorBenchmarkFetchStatus = "PENDING" | "FETCHED" | "FAILED";
+export type CompetitorBenchmarkDimension = "PRICE" | "IMAGE_COUNT" | "BULLET_COUNT" | "TITLE_LENGTH" | "CATEGORY_SALES_RANK";
+export type CompetitorBenchmarkImageMockupStatus = "NOT_REQUESTED" | "NOT_CONFIGURED" | "QUEUED" | "GENERATED" | "FAILED";
+
+export type CompetitorBenchmarkData = {
+  asin: string;
+  price: number | null;
+  currency: string | null;
+  rating: number | null;
+  reviewCount: number | null;
+  imageCount: number | null;
+  bulletCount: number | null;
+  titleLength: number | null;
+  categorySalesRank: number | null;
+  categorySalesRankTitle: string | null;
+  fetchStatus: CompetitorBenchmarkFetchStatus;
+  fetchError: string | null;
+  fetchedAt: string | null;
+};
+
+export type CompetitorBenchmarkCandidate = {
+  id: string;
+  ownSku: string;
+  ownAsin: string | null;
+  asin: string;
+  title: string | null;
+  source: CompetitorBenchmarkCandidateSource;
+  confirmed: boolean | null;
+  addedManually: boolean;
+  discoveryError: string | null;
+  data: CompetitorBenchmarkData | null;
+};
+
+export type CompetitorBenchmarkFinding = {
+  dimension: CompetitorBenchmarkDimension;
+  ownValue: number | null;
+  bestCompetitorValue: number | null;
+  bestCompetitorAsin: string | null;
+  gapSummary: string;
+};
+
+export type CompetitorBenchmarkImageBrief = {
+  ownSku: string;
+  recommendedChanges: string[];
+  basedOnAsins: string[];
+  updatedAt: string;
+} | null;
+
+export type CompetitorBenchmarkImageMockup = {
+  imageSlot: number;
+  status: CompetitorBenchmarkImageMockupStatus;
+  mockupUrl: string | null;
+  note: string | null;
+  requestedAt: string | null;
+};
+
+export type CompetitorBenchmarkSkuGroup = {
+  ownSku: string;
+  ownAsin: string | null;
+  candidates: CompetitorBenchmarkCandidate[];
+  findings: CompetitorBenchmarkFinding[];
+  imageBrief: CompetitorBenchmarkImageBrief;
+  imageMockups: CompetitorBenchmarkImageMockup[];
+};
+
+export type CompetitorBenchmarkRun = {
+  id: string;
+  sellerId: string;
+  ownSkus: string[];
+  status: CompetitorBenchmarkRunStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  skus: CompetitorBenchmarkSkuGroup[];
+};
