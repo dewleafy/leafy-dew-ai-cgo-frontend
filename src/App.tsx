@@ -8,6 +8,7 @@ import {
   approvalExecutionApi,
   aiGatewayApi,
   alertCenterApi,
+  competitorBenchmarkApi,
   daypartingApi,
   dataFreshnessApi,
   experimentsApi,
@@ -52,6 +53,8 @@ import type {
   AlertEvent,
   AlertSummary,
   AplusContentReport,
+  CompetitorBenchmarkCandidate,
+  CompetitorBenchmarkRun,
   CostCompletionQueueItem,
   CostReductionOpportunitiesReport,
   CostReductionOpportunity,
@@ -156,6 +159,7 @@ const technicalTabs = [
   "Playbooks",
   "Ad Dayparting",
   "Cost Reduction Opportunities",
+  "Competitor Benchmark Tool",
   "PPC Guardrail Triage",
   "Social Content Calendar",
   "Approval Center",
@@ -1108,7 +1112,8 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
     { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action" },
     { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
-    { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" }
+    { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
+    { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Compare your SKUs against real competitor data -- report only, nothing applied to any listing" }
   ] },
   { title: "Growth & Ads", items: [
     { label: "Growth Engine", page: "Growth Engine" },
@@ -1289,6 +1294,7 @@ function App() {
           {activePage === "Playbooks" && <PlaybooksPage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
+          {activePage === "Competitor Benchmark Tool" && <CompetitorBenchmarkToolPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
           {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
@@ -10706,6 +10712,274 @@ function CostReductionOpportunitiesPage() {
           </Card>
         </>
       ) : <EmptyBlock text="No data yet." />}
+    </div>
+  );
+}
+
+// Competitor Benchmark Tool (built 2026-10-04, claude/competitor-benchmark-tool-spec.md).
+// Report-only, start to finish: every call this page makes either reads data or writes to
+// this tool's own competitor_benchmark_* tables. None of it ever reaches Amazon's write APIs
+// or this app's live listing data (product_passports, amazon_sp_listings).
+function CompetitorBenchmarkToolPage() {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const runsState = useApi<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(() => competitorBenchmarkApi.listRuns(SELLER_ID));
+
+  const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
+  const [activeRun, setActiveRun] = useState<CompetitorBenchmarkRun | null>(null);
+  const [skippedSkus, setSkippedSkus] = useState<{ sku: string; reason: string }[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [asinDrafts, setAsinDrafts] = useState<Record<string, string>>({});
+
+  const ownSkuOptions = (passports.data?.rows ?? []).filter((p) => p.sku);
+
+  async function refreshActiveRun(runId: string) {
+    try {
+      const result = await competitorBenchmarkApi.getRun(SELLER_ID, runId);
+      setActiveRun(result.run);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not refresh this run.");
+    }
+  }
+
+  function toggleSku(sku: string) {
+    setSelectedSkus((current) => {
+      if (current.includes(sku)) return current.filter((s) => s !== sku);
+      if (current.length >= 20) return current;
+      return [...current, sku];
+    });
+  }
+
+  async function handleCreateRun() {
+    if (selectedSkus.length === 0) return;
+    setCreating(true);
+    setActionError(null);
+    try {
+      const result = await competitorBenchmarkApi.createRun(SELLER_ID, selectedSkus);
+      setActiveRun(result.run);
+      setSkippedSkus(result.skippedSkus);
+      runsState.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not start this benchmark run.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleConfirm(ownSku: string, asin: string, confirmed: boolean) {
+    if (!activeRun) return;
+    setActionError(null);
+    try {
+      const result = await competitorBenchmarkApi.confirmCandidates(SELLER_ID, activeRun.id, {
+        ownSku,
+        confirmedAsins: confirmed ? [asin] : [],
+        removedAsins: confirmed ? [] : [asin],
+        addedAsins: []
+      });
+      setActiveRun(result.run);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not update this candidate.");
+    }
+  }
+
+  async function handleAddAsin(ownSku: string) {
+    if (!activeRun) return;
+    const draft = (asinDrafts[ownSku] ?? "").trim().toUpperCase();
+    if (!draft) return;
+    setActionError(null);
+    try {
+      const result = await competitorBenchmarkApi.confirmCandidates(SELLER_ID, activeRun.id, {
+        ownSku,
+        confirmedAsins: [],
+        removedAsins: [],
+        addedAsins: [draft]
+      });
+      setActiveRun(result.run);
+      setAsinDrafts((current) => ({ ...current, [ownSku]: "" }));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not add this ASIN.");
+    }
+  }
+
+  async function handleCompare() {
+    if (!activeRun) return;
+    setComparing(true);
+    setActionError(null);
+    try {
+      const result = await competitorBenchmarkApi.compare(SELLER_ID, activeRun.id);
+      setActiveRun(result.run);
+      runsState.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not run the comparison.");
+    } finally {
+      setComparing(false);
+    }
+  }
+
+  async function handleRequestMockup(ownSku: string) {
+    if (!activeRun) return;
+    setActionError(null);
+    try {
+      await competitorBenchmarkApi.requestImageMockup(SELLER_ID, activeRun.id, { ownSku, imageSlot: 1 });
+      await refreshActiveRun(activeRun.id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not request this image mockup.");
+    }
+  }
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Competitor Benchmark Tool"
+        subtitle="Enter up to 20 of your own SKUs, confirm comparable competitor ASINs, and see where your real listing data differs -- price, images, bullets, title length, category sales rank."
+      />
+      <div className="brand-card-note" style={{ marginBottom: 16 }}>
+        Nothing on this page has been applied to your Amazon listing or to this app's saved listing data. Every result here is a report you can act on manually -- it only ever reads Amazon's official Catalog Items and Pricing APIs (no scraping) and writes to this tool's own tables.
+      </div>
+
+      <Card title={`1. Pick up to 20 of your own SKUs (${selectedSkus.length}/20 selected)`}>
+        {passports.loading ? <LoadingBlock /> : passports.error ? <ErrorBlock text="Could not load your product catalog." /> : ownSkuOptions.length === 0 ? (
+          <EmptyBlock text="No product passports with a SKU yet. Add products under Product Passport first." />
+        ) : (
+          <div className="card-list command-card-list">
+            {ownSkuOptions.map((product) => {
+              const sku = product.sku as string;
+              const checked = selectedSkus.includes(sku);
+              return (
+                <label key={sku} className="command-card" style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!checked && selectedSkus.length >= 20}
+                    onChange={() => toggleSku(sku)}
+                  />
+                  <span>
+                    <strong>{sku}</strong> -- {product.productName ?? "Unnamed product"} {product.asin ? <span className="brand-card-note">({product.asin})</span> : <Badge tone="watch">No ASIN</Badge>}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ marginTop: 12 }}>
+          <Button onClick={handleCreateRun} disabled={selectedSkus.length === 0 || creating}>
+            {creating ? "Starting..." : `Run benchmark on ${selectedSkus.length} SKU${selectedSkus.length === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+        {skippedSkus.length > 0 ? (
+          <div className="soft-state error-state" style={{ marginTop: 12 }}>
+            Skipped: {skippedSkus.map((s) => `${s.sku} (${s.reason})`).join("; ")}
+          </div>
+        ) : null}
+      </Card>
+
+      {actionError ? <div className="soft-state error-state">{actionError}</div> : null}
+
+      {runsState.data && runsState.data.rows.length > 0 ? (
+        <Card title="Recent runs">
+          <div className="card-list command-card-list">
+            {runsState.data.rows.map((run) => (
+              <div key={run.id} className="command-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>
+                  {run.ownSkus.join(", ")} <span className="brand-card-note">({new Date(run.createdAt).toLocaleString()})</span>
+                </span>
+                <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <StatusBadge value={run.status} />
+                  <Button className="secondary" onClick={() => refreshActiveRun(run.id)}>Open</Button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
+      {activeRun ? (
+        <>
+          <Card
+            title={`2. Review candidates and compare -- run status: ${activeRun.status}`}
+            action={
+              <Button onClick={handleCompare} disabled={comparing}>
+                {comparing ? "Comparing..." : "Run comparison"}
+              </Button>
+            }
+          >
+            {activeRun.errorMessage ? <div className="soft-state error-state">{activeRun.errorMessage}</div> : null}
+            <p className="brand-card-note">
+              Confirm the competitor ASINs that are genuinely comparable to each of your SKUs below, reject ones that aren't, or add your own ASIN. Only confirmed ASINs are pulled and compared.
+            </p>
+          </Card>
+
+          {activeRun.skus.map((group) => (
+            <Card key={group.ownSku} title={`${group.ownSku}${group.ownAsin ? ` (${group.ownAsin})` : ""}`}>
+              <div className="card-list command-card-list">
+                {group.candidates.filter((c) => c.source !== "OWN_BASELINE").map((candidate: CompetitorBenchmarkCandidate) => (
+                  <div key={candidate.id} className="command-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                      <span>
+                        <strong>{candidate.asin}</strong> -- {candidate.title ?? "(title not yet pulled)"}{" "}
+                        <Badge tone="neutral">{labelize(candidate.source)}</Badge>
+                        {candidate.confirmed === true ? <Badge tone="good">Confirmed</Badge> : candidate.confirmed === false ? <Badge tone="risk">Rejected</Badge> : <Badge tone="watch">Needs review</Badge>}
+                      </span>
+                      <span style={{ display: "flex", gap: 6 }}>
+                        <Button className="secondary" onClick={() => handleConfirm(group.ownSku, candidate.asin, true)}>Confirm</Button>
+                        <Button className="secondary" onClick={() => handleConfirm(group.ownSku, candidate.asin, false)}>Reject</Button>
+                      </span>
+                    </div>
+                    {candidate.data ? (
+                      <div className="brand-card-note" style={{ marginTop: 6 }}>
+                        {candidate.data.fetchStatus === "FETCHED" ? (
+                          <>
+                            Price: {formatMoney(candidate.data.price)} · Images: {candidate.data.imageCount ?? "—"} · Bullets: {candidate.data.bulletCount ?? "—"} · Title length: {candidate.data.titleLength ?? "—"} · Category rank: {candidate.data.categorySalesRank ?? "—"}
+                          </>
+                        ) : candidate.data.fetchStatus === "FAILED" ? (
+                          <span className="value-negative">Could not pull Amazon data for this ASIN: {candidate.data.fetchError}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <input
+                  placeholder="Add a competitor ASIN"
+                  value={asinDrafts[group.ownSku] ?? ""}
+                  onChange={(event) => setAsinDrafts((current) => ({ ...current, [group.ownSku]: event.target.value }))}
+                />
+                <Button className="secondary" onClick={() => handleAddAsin(group.ownSku)}>Add ASIN</Button>
+              </div>
+
+              {group.findings.length > 0 ? (
+                <div style={{ marginTop: 16 }}>
+                  <strong>Findings</strong>
+                  <ul>
+                    {group.findings.map((finding) => (
+                      <li key={finding.dimension}>{finding.gapSummary}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {group.imageBrief ? (
+                <div style={{ marginTop: 16 }}>
+                  <strong>Image checklist (written, Stage 1)</strong>
+                  <ul>
+                    {group.imageBrief.recommendedChanges.map((change, index) => (
+                      <li key={index}>{change}</li>
+                    ))}
+                  </ul>
+                  <Button className="secondary" onClick={() => handleRequestMockup(group.ownSku)}>Request AI image mockup (Stage 2)</Button>
+                  {group.imageMockups.length > 0 ? (
+                    <div className="soft-state" style={{ marginTop: 8 }}>
+                      {group.imageMockups[group.imageMockups.length - 1].note}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </Card>
+          ))}
+        </>
+      ) : null}
     </div>
   );
 }
