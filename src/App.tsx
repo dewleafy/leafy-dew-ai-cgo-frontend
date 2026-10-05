@@ -10968,8 +10968,23 @@ function CompetitorBenchmarkToolPage() {
             </p>
           </Card>
 
-          {activeRun.skus.map((group) => (
+          {activeRun.skus.map((group) => {
+            const ownCandidate = group.candidates.find((c) => c.source === "OWN_BASELINE");
+            return (
             <Card key={group.ownSku} title={`${group.ownSku}${group.ownAsin ? ` (${group.ownAsin})` : ""}`}>
+              {ownCandidate?.data ? (
+                <div className={ownCandidate.data.fetchStatus === "FAILED" ? "soft-state error-state" : "soft-state"} style={{ marginBottom: 12 }}>
+                  {ownCandidate.data.fetchStatus === "FETCHED" ? (
+                    <>
+                      <strong>Your own listing (real Amazon data):</strong> Price: {formatMoney(ownCandidate.data.price)} · Images: {ownCandidate.data.imageCount ?? "—"} · Bullets: {ownCandidate.data.bulletCount ?? "—"} · Title length: {ownCandidate.data.titleLength ?? "—"} · Category rank: {ownCandidate.data.categorySalesRank ?? "—"}
+                    </>
+                  ) : (
+                    <>
+                      <strong>Couldn't pull your own listing's data from Amazon this run</strong> -- every finding and recommendation below depends on this, so none could be built. Amazon's response: {ownCandidate.data.fetchError ?? "unknown error"}. If this ASIN looks right on the real Amazon listing for this SKU, it may just need more time to appear in Amazon's catalog search (common for very recently created listings) -- otherwise double-check the ASIN saved on this product's Product Passport against Seller Central.
+                    </>
+                  )}
+                </div>
+              ) : null}
               <div className="card-list command-card-list">
                 {group.candidates.filter((c) => c.source !== "OWN_BASELINE").map((candidate: CompetitorBenchmarkCandidate) => (
                   <div key={candidate.id} className="command-card">
@@ -11046,7 +11061,8 @@ function CompetitorBenchmarkToolPage() {
                 </div>
               ) : null}
             </Card>
-          ))}
+            );
+          })}
         </>
       ) : null}
     </div>
