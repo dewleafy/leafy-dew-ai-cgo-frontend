@@ -14,6 +14,7 @@ import {
   experimentsApi,
   getJson,
   launchChecklistApi,
+  listingOptimizerApi,
   launchGateApi,
   liveExecutionApi,
   maintenanceApi,
@@ -105,6 +106,9 @@ import type {
   BulkPackageContentsResult,
   ProductEconomics,
   ProductPassport,
+  ListingOptimizerAnalysis,
+  ListingOptimizerSubScores,
+  ListingOptimizerSubScoreResult,
   QaSmokeCheck,
   QaSmokeLatest,
   QaSmokeRun,
@@ -160,6 +164,7 @@ const technicalTabs = [
   "Ad Dayparting",
   "Cost Reduction Opportunities",
   "Competitor Benchmark Tool",
+  "Listing Optimizer",
   "PPC Guardrail Triage",
   "Social Content Calendar",
   "Approval Center",
@@ -1113,7 +1118,8 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action" },
     { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
     { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
-    { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Compare your SKUs against real competitor data -- report only, nothing applied to any listing" }
+    { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Compare your SKUs against real competitor data -- report only, nothing applied to any listing" },
+    { label: "Listing Optimizer", page: "Listing Optimizer", note: "Conversion Score, gaps, and priorities -- scoring only, nothing applied to any listing" }
   ] },
   { title: "Growth & Ads", items: [
     { label: "Growth Engine", page: "Growth Engine" },
@@ -1314,6 +1320,7 @@ function App() {
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "Competitor Benchmark Tool" && <CompetitorBenchmarkToolPage />}
+          {activePage === "Listing Optimizer" && <ListingOptimizerPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
           {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
@@ -11066,6 +11073,358 @@ function CompetitorBenchmarkToolPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+// Listing Optimizer: Scoring + Gap Analysis (built 2026-10-05, claude/listing-optimizer-image-studio-spec.md
+// Part A Steps 2-3). Scoring-only, start to finish: this page never writes to Amazon or to this app's live
+// listing data. It REUSES the Competitor Benchmark Tool's already-confirmed, already-fetched competitor
+// data (nothing here calls Amazon itself) and writes only to this feature's own listing_optimizer_analyses
+// table. Text generation and image generation are later phases, not built yet -- this page only scores.
+
+const LISTING_OPTIMIZER_SUBSCORE_LABELS: Record<string, string> = {
+  IS: "Image Score",
+  RS: "Review Score",
+  PS: "Price Score",
+  TS: "Title Score",
+  BS: "Bullet Score",
+  KS: "Keyword Score",
+  CSF: "Creative Strength"
+};
+
+const LISTING_OPTIMIZER_SUBSCORE_ORDER = ["IS", "RS", "PS", "TS", "BS", "KS", "CSF"];
+
+function listingOptimizerStatusBadge(status: string): ReactNode {
+  const style: Record<string, { bg: string; fg: string; label: string }> = {
+    computed: { bg: "#e6f4ea", fg: "#1e7a34", label: "Computed" },
+    partial: { bg: "#fff4e0", fg: "#9a6700", label: "Partial -- floor only" },
+    unknown: { bg: "#f1f1f3", fg: "#6b7280", label: "Unknown -- excluded" }
+  };
+  const s = style[status] ?? style.unknown;
+  return (
+    <span style={{ background: s.bg, color: s.fg, borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 600 }}>
+      {s.label}
+    </span>
+  );
+}
+
+function listingOptimizerInputSourceLabel(source: string): string {
+  if (source === "real_data") return "real data";
+  if (source === "ai_judged") return "AI-judged";
+  if (source === "manual_entry") return "manual entry";
+  return "missing";
+}
+
+function ListingOptimizerSubScoreCard({ subKey, result }: { subKey: string; result: ListingOptimizerSubScoreResult | undefined }) {
+  if (!result) {
+    return (
+      <div className="brand-card-note" style={{ padding: 12 }}>
+        <strong>{LISTING_OPTIMIZER_SUBSCORE_LABELS[subKey] ?? subKey}</strong>: not computed this run.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <strong>{LISTING_OPTIMIZER_SUBSCORE_LABELS[subKey] ?? subKey}</strong>
+        {listingOptimizerStatusBadge(result.status)}
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>
+        {result.value === null ? "--" : result.value}
+        <span style={{ fontSize: 14, fontWeight: 400, color: "#6b7280" }}> / 100</span>
+      </div>
+      <div style={{ fontSize: 13, color: "#374151" }}>
+        {Object.entries(result.inputs).map(([inputKey, input]) => (
+          <div key={inputKey} style={{ marginBottom: 2 }}>
+            <span style={{ fontFamily: "monospace" }}>{inputKey}</span>: {input.value === null ? "--" : input.value}{" "}
+            <em style={{ color: "#6b7280" }}>({listingOptimizerInputSourceLabel(input.source)})</em>
+            {input.reason ? <span style={{ color: "#6b7280" }}> -- {input.reason}</span> : null}
+          </div>
+        ))}
+      </div>
+      {result.notes.length > 0 ? (
+        <div style={{ marginTop: 6, fontSize: 12, color: "#9a6700" }}>
+          {result.notes.map((note, index) => (
+            <div key={index}>{note}</div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ListingOptimizerPage() {
+  const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
+  const ownSkuOptions = (passports.data?.rows ?? []).filter((p) => p.sku);
+
+  const [selectedSku, setSelectedSku] = useState("");
+  const historyState = useApi<{ ok: boolean; rows: ListingOptimizerAnalysis[] }>(
+    () => (selectedSku ? listingOptimizerApi.listAnalyses(SELLER_ID, selectedSku) : Promise.resolve({ ok: true, rows: [] })),
+    [selectedSku]
+  );
+
+  const [keywordsText, setKeywordsText] = useState("");
+  const [ownReviewCount, setOwnReviewCount] = useState("");
+  const [ownRating, setOwnRating] = useState("");
+  const [ownHasVideo, setOwnHasVideo] = useState<"" | "yes" | "no">("");
+  const [ownHasLifestyleImage, setOwnHasLifestyleImage] = useState<"" | "yes" | "no">("");
+  const [ownImageQualityScore, setOwnImageQualityScore] = useState("");
+  const [useAiJudging, setUseAiJudging] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [activeAnalysis, setActiveAnalysis] = useState<ListingOptimizerAnalysis | null>(null);
+  const [expandedCompetitorAsin, setExpandedCompetitorAsin] = useState<string | null>(null);
+
+  function triState(value: "" | "yes" | "no"): boolean | null {
+    if (value === "yes") return true;
+    if (value === "no") return false;
+    return null;
+  }
+
+  async function handleRunAnalysis() {
+    if (!selectedSku) return;
+    setRunning(true);
+    setActionError(null);
+    try {
+      const keywords = keywordsText
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+      const result = await listingOptimizerApi.analyze(SELLER_ID, {
+        sku: selectedSku,
+        highVolumeKeywords: keywords,
+        ownReviewCount: ownReviewCount.trim() ? Number(ownReviewCount) : null,
+        ownRating: ownRating.trim() ? Number(ownRating) : null,
+        ownHasVideo: triState(ownHasVideo),
+        ownHasLifestyleImage: triState(ownHasLifestyleImage),
+        ownImageQualityScore: ownImageQualityScore.trim() ? Number(ownImageQualityScore) : null,
+        useAiJudging
+      });
+      setActiveAnalysis(result.analysis);
+      historyState.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not run this analysis.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const displayedAnalysis = activeAnalysis ?? historyState.data?.rows?.[0] ?? null;
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Listing Optimizer"
+        subtitle="Conversion Score, ranked gaps, and priorities for one listing at a time -- scores your real data and your already-confirmed competitors, nothing invented."
+      />
+      <div className="brand-card-note" style={{ marginBottom: 16 }}>
+        Scoring only, start to finish: nothing here is ever applied to your Amazon listing. This reuses whatever you've already confirmed and compared in the Competitor Benchmark Tool -- it never calls Amazon itself. Run (or re-run) the Competitor Benchmark Tool comparison for a SKU first if you haven't yet, or if you want fresher competitor data.
+      </div>
+      <div className="brand-card-note" style={{ marginBottom: 16 }}>
+        <strong>What's real vs. what you need to answer:</strong> image count, price, bullet count, title length, and keyword presence are read from Amazon's real data. Title readability, bullet clarity, and feature/benefit are AI-judged from your real title/bullet text (toggle off below to skip AI calls). Review/rating, listing video, lifestyle-photo presence, and main-image quality have no automated source anywhere in this app yet -- answer them below if you want them scored, otherwise those sub-scores stay "partial" or "unknown" rather than guessed.
+      </div>
+
+      <Card title="Run a new analysis">
+        {passports.loading ? (
+          <LoadingBlock />
+        ) : passports.error ? (
+          <ErrorBlock text="Could not load your product catalog." />
+        ) : ownSkuOptions.length === 0 ? (
+          <EmptyBlock text="No product passports with a SKU yet. Add products under Product Passport first." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 560 }}>
+            <label>
+              SKU to score
+              <select value={selectedSku} onChange={(event) => setSelectedSku(event.target.value)} style={{ display: "block", width: "100%", marginTop: 4 }}>
+                <option value="">Select a SKU...</option>
+                {ownSkuOptions.map((product) => {
+                  const sku = product.sku as string;
+                  return (
+                    <option key={sku} value={sku}>
+                      {sku} -- {product.productName ?? "Unnamed product"}{product.asin ? ` (${product.asin})` : " (no ASIN)"}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+
+            <label>
+              High-volume keywords (comma-separated, optional -- used only for a literal text match against your real title/bullets, never Amazon search-volume or rank data)
+              <input
+                type="text"
+                value={keywordsText}
+                onChange={(event) => setKeywordsText(event.target.value)}
+                placeholder="e.g. test tube planter, wooden stand vase"
+                style={{ display: "block", width: "100%", marginTop: 4 }}
+              />
+            </label>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <label style={{ flex: 1 }}>
+                Your review count (optional -- from Seller Central, not available via API)
+                <input type="number" min={0} value={ownReviewCount} onChange={(event) => setOwnReviewCount(event.target.value)} style={{ display: "block", width: "100%", marginTop: 4 }} />
+              </label>
+              <label style={{ flex: 1 }}>
+                Your rating 1-5 (optional)
+                <input type="number" min={1} max={5} step={0.1} value={ownRating} onChange={(event) => setOwnRating(event.target.value)} style={{ display: "block", width: "100%", marginTop: 4 }} />
+              </label>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <label style={{ flex: 1 }}>
+                Does this listing have a video?
+                <select value={ownHasVideo} onChange={(event) => setOwnHasVideo(event.target.value as "" | "yes" | "no")} style={{ display: "block", width: "100%", marginTop: 4 }}>
+                  <option value="">Don't know / skip</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label style={{ flex: 1 }}>
+                Does it have a genuine lifestyle photo?
+                <select value={ownHasLifestyleImage} onChange={(event) => setOwnHasLifestyleImage(event.target.value as "" | "yes" | "no")} style={{ display: "block", width: "100%", marginTop: 4 }}>
+                  <option value="">Don't know / skip</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Main-image quality, 0-1 (optional -- 1 = pure white background, sharp, product fills 80-90% of frame)
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.1}
+                value={ownImageQualityScore}
+                onChange={(event) => setOwnImageQualityScore(event.target.value)}
+                style={{ display: "block", width: 160, marginTop: 4 }}
+              />
+            </label>
+
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={useAiJudging} onChange={(event) => setUseAiJudging(event.target.checked)} />
+              Use AI to judge title readability, bullet clarity, and feature/benefit (real AI Gateway calls, subject to your daily/monthly budget)
+            </label>
+
+            {actionError ? <ErrorBlock text={actionError} /> : null}
+
+            <Button onClick={handleRunAnalysis} disabled={!selectedSku || running}>
+              {running ? "Scoring..." : "Run analysis"}
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {displayedAnalysis ? (
+        <ListingOptimizerResultView analysis={displayedAnalysis} expandedCompetitorAsin={expandedCompetitorAsin} onToggleCompetitor={setExpandedCompetitorAsin} />
+      ) : historyState.loading ? (
+        <LoadingBlock />
+      ) : null}
+    </div>
+  );
+}
+
+function ListingOptimizerResultView({
+  analysis,
+  expandedCompetitorAsin,
+  onToggleCompetitor
+}: {
+  analysis: ListingOptimizerAnalysis;
+  expandedCompetitorAsin: string | null;
+  onToggleCompetitor: (asin: string | null) => void;
+}) {
+  return (
+    <>
+      {analysis.warnings.length > 0 ? (
+        <Card title="Warnings -- read before acting on this score">
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            {analysis.warnings.map((warning, index) => (
+              <li key={index} style={{ marginBottom: 6 }}>{warning}</li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      <Card title={`Conversion Score -- ${analysis.ownSku} (${analysis.brand})`}>
+        {analysis.status !== "DONE" ? (
+          <EmptyBlock text="This analysis could not be completed -- see warnings above." />
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 44, fontWeight: 700 }}>{analysis.overallScore ?? "--"}</div>
+              <div style={{ fontSize: 18, color: "#374151" }}>{analysis.grade ?? "Not enough data yet"}</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+              {LISTING_OPTIMIZER_SUBSCORE_ORDER.map((key) => (
+                <ListingOptimizerSubScoreCard key={key} subKey={key} result={analysis.subScores[key as keyof ListingOptimizerSubScores]} />
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+
+      {analysis.gaps.length > 0 ? (
+        <Card title="Top 5 highest-impact gaps">
+          <ol style={{ margin: 0, paddingLeft: 20 }}>
+            {analysis.gaps.map((gap) => (
+              <li key={gap.subScore} style={{ marginBottom: 10 }}>
+                <strong>{gap.label}</strong> -- up to {gap.impact} point(s).
+                <div style={{ color: "#374151", fontSize: 14 }}>{gap.actionText}</div>
+                <div style={{ color: "#6b7280", fontSize: 13 }}>
+                  You: {gap.ownValue ?? "--"} · Competitor average: {gap.competitorAverage ?? "n/a"} · Top 3 average: {gap.top3Average ?? "n/a"}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Card>
+      ) : null}
+
+      <Card title={`Confirmed competitors scored (${analysis.competitorSummary.length})`}>
+        {analysis.competitorSummary.length === 0 ? (
+          <EmptyBlock text="No confirmed-and-fetched competitors yet. Confirm competitors and run the comparison in the Competitor Benchmark Tool for this SKU, then re-run this analysis." />
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+                <th style={{ padding: 6 }}>ASIN</th>
+                <th style={{ padding: 6 }}>Title</th>
+                <th style={{ padding: 6 }}>Overall score</th>
+                <th style={{ padding: 6 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {analysis.competitorSummary.map((competitor) => (
+                <Fragment key={competitor.asin}>
+                  <tr style={{ borderBottom: "1px solid #f1f1f3" }}>
+                    <td style={{ padding: 6, fontFamily: "monospace" }}>{competitor.asin}</td>
+                    <td style={{ padding: 6 }}>{competitor.title ?? "(title not fetched)"}</td>
+                    <td style={{ padding: 6 }}>{competitor.overallScore ?? "--"}</td>
+                    <td style={{ padding: 6 }}>
+                      <Button className="secondary" onClick={() => onToggleCompetitor(expandedCompetitorAsin === competitor.asin ? null : competitor.asin)}>
+                        {expandedCompetitorAsin === competitor.asin ? "Hide detail" : "View detail"}
+                      </Button>
+                    </td>
+                  </tr>
+                  {expandedCompetitorAsin === competitor.asin ? (
+                    <tr>
+                      <td colSpan={4} style={{ padding: 12, background: "#fafafa" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                          {LISTING_OPTIMIZER_SUBSCORE_ORDER.map((key) => (
+                            <ListingOptimizerSubScoreCard key={key} subKey={key} result={competitor.subScores[key as keyof ListingOptimizerSubScores]} />
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </>
   );
 }
 
