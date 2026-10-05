@@ -39,7 +39,8 @@ import type {
   SecurityAuditEvent,
   SecurityGuardrailSummary,
   SocialContentLogRow,
-  CompetitorBenchmarkRun
+  CompetitorBenchmarkRun,
+  ListingOptimizerAnalysis
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "" : "https://api.leafydew.in");
@@ -327,6 +328,29 @@ export const competitorBenchmarkApi = {
       `/api/competitor-benchmark/runs/${encodeURIComponent(runId)}/image-mockup?sellerId=${sellerId}`,
       body
     )
+};
+
+export type ListingOptimizerAnalyzeRequest = {
+  sku: string;
+  benchmarkRunId?: string | null;
+  ownReviewCount?: number | null;
+  ownRating?: number | null;
+  ownHasVideo?: boolean | null;
+  ownHasLifestyleImage?: boolean | null;
+  ownImageQualityScore?: number | null;
+  highVolumeKeywords?: string[];
+  useAiJudging?: boolean;
+};
+
+export const listingOptimizerApi = {
+  listAnalyses: (sellerId: string, sku?: string, limit = 20) =>
+    getJson<{ ok: boolean; rows: ListingOptimizerAnalysis[] }>(
+      `/api/listing-optimizer/analyses?sellerId=${sellerId}&limit=${limit}${sku ? `&sku=${encodeURIComponent(sku)}` : ""}`
+    ),
+  getAnalysis: (sellerId: string, id: string) =>
+    getJson<{ ok: boolean; analysis: ListingOptimizerAnalysis }>(`/api/listing-optimizer/analyses/${encodeURIComponent(id)}?sellerId=${sellerId}`),
+  analyze: (sellerId: string, body: ListingOptimizerAnalyzeRequest) =>
+    postJson<{ ok: boolean; analysis: ListingOptimizerAnalysis }>(`/api/listing-optimizer/analyze?sellerId=${sellerId}`, body)
 };
 
 export type AuthStatus = { ok: true; enabled: boolean; authenticated: boolean };
