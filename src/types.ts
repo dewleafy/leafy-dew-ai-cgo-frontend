@@ -1524,3 +1524,66 @@ export type CompetitorBenchmarkRun = {
   completedAt: string | null;
   skus: CompetitorBenchmarkSkuGroup[];
 };
+
+// ---- Listing Optimizer: Scoring + Gap Analysis (Part A Steps 2-3) ----
+
+export type ListingOptimizerSubScoreKey = "IS" | "RS" | "PS" | "TS" | "BS" | "KS" | "CSF";
+export type ListingOptimizerSubScoreStatus = "computed" | "partial" | "unknown";
+export type ListingOptimizerInputSource = "real_data" | "ai_judged" | "manual_entry" | "missing";
+
+export type ListingOptimizerSubScoreInput = {
+  value: number | null;
+  source: ListingOptimizerInputSource;
+  reason: string | null;
+};
+
+export type ListingOptimizerSubScoreResult = {
+  value: number | null;
+  status: ListingOptimizerSubScoreStatus;
+  inputs: Record<string, ListingOptimizerSubScoreInput>;
+  notes: string[];
+};
+
+export type ListingOptimizerSubScores = Partial<Record<ListingOptimizerSubScoreKey, ListingOptimizerSubScoreResult>>;
+
+export type ListingOptimizerGap = {
+  subScore: ListingOptimizerSubScoreKey;
+  label: string;
+  impact: number;
+  ownValue: number | null;
+  competitorAverage: number | null;
+  top3Average: number | null;
+  actionText: string;
+};
+
+export type ListingOptimizerCompetitorSummaryEntry = {
+  asin: string;
+  title: string | null;
+  overallScore: number | null;
+  subScores: ListingOptimizerSubScores;
+};
+
+export type ListingOptimizerAnalysis = {
+  id: string;
+  sellerId: string;
+  benchmarkRunId: string | null;
+  ownSku: string;
+  ownAsin: string | null;
+  brand: string;
+  ownReviewCount: number | null;
+  ownRating: number | null;
+  ownHasVideo: boolean | null;
+  ownHasLifestyleImage: boolean | null;
+  ownImageQualityScore: number | null;
+  highVolumeKeywords: string[];
+  subScores: ListingOptimizerSubScores;
+  overallScore: number | null;
+  grade: string | null;
+  gaps: ListingOptimizerGap[];
+  competitorSummary: ListingOptimizerCompetitorSummaryEntry[];
+  warnings: string[];
+  status: string;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
