@@ -11216,10 +11216,10 @@ function ListingOptimizerPage() {
     <div className="page">
       <PageHeader
         title="Listing Optimizer"
-        subtitle="Conversion Score, ranked gaps, and priorities for one listing at a time -- scores your real data and your already-confirmed competitors, nothing invented."
+        subtitle="Conversion Score, ranked gaps, and priorities for one listing at a time -- scores your real data against real competitors, nothing invented."
       />
       <div className="brand-card-note" style={{ marginBottom: 16 }}>
-        Scoring only, start to finish: nothing here is ever applied to your Amazon listing. This reuses whatever you've already confirmed and compared in the Competitor Benchmark Tool -- it never calls Amazon itself. Run (or re-run) the Competitor Benchmark Tool comparison for a SKU first if you haven't yet, or if you want fresher competitor data.
+        Scoring only, start to finish: nothing here is ever applied to your Amazon listing. One click is all this needs -- if this SKU has no competitor data yet, "Run analysis" finds and confirms comparable competitors and pulls their real Amazon data automatically before scoring, start to finish. (The Competitor Benchmark Tool page still exists if you ever want to manually review or reject a specific competitor ASIN, but you don't need to visit it first.)
       </div>
       <div className="brand-card-note" style={{ marginBottom: 16 }}>
         <strong>What's real vs. what you need to answer:</strong> image count, price, bullet count, title length, and keyword presence are read from Amazon's real data. Title readability, bullet clarity, and feature/benefit are AI-judged from your real title/bullet text (toggle off below to skip AI calls). Review/rating, listing video, lifestyle-photo presence, and main-image quality have no automated source anywhere in this app yet -- answer them below if you want them scored, otherwise those sub-scores stay "partial" or "unknown" rather than guessed.
@@ -11383,7 +11383,7 @@ function ListingOptimizerResultView({
 
       <Card title={`Confirmed competitors scored (${analysis.competitorSummary.length})`}>
         {analysis.competitorSummary.length === 0 ? (
-          <EmptyBlock text="No confirmed-and-fetched competitors yet. Confirm competitors and run the comparison in the Competitor Benchmark Tool for this SKU, then re-run this analysis." />
+          <EmptyBlock text="No comparable competitors were found for this SKU (Amazon's catalog search returned nothing usable, or every suggested match was rejected in the Competitor Benchmark Tool). You can add a competitor ASIN manually there, then re-run this analysis." />
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
