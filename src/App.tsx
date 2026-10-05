@@ -10964,7 +10964,7 @@ function CompetitorBenchmarkToolPage() {
           >
             {activeRun.errorMessage ? <div className="soft-state error-state">{activeRun.errorMessage}</div> : null}
             <p className="brand-card-note">
-              Confirm the competitor ASINs that are genuinely comparable to each of your SKUs below, reject ones that aren't, or add your own ASIN. Only confirmed ASINs are pulled and compared.
+              Auto-discovered competitors below are included by default -- click Reject on any that aren't genuinely comparable before running the comparison, or add your own ASIN. Only confirmed (not rejected) ASINs are pulled and compared, so if you reject everything for a SKU, re-confirm or add at least one before comparing.
             </p>
           </Card>
 
