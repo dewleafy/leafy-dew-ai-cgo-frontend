@@ -11222,7 +11222,7 @@ function ListingOptimizerPage() {
         Scoring only, start to finish: nothing here is ever applied to your Amazon listing. One click is all this needs -- if this SKU has no competitor data yet, "Run analysis" finds and confirms comparable competitors and pulls their real Amazon data automatically before scoring, start to finish. (The Competitor Benchmark Tool page still exists if you ever want to manually review or reject a specific competitor ASIN, but you don't need to visit it first.)
       </div>
       <div className="brand-card-note" style={{ marginBottom: 16 }}>
-        <strong>What's real vs. what you need to answer:</strong> image count, price, bullet count, title length, and keyword presence are read from Amazon's real data. Title readability, bullet clarity, and feature/benefit are AI-judged from your real title/bullet text (toggle off below to skip AI calls). Review/rating, listing video, lifestyle-photo presence, and main-image quality have no automated source anywhere in this app yet -- answer them below if you want them scored, otherwise those sub-scores stay "partial" or "unknown" rather than guessed.
+        <strong>What's real vs. what you need to answer:</strong> image count, price, bullet count, title length, and keyword presence are read from Amazon's real data. Title readability, bullet clarity, and feature/benefit are AI-judged from your real title/bullet text (toggle off below to skip AI calls). Lifestyle-photo presence and main-image quality are now judged automatically too -- an AI vision call looks at this SKU's real photos unless you answer them manually below. If you don't type a keyword list, one is auto-derived from this ASIN's own real Amazon Ads search terms that drove an order in the last 30 days (when that data exists). Review/rating and listing video still have no automated source anywhere in this app -- answer them below if you want them scored, otherwise those sub-scores stay "partial" or "unknown" rather than guessed.
       </div>
 
       <Card title="Run a new analysis">
@@ -11250,7 +11250,7 @@ function ListingOptimizerPage() {
             </label>
 
             <label>
-              High-volume keywords (comma-separated, optional -- used only for a literal text match against your real title/bullets, never Amazon search-volume or rank data)
+              High-volume keywords (comma-separated, optional -- a literal text match against your real title/bullets, never Amazon search-volume or rank data. Leave blank to auto-use real converting search terms from this ASIN's own Amazon Ads data instead, when available)
               <input
                 type="text"
                 value={keywordsText}
@@ -11281,7 +11281,7 @@ function ListingOptimizerPage() {
                 </select>
               </label>
               <label style={{ flex: 1 }}>
-                Does it have a genuine lifestyle photo?
+                Does it have a genuine lifestyle photo? (leave on "skip" to let AI vision judge your real photos automatically)
                 <select value={ownHasLifestyleImage} onChange={(event) => setOwnHasLifestyleImage(event.target.value as "" | "yes" | "no")} style={{ display: "block", width: "100%", marginTop: 4 }}>
                   <option value="">Don't know / skip</option>
                   <option value="yes">Yes</option>
@@ -11291,7 +11291,7 @@ function ListingOptimizerPage() {
             </div>
 
             <label>
-              Main-image quality, 0-1 (optional -- 1 = pure white background, sharp, product fills 80-90% of frame)
+              Main-image quality, 0-1 (optional -- 1 = pure white background, sharp, product fills 80-90% of frame. Leave blank to let AI vision judge your real main image automatically)
               <input
                 type="number"
                 min={0}
