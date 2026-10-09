@@ -1451,6 +1451,19 @@ export type CompetitorBenchmarkFetchStatus = "PENDING" | "FETCHED" | "FAILED";
 export type CompetitorBenchmarkDimension = "PRICE" | "IMAGE_COUNT" | "BULLET_COUNT" | "TITLE_LENGTH" | "CATEGORY_SALES_RANK";
 export type CompetitorBenchmarkImageMockupStatus = "NOT_REQUESTED" | "NOT_CONFIGURED" | "QUEUED" | "GENERATED" | "FAILED";
 
+export type CompetitorBenchmarkImage = {
+  link: string;
+  width: number | null;
+  height: number | null;
+  variant: string;
+};
+
+export type CompetitorBenchmarkDimensionsCm = {
+  width: number | null;
+  height: number | null;
+  length: number | null;
+};
+
 export type CompetitorBenchmarkData = {
   asin: string;
   price: number | null;
@@ -1465,6 +1478,12 @@ export type CompetitorBenchmarkData = {
   fetchStatus: CompetitorBenchmarkFetchStatus;
   fetchError: string | null;
   fetchedAt: string | null;
+  brand: string | null;
+  description: string | null;
+  bulletText: string[];
+  weightGrams: number | null;
+  dimensionsCm: CompetitorBenchmarkDimensionsCm | null;
+  images: CompetitorBenchmarkImage[];
 };
 
 export type CompetitorBenchmarkCandidate = {
