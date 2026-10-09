@@ -11168,7 +11168,6 @@ function ListingOptimizerPage() {
   const [ownReviewCount, setOwnReviewCount] = useState("");
   const [ownRating, setOwnRating] = useState("");
   const [ownHasVideo, setOwnHasVideo] = useState<"" | "yes" | "no">("");
-  const [ownHasLifestyleImage, setOwnHasLifestyleImage] = useState<"" | "yes" | "no">("");
   const [ownImageQualityScore, setOwnImageQualityScore] = useState("");
   const [useAiJudging, setUseAiJudging] = useState(true);
   const [running, setRunning] = useState(false);
@@ -11197,7 +11196,7 @@ function ListingOptimizerPage() {
         ownReviewCount: ownReviewCount.trim() ? Number(ownReviewCount) : null,
         ownRating: ownRating.trim() ? Number(ownRating) : null,
         ownHasVideo: triState(ownHasVideo),
-        ownHasLifestyleImage: triState(ownHasLifestyleImage),
+        ownHasLifestyleImage: null,
         ownImageQualityScore: ownImageQualityScore.trim() ? Number(ownImageQualityScore) : null,
         useAiJudging
       });
@@ -11218,13 +11217,6 @@ function ListingOptimizerPage() {
         title="Listing Optimizer"
         subtitle="Conversion Score, ranked gaps, and priorities for one listing at a time -- scores your real data against real competitors, nothing invented."
       />
-      <div className="brand-card-note" style={{ marginBottom: 16 }}>
-        Scoring only, start to finish: nothing here is ever applied to your Amazon listing. One click is all this needs -- if this SKU has no competitor data yet, "Run analysis" finds and confirms comparable competitors and pulls their real Amazon data automatically before scoring, start to finish. (The Competitor Benchmark Tool page still exists if you ever want to manually review or reject a specific competitor ASIN, but you don't need to visit it first.)
-      </div>
-      <div className="brand-card-note" style={{ marginBottom: 16 }}>
-        <strong>What's real vs. what you need to answer:</strong> image count, price, bullet count, title length, and keyword presence are read from Amazon's real data. Title readability, bullet clarity, and feature/benefit are AI-judged from your real title/bullet text (toggle off below to skip AI calls). Lifestyle-photo presence and main-image quality are now judged automatically too -- an AI vision call looks at this SKU's real photos unless you answer them manually below. If you don't type a keyword list, one is auto-derived from this ASIN's own real Amazon Ads search terms that drove an order in the last 30 days (when that data exists). Review/rating and listing video still have no automated source anywhere in this app -- answer them below if you want them scored, otherwise those sub-scores stay "partial" or "unknown" rather than guessed.
-      </div>
-
       <Card title="Run a new analysis">
         {passports.loading ? (
           <LoadingBlock />
@@ -11271,24 +11263,14 @@ function ListingOptimizerPage() {
               </label>
             </div>
 
-            <div style={{ display: "flex", gap: 10 }}>
-              <label style={{ flex: 1 }}>
-                Does this listing have a video?
-                <select value={ownHasVideo} onChange={(event) => setOwnHasVideo(event.target.value as "" | "yes" | "no")} style={{ display: "block", width: "100%", marginTop: 4 }}>
-                  <option value="">Don't know / skip</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </select>
-              </label>
-              <label style={{ flex: 1 }}>
-                Does it have a genuine lifestyle photo? (leave on "skip" to let AI vision judge your real photos automatically)
-                <select value={ownHasLifestyleImage} onChange={(event) => setOwnHasLifestyleImage(event.target.value as "" | "yes" | "no")} style={{ display: "block", width: "100%", marginTop: 4 }}>
-                  <option value="">Don't know / skip</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </select>
-              </label>
-            </div>
+            <label style={{ maxWidth: 280 }}>
+              Does this listing have a video?
+              <select value={ownHasVideo} onChange={(event) => setOwnHasVideo(event.target.value as "" | "yes" | "no")} style={{ display: "block", width: "100%", marginTop: 4 }}>
+                <option value="">Don't know / skip</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </label>
 
             <label>
               Main-image quality, 0-1 (optional -- 1 = pure white background, sharp, product fills 80-90% of frame. Leave blank to let AI vision judge your real main image automatically)
@@ -11337,19 +11319,9 @@ function ListingOptimizerResultView({
 }) {
   return (
     <>
-      {analysis.warnings.length > 0 ? (
-        <Card title="Warnings -- read before acting on this score">
-          <ul style={{ margin: 0, paddingLeft: 20 }}>
-            {analysis.warnings.map((warning, index) => (
-              <li key={index} style={{ marginBottom: 6 }}>{warning}</li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
-
       <Card title={`Conversion Score -- ${analysis.ownSku} (${analysis.brand})`}>
         {analysis.status !== "DONE" ? (
-          <EmptyBlock text="This analysis could not be completed -- see warnings above." />
+          <EmptyBlock text="This analysis could not be completed." />
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
