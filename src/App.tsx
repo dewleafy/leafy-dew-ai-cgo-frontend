@@ -10873,13 +10873,17 @@ function formatWeightGrams(grams: number | null): string | null {
   return `${Math.round(grams)} g`;
 }
 
-// Richer per-listing display (added 2026-10-09): brand/weight/dimensions/description/bullets/images,
-// all read straight from SafeCompetitorBenchmarkData -- no new Amazon calls, same real data already
-// fetched for the existing price/image-count/bullet-count/title-length fields above.
-function CompetitorBenchmarkRichFields({ data }: { data: CompetitorBenchmarkData }) {
+// Richer per-listing display (added 2026-10-09, trimmed 2026-10-09 per founder feedback: the full
+// description/bullet TEXT was too much to read per-candidate -- show only the extracted keyword
+// phrases from that text instead, not the raw copy). brand/weight/dimensions/images are still read
+// straight from SafeCompetitorBenchmarkData -- no new Amazon calls, same real data already fetched
+// for the existing price/image-count/bullet-count/title-length fields above.
+function CompetitorBenchmarkRichFields({ data, corpusText }: { data: CompetitorBenchmarkData; corpusText: string }) {
   const dims = formatDimensionsCm(data.dimensionsCm);
   const weight = formatWeightGrams(data.weightGrams);
-  const hasDetails = Boolean(data.brand) || Boolean(dims) || Boolean(weight) || Boolean(data.description) || data.bulletText.length > 0 || data.images.length > 0;
+  const listingText = [data.description ?? "", ...data.bulletText].join(" ").trim();
+  const keywords = listingText ? extractKeywordPhrases(listingText, corpusText || listingText, 8) : [];
+  const hasDetails = Boolean(data.brand) || Boolean(dims) || Boolean(weight) || keywords.length > 0 || data.images.length > 0;
   if (!hasDetails) return null;
   return (
     <div style={{ marginTop: 6 }}>
@@ -10903,13 +10907,17 @@ function CompetitorBenchmarkRichFields({ data }: { data: CompetitorBenchmarkData
           {dims ? <>Dimensions: {dims}</> : null}
         </div>
       ) : null}
-      {data.description ? <div className="brand-card-note" style={{ marginTop: 4 }}>{data.description}</div> : null}
-      {data.bulletText.length > 0 ? (
-        <ul style={{ marginTop: 4, marginBottom: 0 }}>
-          {data.bulletText.map((bullet: string, index: number) => (
-            <li key={index} style={{ fontSize: 13 }}>{bullet}</li>
+      {keywords.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+          {keywords.map((keyword) => (
+            <span
+              key={keyword}
+              style={{ background: "#f1f1f3", color: "#374151", borderRadius: 4, padding: "2px 6px", fontSize: 12 }}
+            >
+              {keyword}
+            </span>
           ))}
-        </ul>
+        </div>
       ) : null}
     </div>
   );
@@ -11190,6 +11198,12 @@ function CompetitorBenchmarkToolPage() {
 
           {activeRun.skus.map((group) => {
             const ownCandidate = group.candidates.find((c) => c.source === "OWN_BASELINE");
+            const fetchedListings = group.candidates.filter(
+              (c): c is CompetitorBenchmarkCandidate & { data: CompetitorBenchmarkData } => c.data?.fetchStatus === "FETCHED"
+            );
+            const groupCorpusText = fetchedListings
+              .map((c) => [c.title ?? "", ...c.data.bulletText, c.data.description ?? ""].join(" "))
+              .join(" ");
             return (
             <Card key={group.ownSku} title={`${group.ownSku}${group.ownAsin ? ` (${group.ownAsin})` : ""}`}>
               {ownCandidate?.data ? (
@@ -11197,7 +11211,7 @@ function CompetitorBenchmarkToolPage() {
                   {ownCandidate.data.fetchStatus === "FETCHED" ? (
                     <>
                       <strong>Your own listing (real Amazon data):</strong> Price: {formatMoney(ownCandidate.data.price)} · Images: {ownCandidate.data.imageCount ?? "—"} · Bullets: {ownCandidate.data.bulletCount ?? "—"} · Title length: {ownCandidate.data.titleLength ?? "—"} · Category rank: {ownCandidate.data.categorySalesRank ?? "—"}
-                      <CompetitorBenchmarkRichFields data={ownCandidate.data} />
+                      <CompetitorBenchmarkRichFields data={ownCandidate.data} corpusText={groupCorpusText} />
                     </>
                   ) : (
                     <>
@@ -11225,7 +11239,7 @@ function CompetitorBenchmarkToolPage() {
                         {candidate.data.fetchStatus === "FETCHED" ? (
                           <>
                             Price: {formatMoney(candidate.data.price)} · Images: {candidate.data.imageCount ?? "—"} · Bullets: {candidate.data.bulletCount ?? "—"} · Title length: {candidate.data.titleLength ?? "—"} · Category rank: {candidate.data.categorySalesRank ?? "—"}
-                            <CompetitorBenchmarkRichFields data={candidate.data} />
+                            <CompetitorBenchmarkRichFields data={candidate.data} corpusText={groupCorpusText} />
                           </>
                         ) : candidate.data.fetchStatus === "FAILED" ? (
                           <span className="value-negative">Could not pull Amazon data for this ASIN: {candidate.data.fetchError}</span>
@@ -11284,14 +11298,8 @@ function CompetitorBenchmarkToolPage() {
               ) : null}
 
               {(() => {
-                const fetchedListings = group.candidates.filter(
-                  (c): c is CompetitorBenchmarkCandidate & { data: CompetitorBenchmarkData } => c.data?.fetchStatus === "FETCHED"
-                );
                 if (fetchedListings.length === 0) return null;
-                const corpusText = fetchedListings
-                  .map((c) => [c.title ?? "", ...c.data.bulletText, c.data.description ?? ""].join(" "))
-                  .join(" ");
-                const phrases = extractKeywordPhrases(corpusText, corpusText, 20);
+                const phrases = extractKeywordPhrases(groupCorpusText, groupCorpusText, 20);
                 if (phrases.length === 0) return null;
                 const selected = keywordSelections[group.ownSku] ?? new Set<string>();
                 return (
