@@ -55,6 +55,9 @@ import type {
   AlertSummary,
   AplusContentReport,
   CompetitorBenchmarkCandidate,
+  CompetitorBenchmarkData,
+  CompetitorBenchmarkDimensionsCm,
+  CompetitorBenchmarkImage,
   CompetitorBenchmarkRun,
   CostCompletionQueueItem,
   CostReductionOpportunitiesReport,
@@ -10742,6 +10745,176 @@ function CostReductionOpportunitiesPage() {
   );
 }
 
+// Keyword phrase extraction (added 2026-10-09). Literal n-gram repetition scoring across a
+// listing's own real title+bullets+description -- never AI-guessed, never Amazon search-volume
+// or rank data (SP-API exposes neither of those to any seller for any ASIN). Counts how often a
+// 2-3 word phrase repeats across the combined corpus and ranks longer, more-repeated phrases
+// highest; single words are included only as a fallback for anything not already covered by a
+// longer phrase. This is a client-side port of the same method already shown to and approved by
+// the founder as a standalone mockup -- same stopword list, same scoring, same dedup rule.
+const PHRASE_STOPWORDS = new Set(
+  `a an the and or for with in on of to from is are was were be been being this that these those
+your you it its it's as at by not no yes can will would should could may might must have has had do does did
+up down out over under again further then once here there when where why how all any both each few more most
+other some such only own same so than too very just don dont won cant without within between into during before
+after above below between through during including per which who whom while if their our ours mine his her hers
+them they we i me my us pack set made use used using suitable ideal perfect great designed provide provides keeps
+keep easy helps help making make makes ensures ensure various every also while every`
+    .split(/\s+/)
+    .filter(Boolean)
+);
+
+function competitorPhraseContentRuns(text: string): string[][] {
+  const chunks = (text ?? "").split(/[.,;:!?()[\]/|&<>]+/);
+  const runs: string[][] = [];
+  for (const chunk of chunks) {
+    const words = chunk.match(/[A-Za-z][A-Za-z-]*/g) ?? [];
+    let current: string[] = [];
+    for (const word of words) {
+      const lower = word.toLowerCase();
+      if (PHRASE_STOPWORDS.has(lower) || lower.length < 3) {
+        if (current.length) {
+          runs.push(current);
+          current = [];
+        }
+      } else {
+        current.push(word);
+      }
+    }
+    if (current.length) runs.push(current);
+  }
+  return runs;
+}
+
+function competitorPhraseNgrams(runs: string[][], n: number): string[][] {
+  const grams: string[][] = [];
+  for (const run of runs) {
+    for (let i = 0; i <= run.length - n; i++) grams.push(run.slice(i, i + n));
+  }
+  return grams;
+}
+
+function extractKeywordPhrases(fieldText: string, corpusText: string, topN = 10): string[] {
+  const fieldRuns = competitorPhraseContentRuns(fieldText);
+  const corpusRuns = competitorPhraseContentRuns(corpusText);
+
+  const corpusCounts = new Map<string, number>();
+  for (const n of [3, 2]) {
+    for (const gram of competitorPhraseNgrams(corpusRuns, n)) {
+      const key = gram.map((w) => w.toLowerCase()).join(" ");
+      corpusCounts.set(key, (corpusCounts.get(key) ?? 0) + 1);
+    }
+  }
+
+  const fieldUnigramCounts = new Map<string, number>();
+  for (const run of fieldRuns) {
+    for (const word of run) {
+      const lower = word.toLowerCase();
+      fieldUnigramCounts.set(lower, (fieldUnigramCounts.get(lower) ?? 0) + 1);
+    }
+  }
+
+  type Candidate = { key: string; display: string; score: number; length: number };
+  const candidates = new Map<string, Candidate>();
+
+  for (const n of [3, 2]) {
+    for (const gram of competitorPhraseNgrams(fieldRuns, n)) {
+      const key = gram.map((w) => w.toLowerCase()).join(" ");
+      const count = corpusCounts.get(key) ?? 0;
+      if (count < 2) continue;
+      const score = count * n;
+      const existing = candidates.get(key);
+      if (!existing || score > existing.score) {
+        candidates.set(key, { key, display: gram.join(" "), score, length: n });
+      }
+    }
+  }
+
+  for (const [word, count] of fieldUnigramCounts) {
+    if (!candidates.has(word)) candidates.set(word, { key: word, display: word, score: count, length: 1 });
+  }
+
+  const ranked = Array.from(candidates.values()).sort((a, b) => b.score - a.score || b.length - a.length);
+
+  const out: string[] = [];
+  const outKeys: string[][] = [];
+  for (const candidate of ranked) {
+    const keyWords = candidate.key.split(" ");
+    let isDuplicate = false;
+    for (const kept of outKeys) {
+      if (keyWords.length >= kept.length) continue;
+      for (let i = 0; i <= kept.length - keyWords.length; i++) {
+        if (kept.slice(i, i + keyWords.length).join(" ") === keyWords.join(" ")) {
+          isDuplicate = true;
+          break;
+        }
+      }
+      if (isDuplicate) break;
+    }
+    if (isDuplicate) continue;
+    out.push(candidate.display);
+    outKeys.push(keyWords);
+    if (out.length >= topN) break;
+  }
+  return out;
+}
+
+function formatDimensionsCm(dimensions: CompetitorBenchmarkDimensionsCm | null): string | null {
+  if (!dimensions) return null;
+  const { length, width, height } = dimensions;
+  if (length === null && width === null && height === null) return null;
+  const parts = [length, width, height].map((v) => (v === null ? "?" : v));
+  return `${parts.join(" x ")} cm (L x W x H)`;
+}
+
+function formatWeightGrams(grams: number | null): string | null {
+  if (grams === null) return null;
+  if (grams >= 1000) return `${(grams / 1000).toFixed(2)} kg`;
+  return `${Math.round(grams)} g`;
+}
+
+// Richer per-listing display (added 2026-10-09): brand/weight/dimensions/description/bullets/images,
+// all read straight from SafeCompetitorBenchmarkData -- no new Amazon calls, same real data already
+// fetched for the existing price/image-count/bullet-count/title-length fields above.
+function CompetitorBenchmarkRichFields({ data }: { data: CompetitorBenchmarkData }) {
+  const dims = formatDimensionsCm(data.dimensionsCm);
+  const weight = formatWeightGrams(data.weightGrams);
+  const hasDetails = Boolean(data.brand) || Boolean(dims) || Boolean(weight) || Boolean(data.description) || data.bulletText.length > 0 || data.images.length > 0;
+  if (!hasDetails) return null;
+  return (
+    <div style={{ marginTop: 6 }}>
+      {data.images.length > 0 ? (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+          {data.images.slice(0, 6).map((image: CompetitorBenchmarkImage) => (
+            <img
+              key={image.variant}
+              src={image.link}
+              alt={image.variant}
+              title={image.variant}
+              style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }}
+            />
+          ))}
+        </div>
+      ) : null}
+      {data.brand || weight || dims ? (
+        <div className="brand-card-note">
+          {data.brand ? <>Brand: {data.brand}{weight || dims ? " · " : ""}</> : null}
+          {weight ? <>Weight: {weight}{dims ? " · " : ""}</> : null}
+          {dims ? <>Dimensions: {dims}</> : null}
+        </div>
+      ) : null}
+      {data.description ? <div className="brand-card-note" style={{ marginTop: 4 }}>{data.description}</div> : null}
+      {data.bulletText.length > 0 ? (
+        <ul style={{ marginTop: 4, marginBottom: 0 }}>
+          {data.bulletText.map((bullet: string, index: number) => (
+            <li key={index} style={{ fontSize: 13 }}>{bullet}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 // Competitor Benchmark Tool (built 2026-10-04, claude/competitor-benchmark-tool-spec.md).
 // Report-only, start to finish: every call this page makes either reads data or writes to
 // this tool's own competitor_benchmark_* tables. None of it ever reaches Amazon's write APIs
@@ -10758,6 +10931,46 @@ function CompetitorBenchmarkToolPage() {
   const [comparing, setComparing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [asinDrafts, setAsinDrafts] = useState<Record<string, string>>({});
+
+  // Keyword selection (added 2026-10-09): the founder marks which extracted phrases to keep, then
+  // saves them onto the own SKU's Product Passport seoKeywords field via the existing passport
+  // update endpoint -- no new backend endpoint needed. The already-built Listing Drafts page
+  // ("Generate Listing Drafts") already weaves seoKeywords into its AI title/bullets/description
+  // prompts, so saving here is the whole handoff.
+  const [keywordSelections, setKeywordSelections] = useState<Record<string, Set<string>>>({});
+  const [savingKeywordsForSku, setSavingKeywordsForSku] = useState<string | null>(null);
+  const [keywordSaveMessage, setKeywordSaveMessage] = useState<Record<string, string>>({});
+
+  function toggleKeywordSelection(ownSku: string, phrase: string) {
+    setKeywordSelections((current) => {
+      const existing = new Set(current[ownSku] ?? []);
+      if (existing.has(phrase)) existing.delete(phrase);
+      else existing.add(phrase);
+      return { ...current, [ownSku]: existing };
+    });
+  }
+
+  async function handleSaveSelectedKeywords(ownSku: string) {
+    const selected = Array.from(keywordSelections[ownSku] ?? []);
+    const passport = ownSkuOptions.find((p) => p.sku === ownSku);
+    if (!passport || selected.length === 0) return;
+    setSavingKeywordsForSku(ownSku);
+    setKeywordSaveMessage((current) => ({ ...current, [ownSku]: "" }));
+    try {
+      await putJson(`/api/product-passports/${passport.id}`, { seoKeywords: selected });
+      setKeywordSaveMessage((current) => ({
+        ...current,
+        [ownSku]: `Saved ${selected.length} keyword${selected.length === 1 ? "" : "s"} to this SKU's SEO keywords. Go to Listing Drafts -> Generate Listing Drafts to get an AI title/bullets/description that weaves these in.`
+      }));
+    } catch (error) {
+      setKeywordSaveMessage((current) => ({
+        ...current,
+        [ownSku]: error instanceof Error ? `Could not save: ${error.message}` : "Could not save these keywords."
+      }));
+    } finally {
+      setSavingKeywordsForSku(null);
+    }
+  }
 
   const ownSkuOptions = (passports.data?.rows ?? []).filter((p) => p.sku);
 
@@ -10984,6 +11197,7 @@ function CompetitorBenchmarkToolPage() {
                   {ownCandidate.data.fetchStatus === "FETCHED" ? (
                     <>
                       <strong>Your own listing (real Amazon data):</strong> Price: {formatMoney(ownCandidate.data.price)} · Images: {ownCandidate.data.imageCount ?? "—"} · Bullets: {ownCandidate.data.bulletCount ?? "—"} · Title length: {ownCandidate.data.titleLength ?? "—"} · Category rank: {ownCandidate.data.categorySalesRank ?? "—"}
+                      <CompetitorBenchmarkRichFields data={ownCandidate.data} />
                     </>
                   ) : (
                     <>
@@ -11011,6 +11225,7 @@ function CompetitorBenchmarkToolPage() {
                         {candidate.data.fetchStatus === "FETCHED" ? (
                           <>
                             Price: {formatMoney(candidate.data.price)} · Images: {candidate.data.imageCount ?? "—"} · Bullets: {candidate.data.bulletCount ?? "—"} · Title length: {candidate.data.titleLength ?? "—"} · Category rank: {candidate.data.categorySalesRank ?? "—"}
+                            <CompetitorBenchmarkRichFields data={candidate.data} />
                           </>
                         ) : candidate.data.fetchStatus === "FAILED" ? (
                           <span className="value-negative">Could not pull Amazon data for this ASIN: {candidate.data.fetchError}</span>
@@ -11067,6 +11282,53 @@ function CompetitorBenchmarkToolPage() {
                   </ul>
                 </div>
               ) : null}
+
+              {(() => {
+                const fetchedListings = group.candidates.filter(
+                  (c): c is CompetitorBenchmarkCandidate & { data: CompetitorBenchmarkData } => c.data?.fetchStatus === "FETCHED"
+                );
+                if (fetchedListings.length === 0) return null;
+                const corpusText = fetchedListings
+                  .map((c) => [c.title ?? "", ...c.data.bulletText, c.data.description ?? ""].join(" "))
+                  .join(" ");
+                const phrases = extractKeywordPhrases(corpusText, corpusText, 20);
+                if (phrases.length === 0) return null;
+                const selected = keywordSelections[group.ownSku] ?? new Set<string>();
+                return (
+                  <div style={{ marginTop: 16 }}>
+                    <strong>Keyword phrases (pulled from the real title/bullet/description text above -- not search-volume data)</strong>
+                    <p className="brand-card-note">
+                      Mark the phrases worth going after, then save -- they're written to this SKU's SEO keywords. From there, go to Listing Drafts -&gt; Generate Listing Drafts to get an AI title/bullets/description that weaves these in.
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                      {phrases.map((phrase) => (
+                        <label
+                          key={phrase}
+                          style={{ display: "flex", alignItems: "center", gap: 4, border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 8px" }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.has(phrase)}
+                            onChange={() => toggleKeywordSelection(group.ownSku, phrase)}
+                          />
+                          {phrase}
+                        </label>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <Button
+                        onClick={() => handleSaveSelectedKeywords(group.ownSku)}
+                        disabled={selected.size === 0 || savingKeywordsForSku === group.ownSku}
+                      >
+                        {savingKeywordsForSku === group.ownSku ? "Saving..." : `Save ${selected.size} selected keyword${selected.size === 1 ? "" : "s"}`}
+                      </Button>
+                    </div>
+                    {keywordSaveMessage[group.ownSku] ? (
+                      <div className="soft-state" style={{ marginTop: 8 }}>{keywordSaveMessage[group.ownSku]}</div>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </Card>
             );
           })}
