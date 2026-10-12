@@ -1,6 +1,6 @@
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, FormEvent, ReactNode, RefObject } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import "./App.css";
 import "./theme-pro.css";
 import {
@@ -55,6 +55,7 @@ import type {
   AlertSummary,
   AplusContentReport,
   CompetitorBenchmarkCandidate,
+  CompetitorBenchmarkCandidateSource,
   CompetitorBenchmarkData,
   CompetitorBenchmarkDimensionsCm,
   CompetitorBenchmarkImage,
@@ -10873,23 +10874,134 @@ function formatWeightGrams(grams: number | null): string | null {
   return `${Math.round(grams)} g`;
 }
 
-// Richer per-listing display (added 2026-10-09, trimmed 2026-10-09 per founder feedback: the full
-// description/bullet TEXT was too much to read per-candidate -- show only the extracted keyword
-// phrases from that text instead, not the raw copy). brand/weight/dimensions/images are still read
-// straight from SafeCompetitorBenchmarkData -- no new Amazon calls, same real data already fetched
-// for the existing price/image-count/bullet-count/title-length fields above.
-function CompetitorBenchmarkRichFields({ data, corpusText }: { data: CompetitorBenchmarkData; corpusText: string }) {
+// Card-grid listing display (redesigned 2026-10-12 to match "mockup v3": a full card per
+// candidate -- own listing and every competitor render through this SAME component, with
+// isOwn only changing the badge/background, so the own card and competitor cards stay visually
+// comparable side by side. Keyword phrases are now split into three independently-extracted
+// categories (title / bullet points / description) instead of one merged list, and each card
+// also shows the real, non-AI Listing Score and the real profit-at-this-price (both computed on
+// the backend from already-fetched/already-saved data -- see competitor-benchmark.service.ts).
+function CompetitorBenchmarkCard({
+  asin,
+  title,
+  source,
+  confirmed,
+  isOwn,
+  data,
+  corpusText,
+  onConfirm
+}: {
+  asin: string;
+  title: string | null;
+  source: CompetitorBenchmarkCandidateSource;
+  confirmed: boolean | null;
+  isOwn: boolean;
+  data: CompetitorBenchmarkData | null;
+  corpusText: string;
+  onConfirm?: (confirmed: boolean) => void;
+}) {
+  const cardStyle: CSSProperties = {
+    border: isOwn ? "1px solid #c7d2fe" : "1px solid #e5e7eb",
+    borderRadius: 10,
+    padding: 14,
+    background: isOwn ? "#f5f6ff" : "#fff",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10
+  };
+
+  const header = (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+      <div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <strong>{asin}</strong>
+          {isOwn ? <Badge tone="good">YOU</Badge> : <Badge tone="neutral">{labelize(source)}</Badge>}
+          {!isOwn && confirmed === true ? <Badge tone="good">Confirmed</Badge> : null}
+          {!isOwn && confirmed === false ? <Badge tone="risk">Rejected</Badge> : null}
+          {!isOwn && confirmed === null ? <Badge tone="watch">Needs review</Badge> : null}
+        </div>
+        <div className="brand-card-note" style={{ marginTop: 2 }}>{title ?? "(title not yet pulled)"}</div>
+      </div>
+      {onConfirm ? (
+        <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <Button className="secondary" onClick={() => onConfirm(true)}>Confirm</Button>
+          <Button className="secondary" onClick={() => onConfirm(false)}>Reject</Button>
+        </span>
+      ) : null}
+    </div>
+  );
+
+  if (!data) {
+    return <div style={cardStyle}>{header}</div>;
+  }
+
+  if (data.fetchStatus === "FAILED") {
+    return (
+      <div style={cardStyle}>
+        {header}
+        <span className="value-negative">
+          {isOwn
+            ? `Couldn't pull your own listing's data from Amazon this run -- every finding and recommendation below depends on this, so none could be built. Amazon's response: ${data.fetchError ?? "unknown error"}.`
+            : `Could not pull Amazon data for this ASIN: ${data.fetchError}`}
+        </span>
+      </div>
+    );
+  }
+
+  if (data.fetchStatus !== "FETCHED") {
+    return <div style={cardStyle}>{header}</div>;
+  }
+
   const dims = formatDimensionsCm(data.dimensionsCm);
   const weight = formatWeightGrams(data.weightGrams);
-  const listingText = [data.description ?? "", ...data.bulletText].join(" ").trim();
-  const keywords = listingText ? extractKeywordPhrases(listingText, corpusText || listingText, 8) : [];
-  const hasDetails = Boolean(data.brand) || Boolean(dims) || Boolean(weight) || keywords.length > 0 || data.images.length > 0;
-  if (!hasDetails) return null;
+  const bulletFieldText = data.bulletText.join(" ").trim();
+  const titleKeywords = title ? extractKeywordPhrases(title, corpusText || title, 6) : [];
+  const bulletKeywords = bulletFieldText ? extractKeywordPhrases(bulletFieldText, corpusText || bulletFieldText, 6) : [];
+  const descriptionKeywords = data.description ? extractKeywordPhrases(data.description, corpusText || data.description, 6) : [];
+  const profitPositive = data.profitAtThisPrice !== null && data.profitAtThisPrice >= 0;
+
+  const statTile = (label: string, value: ReactNode) => (
+    <div style={{ flex: 1, minWidth: 90, border: "1px solid #eef0f2", borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+      <div style={{ fontSize: 11, color: "#6b7280", letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>{value}</div>
+    </div>
+  );
+
+  const keywordSection = (label: string, phrases: string[]) =>
+    phrases.length > 0 ? (
+      <div>
+        <div style={{ fontSize: 11, color: "#6b7280", letterSpacing: 0.4, marginBottom: 4 }}>{label}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {phrases.map((keyword) => (
+            <span
+              key={keyword}
+              style={{ background: "#f1f1f3", color: "#374151", borderRadius: 4, padding: "2px 6px", fontSize: 12 }}
+            >
+              {keyword}
+            </span>
+          ))}
+        </div>
+      </div>
+    ) : null;
+
   return (
-    <div style={{ marginTop: 6 }}>
+    <div style={cardStyle}>
+      {header}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {statTile("PRICE", formatMoney(data.price))}
+        {statTile("IMAGES", data.imageCount ?? "—")}
+        {statTile("BULLET POINTS", data.bulletCount ?? "—")}
+        {statTile("TITLE LENGTH", data.titleLength ?? "—")}
+        {statTile("LISTING SCORE", data.listingScore !== null ? `${data.listingScore}/100` : "—")}
+      </div>
+      {data.categorySalesRank !== null ? (
+        <div className="brand-card-note">
+          Category rank: #{data.categorySalesRank}{data.categorySalesRankTitle ? ` in ${data.categorySalesRankTitle}` : ""}
+        </div>
+      ) : null}
       {data.images.length > 0 ? (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-          {data.images.slice(0, 6).map((image: CompetitorBenchmarkImage) => (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {data.images.map((image: CompetitorBenchmarkImage) => (
             <img
               key={image.variant}
               src={image.link}
@@ -10907,16 +11019,22 @@ function CompetitorBenchmarkRichFields({ data, corpusText }: { data: CompetitorB
           {dims ? <>Dimensions: {dims}</> : null}
         </div>
       ) : null}
-      {keywords.length > 0 ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
-          {keywords.map((keyword) => (
-            <span
-              key={keyword}
-              style={{ background: "#f1f1f3", color: "#374151", borderRadius: 4, padding: "2px 6px", fontSize: 12 }}
-            >
-              {keyword}
-            </span>
-          ))}
+      {keywordSection("TITLE KEYWORDS", titleKeywords)}
+      {keywordSection("BULLET POINT KEYWORDS", bulletKeywords)}
+      {keywordSection("DESCRIPTION KEYWORDS", descriptionKeywords)}
+      {data.profitAtThisPrice !== null ? (
+        <div
+          style={{
+            background: profitPositive ? "#ecfdf5" : "#fef2f2",
+            color: profitPositive ? "#065f46" : "#991b1b",
+            border: `1px solid ${profitPositive ? "#a7f3d0" : "#fecaca"}`,
+            borderRadius: 8,
+            padding: "8px 10px",
+            fontWeight: 600,
+            fontSize: 13
+          }}
+        >
+          YOUR PROFIT AT {formatMoney(data.price)}: {formatMoney(data.profitAtThisPrice)}
         </div>
       ) : null}
     </div>
@@ -11206,47 +11324,32 @@ function CompetitorBenchmarkToolPage() {
               .join(" ");
             return (
             <Card key={group.ownSku} title={`${group.ownSku}${group.ownAsin ? ` (${group.ownAsin})` : ""}`}>
-              {ownCandidate?.data ? (
-                <div className={ownCandidate.data.fetchStatus === "FAILED" ? "soft-state error-state" : "soft-state"} style={{ marginBottom: 12 }}>
-                  {ownCandidate.data.fetchStatus === "FETCHED" ? (
-                    <>
-                      <strong>Your own listing (real Amazon data):</strong> Price: {formatMoney(ownCandidate.data.price)} · Images: {ownCandidate.data.imageCount ?? "—"} · Bullets: {ownCandidate.data.bulletCount ?? "—"} · Title length: {ownCandidate.data.titleLength ?? "—"} · Category rank: {ownCandidate.data.categorySalesRank ?? "—"}
-                      <CompetitorBenchmarkRichFields data={ownCandidate.data} corpusText={groupCorpusText} />
-                    </>
-                  ) : (
-                    <>
-                      <strong>Couldn't pull your own listing's data from Amazon this run</strong> -- every finding and recommendation below depends on this, so none could be built. Amazon's response: {ownCandidate.data.fetchError ?? "unknown error"}. If this ASIN looks right on the real Amazon listing for this SKU, it may just need more time to appear in Amazon's catalog search (common for very recently created listings) -- otherwise double-check the ASIN saved on this product's Product Passport against Seller Central.
-                    </>
-                  )}
+              {ownCandidate ? (
+                <div style={{ marginBottom: 16 }}>
+                  <CompetitorBenchmarkCard
+                    asin={ownCandidate.asin}
+                    title={ownCandidate.title}
+                    source={ownCandidate.source}
+                    confirmed={ownCandidate.confirmed}
+                    isOwn={true}
+                    data={ownCandidate.data}
+                    corpusText={groupCorpusText}
+                  />
                 </div>
               ) : null}
-              <div className="card-list command-card-list">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
                 {group.candidates.filter((c) => c.source !== "OWN_BASELINE").map((candidate: CompetitorBenchmarkCandidate) => (
-                  <div key={candidate.id} className="command-card">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                      <span>
-                        <strong>{candidate.asin}</strong> -- {candidate.title ?? "(title not yet pulled)"}{" "}
-                        <Badge tone="neutral">{labelize(candidate.source)}</Badge>
-                        {candidate.confirmed === true ? <Badge tone="good">Confirmed</Badge> : candidate.confirmed === false ? <Badge tone="risk">Rejected</Badge> : <Badge tone="watch">Needs review</Badge>}
-                      </span>
-                      <span style={{ display: "flex", gap: 6 }}>
-                        <Button className="secondary" onClick={() => handleConfirm(group.ownSku, candidate.asin, true)}>Confirm</Button>
-                        <Button className="secondary" onClick={() => handleConfirm(group.ownSku, candidate.asin, false)}>Reject</Button>
-                      </span>
-                    </div>
-                    {candidate.data ? (
-                      <div className="brand-card-note" style={{ marginTop: 6 }}>
-                        {candidate.data.fetchStatus === "FETCHED" ? (
-                          <>
-                            Price: {formatMoney(candidate.data.price)} · Images: {candidate.data.imageCount ?? "—"} · Bullets: {candidate.data.bulletCount ?? "—"} · Title length: {candidate.data.titleLength ?? "—"} · Category rank: {candidate.data.categorySalesRank ?? "—"}
-                            <CompetitorBenchmarkRichFields data={candidate.data} corpusText={groupCorpusText} />
-                          </>
-                        ) : candidate.data.fetchStatus === "FAILED" ? (
-                          <span className="value-negative">Could not pull Amazon data for this ASIN: {candidate.data.fetchError}</span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
+                  <CompetitorBenchmarkCard
+                    key={candidate.id}
+                    asin={candidate.asin}
+                    title={candidate.title}
+                    source={candidate.source}
+                    confirmed={candidate.confirmed}
+                    isOwn={false}
+                    data={candidate.data}
+                    corpusText={groupCorpusText}
+                    onConfirm={(confirmed) => handleConfirm(group.ownSku, candidate.asin, confirmed)}
+                  />
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
