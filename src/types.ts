@@ -1484,6 +1484,9 @@ export type CompetitorBenchmarkData = {
   weightGrams: number | null;
   dimensionsCm: CompetitorBenchmarkDimensionsCm | null;
   images: CompetitorBenchmarkImage[];
+  // Added 2026-10-12 for the card-grid redesign (mockup v3).
+  listingScore: number | null;
+  profitAtThisPrice: number | null;
 };
 
 export type CompetitorBenchmarkCandidate = {
