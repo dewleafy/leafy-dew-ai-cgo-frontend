@@ -298,7 +298,11 @@ export type ProductEconomics = {
   netRevenueBeforeGst?: number | string | null;
   outputGstOnSale?: number | string | null;
   returnRatePercent?: number | string | null;
+  returnCostPerReturn?: number | string | null;
   returnCostProvision?: number | string | null;
+  influencerCostAllocationPerUnit?: number | string | null;
+  socialMarketingCostPerUnit?: number | string | null;
+  couponDiscountEstimate?: number | string | null;
   hiddenOtherFee?: number | string | null;
   grossProfit?: number | string | null;
   netProfit?: number | string | null;
