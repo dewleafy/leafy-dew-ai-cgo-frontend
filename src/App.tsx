@@ -1120,7 +1120,6 @@ const advancedNavGroups: NavGroup[] = [
   { title: "Catalog & Listings", items: [
     { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
     { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action" },
-    { label: "Product Economics", page: "Product Economics", note: "Profit calculator" },
     { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
     { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Compare your SKUs against real competitor data -- report only, nothing applied to any listing" },
     { label: "Listing Optimizer", page: "Listing Optimizer", note: "Conversion Score, gaps, and priorities -- scoring only, nothing applied to any listing" }
@@ -1314,7 +1313,6 @@ function App() {
           {activePage === "Daily AI-CGO" && <DailyAiCgoPage setActiveTab={setTechnicalTab} />}
           {activePage === "Product Passport" && <ProductPassportPage product={selectedProduct} />}
           {activePage === "Listing Readiness" && <ListingReadinessPage navigate={navigate} />}
-          {activePage === "Product Economics" && <ProductEconomicsPage />}
           {activePage === "PPC Recommendations" && <PpcRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Order Profit & Loss" && <OrderEconomicsPage navigate={navigate} />}
           {activePage === "Sales & Traffic" && <SalesTrafficPage />}
@@ -1469,6 +1467,10 @@ function TodayDashboard({ navigate }: { navigate: FounderNavigate }) {
           <button type="button" className="secondary" onClick={() => navigate("Weekly Strategy" as AppPage)}>Open weekly strategy →</button>
         </div>
         <ProductHeatMap products={strategyProducts} />
+      </section>
+
+      <section className="founder-section">
+        <ReturnRateCard />
       </section>
 
       <section className="founder-section">
@@ -1997,7 +1999,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
             <button type="button" onClick={() => navigate("Sales & Ads")}>Manage PPC & Ads</button>
             <button type="button" onClick={() => navigate("Growth Engine")}>Image & A+ Ideas</button>
             <button type="button" onClick={() => navigate("Products")}>Fix Cost</button>
-            <button type="button" onClick={() => navigate("Product Economics")}>Profit Calculator</button>
+            <button type="button" onClick={() => navigate("Competitor Benchmark Tool")}>Profit Calculator</button>
             <BackgroundSyncStatus />
           </div>
 
@@ -3617,7 +3619,7 @@ function ReportsPage({ navigate }: { navigate: FounderNavigate }) {
     { title: "CEO Report", page: "CEO Report" as AppPage },
     { title: "Daily Summary", page: "Today" as AppPage },
     { title: "Weekly Summary", page: "CEO Report" as AppPage },
-    { title: "Profit Report", page: "Product Economics" as AppPage },
+    { title: "Profit Report", page: "Competitor Benchmark Tool" as AppPage },
     { title: "PPC Report", page: "PPC Recommendations" as AppPage },
     { title: "Product Readiness Report", page: "Product Passport" as AppPage }
   ];
@@ -3673,7 +3675,6 @@ function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
       { label: "Experiments", page: "Experiments", note: "Growth experiments" },
       { label: "Product Readiness", page: "Product Passport", note: "Product truth and cost queue" },
       { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action per SKU" },
-      { label: "Profit Calculator", page: "Product Economics", note: "Profit calculator" },
       { label: "Ads Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
       { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
       { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
@@ -5136,118 +5137,6 @@ function ReturnRateCard() {
   );
 }
 
-function ProductEconomicsPage() {
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const rows = rowsOf<ProductEconomics>(economics.data);
-  const [selectedId, setSelectedId] = useState("");
-  const selectedRow = rows.find((row) => row.id === selectedId) ?? null;
-  const completeCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("COMPLETE") || normalizeState(row.profitDataStatus).includes("AVAILABLE")).length;
-  const needsInputCount = rows.filter((row) => normalizeState(row.profitDataStatus).includes("MISSING") || normalizeState(row.profitDataStatus).includes("NEEDS") || normalizeState(row.profitDataStatus).includes("PARTIAL")).length;
-
-  return (
-    <div className="page">
-      <PageHeader
-        title="Product Economics"
-        subtitle="Profitability, readiness, and calculated economics. Cost completion lives in Product Passport."
-      />
-      <div className="summary-strip">
-        <MetricTile label="Economics rows" value={economics.loading ? "..." : rows.length} />
-        <MetricTile label="Complete data" value={economics.loading ? "..." : completeCount} />
-        <MetricTile label="Needs input" value={economics.loading ? "..." : needsInputCount} />
-        <MetricTile label="Selected SKU" value={selectedRow ? formatEmpty(selectedRow.sku) : "-"} />
-      </div>
-
-      <ReturnRateCard />
-
-      <Card title="Profitability Readiness">
-        {economics.loading ? <LoadingBlock /> : economics.error ? (
-          <ErrorBlock text="Could not load product economics. Backend may still be deploying." />
-        ) : rows.length === 0 ? (
-          <EmptyBlock text="No product economics rows yet. Complete cost data in Product Passport first." />
-        ) : (
-          <div className="table-wrap economics-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Product Name</th>
-                  <th>SKU</th>
-                  <th>ASIN</th>
-                  <th>Subcategory</th>
-                  <th>Selling Price</th>
-                  <th>Landed Cost</th>
-                  <th>Required Profit</th>
-                  <th>Profit Status</th>
-                  <th>Real Ad Profit</th>
-                  <th>Target ACOS</th>
-                  <th>Break-even ACOS</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const open = selectedId === row.id;
-                  const adDataAvailable = Boolean(row.realAdSpendDataAvailable);
-                  const realNetProfitAfterAds = readNumber(row.realNetProfitAfterAds);
-                  return (
-                    <Fragment key={row.id}>
-                      <tr className={open ? "edited-row" : ""}>
-                        <td className="product-name-cell">{formatEmpty(row.productName)}</td>
-                        <td className="identity-cell">{formatEmpty(row.sku)}</td>
-                        <td className="identity-cell">{formatEmpty(row.asin)}</td>
-                        <td>{formatEmpty(row.subCategory)}</td>
-                        <td>{formatMoney(row.sellingPrice)}</td>
-                        <td>{formatMoney(row.landedCost)}</td>
-                        <td>{formatMoney(row.requiredProfit)}</td>
-                        <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
-                        <td>
-                          {adDataAvailable ? (
-                            <Badge tone={realNetProfitAfterAds < 0 ? "risk" : "good"}>
-                              {formatMoney(row.realNetProfitAfterAds)}
-                            </Badge>
-                          ) : (
-                            <span className="muted-text">Not synced</span>
-                          )}
-                        </td>
-                        <td>{formatPercent(row.targetAcos)}</td>
-                        <td>{formatPercent(row.breakEvenAcos)}</td>
-                        <td>
-                          <button type="button" className="secondary" onClick={() => setSelectedId(open ? "" : row.id)}>
-                            {open ? "Close Details" : "View Details"}
-                          </button>
-                        </td>
-                      </tr>
-                      {open ? (
-                        <tr className="economics-inline-detail-row">
-                          <td colSpan={12}>
-                            <div className="economics-inline-detail">
-                              <div className="approval-card-head">
-                                <div className="approval-title-block">
-                                  <strong>{formatEmpty(row.productName)}</strong>
-                                  <span>{formatEmpty(row.sku)} / {formatEmpty(row.asin)}</span>
-                                </div>
-                                <button type="button" className="secondary" onClick={() => setSelectedId("")}>Close Details</button>
-                              </div>
-                              <div className="detail-grid">
-                                {economicsDetailRows(row).map(([label, value]) => (
-                                  <MetricRow key={label} label={label} value={value} />
-                                ))}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
 const referralFeeSubcategories = [
   "Mattresses",
   "Rugs and Doormats",
@@ -5283,128 +5172,234 @@ function readFirst(source: unknown, keys: string[]): unknown {
   return undefined;
 }
 
-function queueMissingFields(value: unknown): string {
-  if (Array.isArray(value)) return value.map((item) => formatEmpty(item)).join(", ");
-  return formatEmpty(value);
+// Profitability Readiness (moved 2026-10-12 from the removed standalone "Product Economics" page
+// into the Competitor Benchmark Tool, per founder request -- same table, same data source
+// (/api/product-economics), just relocated).
+function ProfitabilityReadinessCard({ economics }: { economics: LoadState<ApiRows<ProductEconomics>> & { reload: () => void } }) {
+  const rows = rowsOf<ProductEconomics>(economics.data);
+  const [selectedId, setSelectedId] = useState("");
+
+  return (
+    <Card title="Profitability Readiness">
+      {economics.loading ? <LoadingBlock /> : economics.error ? (
+        <ErrorBlock text="Could not load product economics. Backend may still be deploying." />
+      ) : rows.length === 0 ? (
+        <EmptyBlock text="No product economics rows yet. Fill in cost data below for a SKU to see it here." />
+      ) : (
+        <div className="table-wrap economics-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>SKU</th>
+                <th>ASIN</th>
+                <th>Subcategory</th>
+                <th>Selling Price</th>
+                <th>Landed Cost</th>
+                <th>Required Profit</th>
+                <th>Profit Status</th>
+                <th>Real Ad Profit</th>
+                <th>Target ACOS</th>
+                <th>Break-even ACOS</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const open = selectedId === row.id;
+                const adDataAvailable = Boolean(row.realAdSpendDataAvailable);
+                const realNetProfitAfterAds = readNumber(row.realNetProfitAfterAds);
+                return (
+                  <Fragment key={row.id}>
+                    <tr className={open ? "edited-row" : ""}>
+                      <td className="product-name-cell">{formatEmpty(row.productName)}</td>
+                      <td className="identity-cell">{formatEmpty(row.sku)}</td>
+                      <td className="identity-cell">{formatEmpty(row.asin)}</td>
+                      <td>{formatEmpty(row.subCategory)}</td>
+                      <td>{formatMoney(row.sellingPrice)}</td>
+                      <td>{formatMoney(row.landedCost)}</td>
+                      <td>{formatMoney(row.requiredProfit)}</td>
+                      <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
+                      <td>
+                        {adDataAvailable ? (
+                          <Badge tone={realNetProfitAfterAds < 0 ? "risk" : "good"}>
+                            {formatMoney(row.realNetProfitAfterAds)}
+                          </Badge>
+                        ) : (
+                          <span className="muted-text">Not synced</span>
+                        )}
+                      </td>
+                      <td>{formatPercent(row.targetAcos)}</td>
+                      <td>{formatPercent(row.breakEvenAcos)}</td>
+                      <td>
+                        <button type="button" className="secondary" onClick={() => setSelectedId(open ? "" : row.id)}>
+                          {open ? "Close Details" : "View Details"}
+                        </button>
+                      </td>
+                    </tr>
+                    {open ? (
+                      <tr className="economics-inline-detail-row">
+                        <td colSpan={12}>
+                          <div className="economics-inline-detail">
+                            <div className="approval-card-head">
+                              <div className="approval-title-block">
+                                <strong>{formatEmpty(row.productName)}</strong>
+                                <span>{formatEmpty(row.sku)} / {formatEmpty(row.asin)}</span>
+                              </div>
+                              <button type="button" className="secondary" onClick={() => setSelectedId("")}>Close Details</button>
+                            </div>
+                            <div className="detail-grid">
+                              {economicsDetailRows(row).map(([label, value]) => (
+                                <MetricRow key={label} label={label} value={value} />
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
 }
 
-export function CostCompletionQueuePage({ title = "Product Economics" }: { title?: string }) {
-  const queue = useApi<ApiRows<CostCompletionQueueItem>>(() => getJson(`/api/product-economics/cost-completion-queue?sellerId=${SELLER_ID}`));
-  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
-  const queueRows = useMemo(() => {
-    const directRows = rowsOf<CostCompletionQueueItem>(queue.data);
-    if (directRows.length > 0) return directRows;
-    const dataRecord = recordOf(queue.data);
-    return arrayOf(dataRecord.queue ?? dataRecord.items ?? dataRecord.products) as CostCompletionQueueItem[];
-  }, [queue.data]);
-  const economicsRows = rowsOf<ProductEconomics>(economics.data);
-  const economicsBySku = useMemo(() => new Map(economicsRows.filter((row) => row.sku).map((row) => [String(row.sku), row])), [economicsRows]);
-  const economicsByAsin = useMemo(() => new Map(economicsRows.filter((row) => row.asin).map((row) => [String(row.asin), row])), [economicsRows]);
+// Cost & charge calculation inputs for one SKU (moved 2026-10-12 into the Competitor Benchmark
+// Tool, per founder request: fill in cost data right where you're selecting SKUs to benchmark,
+// instead of on a separate page). Posts to the same /api/product-economics endpoint the old
+// Product Economics page used -- same calculation, same saved rows, just a different place to
+// edit them. Prefills from the SKU's existing economics row (if any) so re-opening this after a
+// benchmark run shows what's already saved, not a blank form.
+const costInputCalculatedRows = [
+  ["Net Revenue before GST", ["netRevenueBeforeGst", "net_revenue_before_gst"], "money"],
+  ["Referral Fee", ["referralFee", "referral_fee"], "money"],
+  ["Closing Fee", ["closingFee", "closing_fee"], "money"],
+  ["Shipping Fee", ["shippingFee", "shipping_fee"], "money"],
+  ["Pick & Pack Fee", ["pickAndPackFee", "pick_and_pack_fee"], "money"],
+  ["Storage Fee", ["storageFee", "storage_fee"], "money"],
+  ["Total Amazon Fees", ["totalAmazonFees", "total_amazon_fees"], "money"],
+  ["Return Cost Provision", ["returnCostProvision", "return_cost_provision"], "money"],
+  ["Gross Profit", ["grossProfit", "gross_profit"], "money"],
+  ["Net Profit", ["netProfit", "net_profit"], "money"],
+  ["Profit Margin %", ["profitMarginPercent", "profit_margin_percent"], "percent"],
+  ["Target ACOS", ["targetAcos", "target_acos"], "percent"],
+  ["Break-even ACOS", ["breakEvenAcos", "break_even_acos"], "percent"]
+] as const;
 
-  const products = useMemo(() => queueRows.map((item, index) => {
-    const raw = item as unknown as AnyRecord;
-    const sku = String(readFirst(raw, ["sku", "sellerSku"]) ?? "");
-    const asin = String(readFirst(raw, ["asin"]) ?? "");
-    const economicsRow = item.economics ?? (sku ? economicsBySku.get(sku) : undefined) ?? (asin ? economicsByAsin.get(asin) : undefined) ?? null;
-    const key = String(readFirst(raw, ["key", "id"]) ?? (sku ? `sku:${sku}` : asin ? `asin:${asin}` : `row:${index}`));
+type SkuCostFormState = {
+  sellingPrice: string;
+  landedCost: string;
+  packagingCost: string;
+  requiredProfit: string;
+  fulfillmentType: string;
+  productType: string;
+  weightKg: string;
+  volumeCuFt: string;
+  otherFees: string;
+  shippingRegion: string;
+  categoryException: string;
+  subCategory: string;
+  productGstRatePercent: string;
+  amazonFeeGstRatePercent: string;
+  returnRatePercent: string;
+  returnCostPerReturn: string;
+  returnPenaltyFractionPercent: string;
+  returnRecoverable: string;
+  repackagingCost: string;
+  tcsPercent: string;
+  influencerCostAllocationPerUnit: string;
+  socialMarketingCostPerUnit: string;
+  couponDiscountEstimate: string;
+  notes: string;
+};
 
-    return {
-      key,
-      sku,
-      asin,
-      productName: String(readFirst(raw, ["productName", "product_name", "title"]) ?? economicsRow?.productName ?? ""),
-      subCategory: String(readFirst(raw, ["subCategory", "sub_category"]) ?? economicsRow?.subCategory ?? ""),
-      sellingPrice: readFirst(raw, ["sellingPrice", "price"]) ?? economicsRow?.sellingPrice,
-      costStatus: String(readFirst(raw, ["costStatus", "status", "profitDataStatus"]) ?? economicsRow?.profitDataStatus ?? "NEEDS_INPUT"),
-      missingFields: readFirst(raw, ["missingFields", "missing_fields"]) ?? [],
-      profitStatus: String(readFirst(raw, ["profitStatus"]) ?? economicsRow?.profitStatus ?? ""),
-      targetAcos: readFirst(raw, ["targetAcos"]) ?? economicsRow?.targetAcos,
-      fulfillmentType: String(readFirst(raw, ["fulfillmentType", "fulfillmentChannel"]) ?? economicsRow?.fulfillmentType ?? ""),
-      productType: String(readFirst(raw, ["productType"]) ?? economicsRow?.productType ?? ""),
-      weightKg: readFirst(raw, ["weightKg"]) ?? economicsRow?.weightKg,
-      volumeCuFt: readFirst(raw, ["volumeCuFt"]) ?? economicsRow?.volumeCuFt,
-      productGstRatePercent: readFirst(raw, ["productGstRatePercent"]) ?? economicsRow?.productGstRatePercent,
-      amazonFeeGstRatePercent: readFirst(raw, ["amazonFeeGstRatePercent"]) ?? economicsRow?.amazonFeeGstRatePercent,
-      marketplaceId: String(readFirst(raw, ["marketplaceId"]) ?? economicsRow?.marketplaceId ?? ""),
-      economics: economicsRow
-    };
-  }), [economicsByAsin, economicsBySku, queueRows]);
+function skuCostFormFromRow(row: ProductEconomics | undefined, passportSubCategory: string | null): SkuCostFormState {
+  const value = (v: unknown, fallback = ""): string => (v === null || v === undefined || v === "" ? fallback : String(v));
+  return {
+    sellingPrice: value(row?.sellingPrice),
+    landedCost: value(row?.landedCost),
+    packagingCost: value(row?.packagingCost),
+    requiredProfit: value(row?.requiredProfit),
+    fulfillmentType: value(row?.fulfillmentType, "Easy Ship"),
+    productType: value(row?.productType, "Standard"),
+    weightKg: value(row?.weightKg),
+    volumeCuFt: value(row?.volumeCuFt),
+    otherFees: value(row?.otherFees ?? row?.otherCostPerUnit),
+    shippingRegion: value(row?.shippingRegion, "National"),
+    categoryException: row?.categoryException === true ? "Yes" : row?.categoryException === false ? "No" : value(row?.categoryException, "No"),
+    subCategory: value(row?.subCategory, passportSubCategory ?? ""),
+    productGstRatePercent: value(row?.productGstRatePercent, "18"),
+    amazonFeeGstRatePercent: value(row?.amazonFeeGstRatePercent, "18"),
+    returnRatePercent: value(row?.returnRatePercent, "25"),
+    returnCostPerReturn: value(row?.returnCostPerReturn, "0"),
+    returnPenaltyFractionPercent: value(row?.returnPenaltyFractionPercent, "66.7"),
+    returnRecoverable: row?.returnRecoverable === false ? "No" : "Yes",
+    repackagingCost: value(row?.repackagingCost, "10"),
+    tcsPercent: value(row?.tcsPercent, "0.5"),
+    influencerCostAllocationPerUnit: value(row?.influencerCostAllocationPerUnit, "0"),
+    socialMarketingCostPerUnit: value(row?.socialMarketingCostPerUnit, "0"),
+    couponDiscountEstimate: value(row?.couponDiscountEstimate, "0"),
+    notes: value(row?.notes)
+  };
+}
 
-  const [selectedKey, setSelectedKey] = useState("");
-  const [form, setForm] = useState({
-    sellingPrice: "",
-    buyingCost: "",
-    requiredProfit: "",
-    fulfillmentType: "FC",
-    productType: "Standard",
-    weightKg: "",
-    volumeCuFt: "",
-    otherFees: "",
-    shippingRegion: "National",
-    categoryException: "No",
-    productGstRatePercent: "18",
-    amazonFeeGstRatePercent: "18",
-    subCategory: "",
-    notes: ""
-  });
+function SkuCostInputPanel({
+  sku,
+  asin,
+  productName,
+  passportSubCategory,
+  economicsRow,
+  onSaved
+}: {
+  sku: string;
+  asin: string | null;
+  productName: string | null;
+  passportSubCategory: string | null;
+  economicsRow: ProductEconomics | undefined;
+  onSaved: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [form, setForm] = useState<SkuCostFormState>(() => skuCostFormFromRow(economicsRow, passportSubCategory));
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [calculatedResult, setCalculatedResult] = useState<AnyRecord | null>(null);
-  const selectedProduct = products.find((product) => product.key === selectedKey) ?? null;
-  const resultSource = calculatedResult ?? recordOf(selectedProduct?.economics);
-  const profitBands = arrayOf(readFirst(resultSource, ["profitBands", "profit_bands"]));
-  const hasFounderOverrideBand = profitBands.some((band) => {
-    const record = recordOf(band);
-    return String(record.approvalTier ?? record.approval_tier ?? "").toUpperCase() === "FOUNDER_OVERRIDE_REQUIRED";
-  });
+  const [calculatedResult, setCalculatedResult] = useState<AnyRecord | null>(economicsRow ? (economicsRow as unknown as AnyRecord) : null);
 
-  function openCostForm(product: (typeof products)[number]) {
-    const row = product.economics;
-    setSelectedKey(product.key);
-    setCalculatedResult(row ? (row as unknown as AnyRecord) : null);
-    setSaveMessage("");
-    setSaveError("");
-    setForm({
-      sellingPrice: row?.sellingPrice !== null && row?.sellingPrice !== undefined ? String(row.sellingPrice) : product.sellingPrice !== null && product.sellingPrice !== undefined ? String(product.sellingPrice) : "",
-      buyingCost: row?.buyingCost !== null && row?.buyingCost !== undefined ? String(row.buyingCost) : row?.landedCost !== null && row?.landedCost !== undefined ? String(row.landedCost) : "",
-      requiredProfit: row?.requiredProfit !== null && row?.requiredProfit !== undefined ? String(row.requiredProfit) : row?.targetProfit !== null && row?.targetProfit !== undefined ? String(row.targetProfit) : "",
-      fulfillmentType: row?.fulfillmentType ?? product.fulfillmentType ?? "FC",
-      productType: row?.productType ?? product.productType ?? "Standard",
-      weightKg: row?.weightKg !== null && row?.weightKg !== undefined ? String(row.weightKg) : product.weightKg !== null && product.weightKg !== undefined ? String(product.weightKg) : "",
-      volumeCuFt: row?.volumeCuFt !== null && row?.volumeCuFt !== undefined ? String(row.volumeCuFt) : product.volumeCuFt !== null && product.volumeCuFt !== undefined ? String(product.volumeCuFt) : "",
-      otherFees: row?.otherFees !== null && row?.otherFees !== undefined ? String(row.otherFees) : row?.otherCostPerUnit !== null && row?.otherCostPerUnit !== undefined ? String(row.otherCostPerUnit) : "",
-      shippingRegion: row?.shippingRegion ?? "National",
-      categoryException: row?.categoryException === true ? "Yes" : row?.categoryException === false ? "No" : row?.categoryException ?? "No",
-      productGstRatePercent: row?.productGstRatePercent !== null && row?.productGstRatePercent !== undefined ? String(row.productGstRatePercent) : product.productGstRatePercent !== null && product.productGstRatePercent !== undefined ? String(product.productGstRatePercent) : "18",
-      amazonFeeGstRatePercent: row?.amazonFeeGstRatePercent !== null && row?.amazonFeeGstRatePercent !== undefined ? String(row.amazonFeeGstRatePercent) : product.amazonFeeGstRatePercent !== null && product.amazonFeeGstRatePercent !== undefined ? String(product.amazonFeeGstRatePercent) : "18",
-      subCategory: product.subCategory,
-      notes: row?.notes ?? ""
-    });
+  function toggleExpanded() {
+    if (!expanded) {
+      // Re-sync from the latest saved row every time this panel is opened, so switching between
+      // SKUs (or re-opening after a save elsewhere) never shows stale values.
+      setForm(skuCostFormFromRow(economicsRow, passportSubCategory));
+      setCalculatedResult(economicsRow ? (economicsRow as unknown as AnyRecord) : null);
+      setSaveMessage("");
+      setSaveError("");
+    }
+    setExpanded((value) => !value);
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!selectedProduct) return;
-    if (!selectedProduct.subCategory && !form.subCategory) {
+    if (!form.subCategory) {
       setSaveError("Choose a subcategory before saving cost data.");
       return;
     }
-
     setSaving(true);
     setSaveError("");
     setSaveMessage("");
-
     try {
       const response = await postJson<AnyRecord>("/api/product-economics", {
         sellerId: SELLER_ID,
-        sku: selectedProduct.sku,
-        asin: selectedProduct.asin || null,
-        marketplaceId: selectedProduct.marketplaceId || null,
-        productName: selectedProduct.productName || selectedProduct.sku,
-        subCategory: selectedProduct.subCategory || form.subCategory,
+        sku,
+        asin: asin || null,
+        productName: productName || sku,
+        subCategory: form.subCategory,
         sellingPrice: asInputNumber(form.sellingPrice) ?? 0,
-        buyingCost: asInputNumber(form.buyingCost),
+        landedCost: asInputNumber(form.landedCost) ?? 0,
+        packagingCost: asInputNumber(form.packagingCost) ?? 0,
         requiredProfit: asInputNumber(form.requiredProfit) ?? 0,
         fulfillmentType: form.fulfillmentType,
         productType: form.productType,
@@ -5416,14 +5411,21 @@ export function CostCompletionQueuePage({ title = "Product Economics" }: { title
         categoryException: form.categoryException,
         productGstRatePercent: asInputNumber(form.productGstRatePercent) ?? 18,
         amazonFeeGstRatePercent: asInputNumber(form.amazonFeeGstRatePercent) ?? 18,
+        returnRatePercent: asInputNumber(form.returnRatePercent) ?? 25,
+        returnCostPerReturn: asInputNumber(form.returnCostPerReturn) ?? 0,
+        returnPenaltyFractionPercent: asInputNumber(form.returnPenaltyFractionPercent) ?? 66.7,
+        returnRecoverable: form.returnRecoverable === "Yes",
+        repackagingCost: asInputNumber(form.repackagingCost) ?? 10,
+        tcsPercent: asInputNumber(form.tcsPercent) ?? 0.5,
+        influencerCostAllocationPerUnit: asInputNumber(form.influencerCostAllocationPerUnit) ?? 0,
+        socialMarketingCostPerUnit: asInputNumber(form.socialMarketingCostPerUnit) ?? 0,
+        couponDiscountEstimate: asInputNumber(form.couponDiscountEstimate) ?? 0,
         notes: form.notes.trim() || null
       });
-
       const result = recordOf(response.economics ?? response.row ?? response.result ?? response.calculation ?? response);
       setCalculatedResult(result);
-      setSaveMessage("Cost data saved. Amazon fee calculations refreshed.");
-      queue.reload();
-      economics.reload();
+      setSaveMessage("Cost data saved. Amazon fee calculations refreshed -- this SKU's Listing Score / profit-at-price and Profitability Readiness row above will reflect it next time you open or refresh this run.");
+      onSaved();
     } catch {
       setSaveError("Could not save cost data. Backend may still be deploying.");
     } finally {
@@ -5431,199 +5433,65 @@ export function CostCompletionQueuePage({ title = "Product Economics" }: { title
     }
   }
 
-  const calculatedRows = [
-    ["Net Revenue before GST", ["netRevenueBeforeGst", "net_revenue_before_gst"], "money"],
-    ["Output GST on Sale", ["outputGstOnSale", "output_gst_on_sale"], "money"],
-    ["Referral Fee %", ["referralFeePercent", "referral_fee_percent", "feeBreakdown.referralFeePercent"], "percent"],
-    ["Referral Fee", ["referralFee", "referral_fee", "amazonFeeEstimate", "amazon_fee_estimate", "feeBreakdown.referralFee"], "money"],
-    ["Closing Fee", ["closingFee", "closing_fee", "feeBreakdown.closingFee"], "money"],
-    ["Shipping Fee", ["shippingFee", "shipping_fee", "shippingFeeEstimate", "shipping_fee_estimate", "feeBreakdown.shippingFee"], "money"],
-    ["Pick & Pack Fee", ["pickAndPackFee", "pick_and_pack_fee", "feeBreakdown.pickAndPackFee"], "money"],
-    ["Storage Fee", ["storageFee", "storage_fee", "feeBreakdown.storageFee"], "money"],
-    ["Other Fees", ["otherFees", "other_fees", "otherCostPerUnit", "other_cost_per_unit"], "money"],
-    ["Total Amazon Fees", ["totalAmazonFees", "total_amazon_fees", "feeBreakdown.totalAmazonFees"], "money"],
-    ["GST on Amazon Fees", ["gstOnAmazonFees", "gst_on_amazon_fees", "feeBreakdown.gstOnAmazonFees"], "money"],
-    ["Return Cost Provision", ["returnCostProvision", "return_cost_provision"], "money"],
-    ["Gross Profit", ["grossProfit", "gross_profit"], "money"],
-    ["Net Profit", ["netProfit", "net_profit"], "money"],
-    ["Net Profit Before Ads", ["netProfitBeforeAds", "net_profit_before_ads"], "money"],
-    ["Profit Margin %", ["profitMargin", "profit_margin", "profitMarginPercent", "profit_margin_percent"], "percent"],
-    ["Max Allowable Ad Spend", ["maxAllowableAdSpend", "max_allowable_ad_spend"], "money"],
-    ["Target ACOS", ["targetAcos", "target_acos"], "percent"],
-    ["Break-even ACOS", ["breakEvenAcos", "break_even_acos"], "percent"],
-    ["Fee Rules Version", ["feeRulesVersion", "fee_rules_version"], "text"]
-  ] as const;
-
   return (
-    <div className="page">
-      <PageHeader
-        title={title}
-        subtitle="Review economics inputs, Amazon fee calculations, and profit readiness without changing Amazon or Ads."
-      />
-
-      <Card title="Economics Inputs">
-        {queue.loading || economics.loading ? <LoadingBlock /> : queue.error || economics.error ? (
-          <ErrorBlock text="Could not load cost queue. Backend may still be deploying." />
-        ) : products.length === 0 ? (
-          <EmptyBlock text="No products need cost completion right now." />
-        ) : (
-          <div className="table-wrap cost-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Product Name</th>
-                  <th>SKU</th>
-                  <th>ASIN</th>
-                  <th>Subcategory</th>
-                  <th>Selling Price</th>
-                  <th>Cost Status</th>
-                  <th>Missing Fields</th>
-                  <th>Profit Status</th>
-                  <th>Target ACOS</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => (
-                  <tr key={product.key}>
-                    <td>{formatEmpty(product.productName)}</td>
-                    <td>{formatEmpty(product.sku)}</td>
-                    <td>{formatEmpty(product.asin)}</td>
-                    <td>{product.subCategory ? formatEmpty(product.subCategory) : <StatusBadge value="Subcategory missing" />}</td>
-                    <td>{formatMoney(product.sellingPrice)}</td>
-                    <td><StatusBadge value={product.costStatus} /></td>
-                    <td>{queueMissingFields(product.missingFields)}</td>
-                    <td><StatusBadge value={product.profitStatus || product.economics?.profitStatus || "NEEDS_INPUT"} /></td>
-                    <td>{formatPercent(product.targetAcos ?? product.economics?.targetAcos)}</td>
-                    <td><button type="button" onClick={() => openCostForm(product)}>{product.economics ? "Edit Cost" : "Complete Cost Data"}</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <Card title="Cost Completion">
-        {!selectedProduct ? (
-          <EmptyBlock text="Choose Complete Cost Data or Edit Cost from the queue." />
-        ) : (
-          <form className="form-grid" onSubmit={submit}>
-            <ReadOnlyField label="SKU" value={formatEmpty(selectedProduct.sku)} />
-            <ReadOnlyField label="ASIN" value={formatEmpty(selectedProduct.asin)} />
-            <ReadOnlyField label="Product Name" value={formatEmpty(selectedProduct.productName)} />
-            {selectedProduct.subCategory ? (
-              <ReadOnlyField label="Subcategory" value={formatEmpty(selectedProduct.subCategory)} />
-            ) : (
-              <label className="field">
-                <span>Subcategory</span>
-                <select value={form.subCategory} onChange={(event) => setForm({ ...form, subCategory: event.target.value })}>
-                  <option value="">Subcategory missing</option>
-                  {referralFeeSubcategories.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </label>
-            )}
-            <TextInput label="Selling Price" type="number" value={form.sellingPrice} onChange={(value) => setForm({ ...form, sellingPrice: value })} />
-            <TextInput label="Product Cost / Buying Cost" type="number" value={form.buyingCost} onChange={(value) => setForm({ ...form, buyingCost: value })} />
-            <TextInput label="Required Profit" type="number" value={form.requiredProfit} onChange={(value) => setForm({ ...form, requiredProfit: value })} />
-            <SelectField label="Fulfillment Type" value={form.fulfillmentType} options={["FC", "Easy Ship", "Easy Ship Prime", "Self Ship", "Seller Flex"]} onChange={(value) => setForm({ ...form, fulfillmentType: value })} />
-            <SelectField label="Product Type" value={form.productType} options={["Standard", "Oversize"]} onChange={(value) => setForm({ ...form, productType: value })} />
-            <TextInput label="Weight kg" type="number" value={form.weightKg} onChange={(value) => setForm({ ...form, weightKg: value })} />
-            <TextInput label="Volume cu ft" type="number" value={form.volumeCuFt} onChange={(value) => setForm({ ...form, volumeCuFt: value })} />
-            <TextInput label="Other Fees" type="number" value={form.otherFees} onChange={(value) => setForm({ ...form, otherFees: value })} />
-            <SelectField label="Shipping Region" value={form.shippingRegion} options={["National"]} onChange={(value) => setForm({ ...form, shippingRegion: value })} />
-            <SelectField label="Category Exception" value={form.categoryException} options={["No", "Yes"]} onChange={(value) => setForm({ ...form, categoryException: value })} />
-            <details className="advanced-settings field-wide">
-              <summary>Advanced Tax Settings</summary>
-              <div className="advanced-settings-grid">
-                <TextInput label="Product GST Rate %" type="number" value={form.productGstRatePercent} onChange={(value) => setForm({ ...form, productGstRatePercent: value })} />
-                <TextInput label="Amazon Fee GST Rate %" type="number" value={form.amazonFeeGstRatePercent} onChange={(value) => setForm({ ...form, amazonFeeGstRatePercent: value })} />
-              </div>
-            </details>
-            <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
-            <div className="field-wide cost-form-actions">
-              <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
-              {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
-              {saveError ? <span className="save-error">{saveError}</span> : null}
+    <div className="card-list-item sku-cost-input-panel" style={{ marginTop: 8 }}>
+      <Button className="secondary" onClick={toggleExpanded}>
+        {expanded ? "Hide cost & profitability inputs ▴" : `${economicsRow ? "Edit" : "Add"} cost & profitability inputs ▾`}
+      </Button>
+      {expanded ? (
+        <form className="form-grid" onSubmit={submit} style={{ marginTop: 10 }}>
+          <ReadOnlyField label="SKU" value={formatEmpty(sku)} />
+          <ReadOnlyField label="ASIN" value={formatEmpty(asin)} />
+          <TextInput label="Selling Price" type="number" value={form.sellingPrice} onChange={(value) => setForm({ ...form, sellingPrice: value })} />
+          <TextInput label="Landed Cost" type="number" value={form.landedCost} onChange={(value) => setForm({ ...form, landedCost: value })} />
+          <TextInput label="Packaging Cost" type="number" value={form.packagingCost} onChange={(value) => setForm({ ...form, packagingCost: value })} />
+          <TextInput label="Required Profit" type="number" value={form.requiredProfit} onChange={(value) => setForm({ ...form, requiredProfit: value })} />
+          <SelectField label="Fulfillment Type" value={form.fulfillmentType} options={["Easy Ship", "Easy Ship Prime", "FC", "Self Ship", "Seller Flex"]} onChange={(value) => setForm({ ...form, fulfillmentType: value })} />
+          <SelectField label="Product Type" value={form.productType} options={["Standard", "Oversize"]} onChange={(value) => setForm({ ...form, productType: value })} />
+          <TextInput label="Weight kg" type="number" value={form.weightKg} onChange={(value) => setForm({ ...form, weightKg: value })} />
+          <TextInput label="Volume cu ft" type="number" value={form.volumeCuFt} onChange={(value) => setForm({ ...form, volumeCuFt: value })} />
+          <TextInput label="Other Fees" type="number" value={form.otherFees} onChange={(value) => setForm({ ...form, otherFees: value })} />
+          <SelectField label="Shipping Region" value={form.shippingRegion} options={["National"]} onChange={(value) => setForm({ ...form, shippingRegion: value })} />
+          <SelectField label="Category Exception" value={form.categoryException} options={["No", "Yes"]} onChange={(value) => setForm({ ...form, categoryException: value })} />
+          <SelectField label="Subcategory" value={form.subCategory} options={referralFeeSubcategories} onChange={(value) => setForm({ ...form, subCategory: value })} />
+          <details className="advanced-settings field-wide">
+            <summary>Returns &amp; other real costs</summary>
+            <div className="advanced-settings-grid">
+              <TextInput label="Return Rate %" type="number" value={form.returnRatePercent} onChange={(value) => setForm({ ...form, returnRatePercent: value })} />
+              <TextInput label="Return Cost Per Return" type="number" value={form.returnCostPerReturn} onChange={(value) => setForm({ ...form, returnCostPerReturn: value })} />
+              <TextInput label="Return Penalty Fraction %" type="number" value={form.returnPenaltyFractionPercent} onChange={(value) => setForm({ ...form, returnPenaltyFractionPercent: value })} />
+              <SelectField label="Return Recoverable" value={form.returnRecoverable} options={["Yes", "No"]} onChange={(value) => setForm({ ...form, returnRecoverable: value })} />
+              <TextInput label="Repackaging Cost" type="number" value={form.repackagingCost} onChange={(value) => setForm({ ...form, repackagingCost: value })} />
+              <TextInput label="TCS %" type="number" value={form.tcsPercent} onChange={(value) => setForm({ ...form, tcsPercent: value })} />
+              <TextInput label="Influencer Cost / Unit" type="number" value={form.influencerCostAllocationPerUnit} onChange={(value) => setForm({ ...form, influencerCostAllocationPerUnit: value })} />
+              <TextInput label="Social Marketing Cost / Unit" type="number" value={form.socialMarketingCostPerUnit} onChange={(value) => setForm({ ...form, socialMarketingCostPerUnit: value })} />
+              <TextInput label="Coupon Discount Estimate" type="number" value={form.couponDiscountEstimate} onChange={(value) => setForm({ ...form, couponDiscountEstimate: value })} />
             </div>
-          </form>
-        )}
-      </Card>
-
-      {selectedProduct && Object.keys(resultSource).length > 0 ? (
-        <Card title="Calculated Result">
-          <div className="calculated-grid">
-            {calculatedRows.map(([label, keys, format]) => {
-              const value = readFirst(resultSource, [...keys]);
-              const display = format === "money" ? formatMoney(value) : format === "percent" ? formatPercent(value) : formatEmpty(value);
-              return <MetricRow key={label} label={label} value={display} />;
-            })}
-            <MetricRow label="Profit Status" value={<StatusBadge value={readFirst(resultSource, ["profitStatus", "profit_status"]) ?? "NEEDS_INPUT"} />} />
+          </details>
+          <details className="advanced-settings field-wide">
+            <summary>Advanced Tax Settings</summary>
+            <div className="advanced-settings-grid">
+              <TextInput label="Product GST Rate %" type="number" value={form.productGstRatePercent} onChange={(value) => setForm({ ...form, productGstRatePercent: value })} />
+              <TextInput label="Amazon Fee GST Rate %" type="number" value={form.amazonFeeGstRatePercent} onChange={(value) => setForm({ ...form, amazonFeeGstRatePercent: value })} />
+            </div>
+          </details>
+          <TextArea label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+          <div className="field-wide cost-form-actions">
+            <button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Cost Data"}</button>
+            {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
+            {saveError ? <span className="save-error">{saveError}</span> : null}
           </div>
-        </Card>
+        </form>
       ) : null}
-
-      {selectedProduct && profitBands.length > 0 ? (
-        <Card title="Profit Flex Options">
-          <p className="section-note">Lower profit bands are approval-only. This screen does not auto-apply any lower profit target.</p>
-          {hasFounderOverrideBand ? (
-            <div className="warning-card profit-band-warning">
-              <StatusBadge value="FOUNDER_OVERRIDE_REQUIRED" />
-              <p>This profit band is too far below target. Founder override required.</p>
-            </div>
-          ) : null}
-          <div className="table-wrap profit-band-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Profit Band</th>
-                  <th>Target ACOS</th>
-                  <th>Max Allowable Ad Spend</th>
-                  <th>Risk Level</th>
-                  <th>Approval Required</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {profitBands.map((band, index) => {
-                  const bandRecord = recordOf(band);
-                  const approvalRequired = Boolean(readFirst(bandRecord, ["approvalRequired", "approval_required"]));
-                  const approvalTier = String(readFirst(bandRecord, ["approvalTier", "approval_tier"]) ?? "");
-                  const bandWarning = String(readFirst(bandRecord, ["warning"]) ?? "");
-                  const status = approvalTier || (approvalRequired ? "APPROVAL_REQUIRED" : "AVAILABLE");
-                  const needsFounderOverride =
-                    approvalTier.toUpperCase() === "FOUNDER_OVERRIDE_REQUIRED" ||
-                    bandWarning.toLowerCase().includes("significantly below") ||
-                    bandWarning.toLowerCase().includes("too far");
-
-                  return (
-                    <tr key={String(readFirst(bandRecord, ["bandLabel", "band_label"]) ?? index)}>
-                      <td>
-                        <strong>{formatEmpty(readFirst(bandRecord, ["bandLabel", "band_label"]))}</strong>
-                        {needsFounderOverride ? <p className="table-warning">Founder override required.</p> : null}
-                      </td>
-                      <td>{formatPercent(readFirst(bandRecord, ["targetAcos", "target_acos"]))}</td>
-                      <td>{formatMoney(readFirst(bandRecord, ["maxAllowableAdSpend", "max_allowable_ad_spend"]))}</td>
-                      <td><StatusBadge value={readFirst(bandRecord, ["riskLevel", "risk_level"])} /></td>
-                      <td>{approvalRequired ? "Approval Required" : "No Approval Required"}</td>
-                      <td><StatusBadge value={status} /></td>
-                      <td>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => setSaveMessage("Profit band approval request noted for review. No lower profit band was applied automatically.")}
-                        >
-                          Request Approval for This Profit Band
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      {expanded && calculatedResult && Object.keys(calculatedResult).length > 0 ? (
+        <div className="detail-grid" style={{ marginTop: 10 }}>
+          {costInputCalculatedRows.map(([label, keys, format]) => {
+            const value = readFirst(calculatedResult, [...keys]);
+            const display = format === "money" ? formatMoney(value) : format === "percent" ? formatPercent(value) : formatEmpty(value);
+            return <MetricRow key={label} label={label} value={display} />;
+          })}
+          <MetricRow label="Profit Status" value={<StatusBadge value={readFirst(calculatedResult, ["profitStatus", "profit_status"]) ?? "NEEDS_INPUT"} />} />
+        </div>
       ) : null}
     </div>
   );
@@ -11048,6 +10916,15 @@ function CompetitorBenchmarkCard({
 function CompetitorBenchmarkToolPage() {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const runsState = useApi<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(() => competitorBenchmarkApi.listRuns(SELLER_ID));
+  // Cost & charge calculation inputs and Profitability Readiness (moved 2026-10-12 from the
+  // removed standalone "Product Economics" page, per founder request): fetched once here and
+  // shared by the Profitability Readiness table below and every per-SKU cost-input panel, so
+  // selecting several SKUs doesn't fire several redundant copies of this same request.
+  const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
+  const economicsBySku = useMemo(
+    () => new Map(rowsOf<ProductEconomics>(economics.data).filter((row) => row.sku).map((row) => [row.sku as string, row])),
+    [economics.data]
+  );
 
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
   const [pendingSku, setPendingSku] = useState("");
@@ -11252,11 +11129,21 @@ function CompetitorBenchmarkToolPage() {
                 {selectedSkus.map((sku) => {
                   const product = ownSkuOptions.find((p) => p.sku === sku);
                   return (
-                    <div key={sku} className="command-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>
-                        <strong>{sku}</strong> -- {product?.productName ?? "Unnamed product"} {product?.asin ? <span className="brand-card-note">({product.asin})</span> : <Badge tone="watch">No ASIN</Badge>}
-                      </span>
-                      <Button className="secondary" onClick={() => toggleSku(sku)}>Remove</Button>
+                    <div key={sku} className="command-card">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>
+                          <strong>{sku}</strong> -- {product?.productName ?? "Unnamed product"} {product?.asin ? <span className="brand-card-note">({product.asin})</span> : <Badge tone="watch">No ASIN</Badge>}
+                        </span>
+                        <Button className="secondary" onClick={() => toggleSku(sku)}>Remove</Button>
+                      </div>
+                      <SkuCostInputPanel
+                        sku={sku}
+                        asin={product?.asin ?? null}
+                        productName={product?.productName ?? null}
+                        passportSubCategory={product?.subCategory ?? null}
+                        economicsRow={economicsBySku.get(sku)}
+                        onSaved={economics.reload}
+                      />
                     </div>
                   );
                 })}
@@ -11277,6 +11164,8 @@ function CompetitorBenchmarkToolPage() {
           </div>
         ) : null}
       </Card>
+
+      <ProfitabilityReadinessCard economics={economics} />
 
       {actionError ? <div className="soft-state error-state">{actionError}</div> : null}
 
