@@ -5172,99 +5172,33 @@ function readFirst(source: unknown, keys: string[]): unknown {
   return undefined;
 }
 
-// Profitability Readiness (moved 2026-10-12 from the removed standalone "Product Economics" page
-// into the Competitor Benchmark Tool, per founder request -- same table, same data source
-// (/api/product-economics), just relocated).
-function ProfitabilityReadinessCard({ economics }: { economics: LoadState<ApiRows<ProductEconomics>> & { reload: () => void } }) {
-  const rows = rowsOf<ProductEconomics>(economics.data);
-  const [selectedId, setSelectedId] = useState("");
-
+// Compact profitability summary for one SKU -- shown inline inside that SKU's results card in
+// the Competitor Benchmark Tool (moved 2026-10-13: this used to be its own standalone
+// "Profitability Readiness" table before the SKU-level results card existed; the founder asked
+// for it to instead be part of the same per-SKU details view as the Listing Score / stat tiles /
+// keyword sections, so there's one place per SKU with everything, not several separate sections).
+function ProfitabilitySummaryRow({ row }: { row: ProductEconomics }) {
+  const adDataAvailable = Boolean(row.realAdSpendDataAvailable);
+  const realNetProfitAfterAds = readNumber(row.realNetProfitAfterAds);
   return (
-    <Card title="Profitability Readiness">
-      {economics.loading ? <LoadingBlock /> : economics.error ? (
-        <ErrorBlock text="Could not load product economics. Backend may still be deploying." />
-      ) : rows.length === 0 ? (
-        <EmptyBlock text="No product economics rows yet. Fill in cost data below for a SKU to see it here." />
-      ) : (
-        <div className="table-wrap economics-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Product Name</th>
-                <th>SKU</th>
-                <th>ASIN</th>
-                <th>Subcategory</th>
-                <th>Selling Price</th>
-                <th>Landed Cost</th>
-                <th>Required Profit</th>
-                <th>Profit Status</th>
-                <th>Real Ad Profit</th>
-                <th>Target ACOS</th>
-                <th>Break-even ACOS</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const open = selectedId === row.id;
-                const adDataAvailable = Boolean(row.realAdSpendDataAvailable);
-                const realNetProfitAfterAds = readNumber(row.realNetProfitAfterAds);
-                return (
-                  <Fragment key={row.id}>
-                    <tr className={open ? "edited-row" : ""}>
-                      <td className="product-name-cell">{formatEmpty(row.productName)}</td>
-                      <td className="identity-cell">{formatEmpty(row.sku)}</td>
-                      <td className="identity-cell">{formatEmpty(row.asin)}</td>
-                      <td>{formatEmpty(row.subCategory)}</td>
-                      <td>{formatMoney(row.sellingPrice)}</td>
-                      <td>{formatMoney(row.landedCost)}</td>
-                      <td>{formatMoney(row.requiredProfit)}</td>
-                      <td><StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} /></td>
-                      <td>
-                        {adDataAvailable ? (
-                          <Badge tone={realNetProfitAfterAds < 0 ? "risk" : "good"}>
-                            {formatMoney(row.realNetProfitAfterAds)}
-                          </Badge>
-                        ) : (
-                          <span className="muted-text">Not synced</span>
-                        )}
-                      </td>
-                      <td>{formatPercent(row.targetAcos)}</td>
-                      <td>{formatPercent(row.breakEvenAcos)}</td>
-                      <td>
-                        <button type="button" className="secondary" onClick={() => setSelectedId(open ? "" : row.id)}>
-                          {open ? "Close Details" : "View Details"}
-                        </button>
-                      </td>
-                    </tr>
-                    {open ? (
-                      <tr className="economics-inline-detail-row">
-                        <td colSpan={12}>
-                          <div className="economics-inline-detail">
-                            <div className="approval-card-head">
-                              <div className="approval-title-block">
-                                <strong>{formatEmpty(row.productName)}</strong>
-                                <span>{formatEmpty(row.sku)} / {formatEmpty(row.asin)}</span>
-                              </div>
-                              <button type="button" className="secondary" onClick={() => setSelectedId("")}>Close Details</button>
-                            </div>
-                            <div className="detail-grid">
-                              {economicsDetailRows(row).map(([label, value]) => (
-                                <MetricRow key={label} label={label} value={value} />
-                              ))}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
+    <div className="detail-grid">
+      <MetricRow label="Selling Price" value={formatMoney(row.sellingPrice)} />
+      <MetricRow label="Landed Cost" value={formatMoney(row.landedCost)} />
+      <MetricRow label="Required Profit" value={formatMoney(row.requiredProfit)} />
+      <MetricRow label="Profit Status" value={<StatusBadge value={row.profitStatus ?? row.profitDataStatus ?? "NEEDS_INPUT"} />} />
+      <MetricRow
+        label="Real Ad Profit"
+        value={
+          adDataAvailable ? (
+            <Badge tone={realNetProfitAfterAds < 0 ? "risk" : "good"}>{formatMoney(row.realNetProfitAfterAds)}</Badge>
+          ) : (
+            <span className="muted-text">Not synced</span>
+          )
+        }
+      />
+      <MetricRow label="Target ACOS" value={formatPercent(row.targetAcos)} />
+      <MetricRow label="Break-even ACOS" value={formatPercent(row.breakEvenAcos)} />
+    </div>
   );
 }
 
@@ -10917,9 +10851,12 @@ function CompetitorBenchmarkToolPage() {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const runsState = useApi<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(() => competitorBenchmarkApi.listRuns(SELLER_ID));
   // Cost & charge calculation inputs and Profitability Readiness (moved 2026-10-12 from the
-  // removed standalone "Product Economics" page, per founder request): fetched once here and
-  // shared by the Profitability Readiness table below and every per-SKU cost-input panel, so
-  // selecting several SKUs doesn't fire several redundant copies of this same request.
+  // removed standalone "Product Economics" page, per founder request, then 2026-10-13 moved
+  // again -- out of the SKU-picker step and the standalone "Profitability Readiness" table --
+  // into each SKU's own results card below, alongside the Listing Score / stat tiles / keyword
+  // sections already shown there, so one SKU's full picture lives in one place): fetched once
+  // here and shared by every per-SKU card, so selecting several SKUs doesn't fire several
+  // redundant copies of this same request.
   const economics = useApi<ApiRows<ProductEconomics>>(() => getJson(`/api/product-economics?sellerId=${SELLER_ID}`));
   const economicsBySku = useMemo(
     () => new Map(rowsOf<ProductEconomics>(economics.data).filter((row) => row.sku).map((row) => [row.sku as string, row])),
@@ -11136,14 +11073,6 @@ function CompetitorBenchmarkToolPage() {
                         </span>
                         <Button className="secondary" onClick={() => toggleSku(sku)}>Remove</Button>
                       </div>
-                      <SkuCostInputPanel
-                        sku={sku}
-                        asin={product?.asin ?? null}
-                        productName={product?.productName ?? null}
-                        passportSubCategory={product?.subCategory ?? null}
-                        economicsRow={economicsBySku.get(sku)}
-                        onSaved={economics.reload}
-                      />
                     </div>
                   );
                 })}
@@ -11164,8 +11093,6 @@ function CompetitorBenchmarkToolPage() {
           </div>
         ) : null}
       </Card>
-
-      <ProfitabilityReadinessCard economics={economics} />
 
       {actionError ? <div className="soft-state error-state">{actionError}</div> : null}
 
@@ -11226,6 +11153,36 @@ function CompetitorBenchmarkToolPage() {
                   />
                 </div>
               ) : null}
+
+              {(() => {
+                const ownProduct = ownSkuOptions.find((p) => p.sku === group.ownSku);
+                const economicsRow = economicsBySku.get(group.ownSku);
+                return (
+                  <div className="card-list-item" style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                    <strong>Profitability Readiness</strong>
+                    {economics.loading ? (
+                      <LoadingBlock />
+                    ) : economicsRow ? (
+                      <div style={{ marginTop: 8 }}>
+                        <ProfitabilitySummaryRow row={economicsRow} />
+                      </div>
+                    ) : (
+                      <div className="soft-state" style={{ marginTop: 8 }}>
+                        No cost data saved yet for this SKU -- add it below to see profit status, target ACOS and break-even ACOS.
+                      </div>
+                    )}
+                    <SkuCostInputPanel
+                      sku={group.ownSku}
+                      asin={group.ownAsin ?? ownProduct?.asin ?? null}
+                      productName={ownCandidate?.title ?? ownProduct?.productName ?? null}
+                      passportSubCategory={ownProduct?.subCategory ?? null}
+                      economicsRow={economicsRow}
+                      onSaved={economics.reload}
+                    />
+                  </div>
+                );
+              })()}
+
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
                 {group.candidates.filter((c) => c.source !== "OWN_BASELINE").map((candidate: CompetitorBenchmarkCandidate) => (
                   <CompetitorBenchmarkCard
