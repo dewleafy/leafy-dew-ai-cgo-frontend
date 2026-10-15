@@ -1279,6 +1279,12 @@ function App() {
   const [logoFailed, setLogoFailed] = useState(false);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
 
+  // One-click handoff from the Competitor Benchmark Tool to Listing Drafts (built 2026-10-15, per
+  // founder's "Add a one-click link to Listing Drafts" choice): Listing Drafts already generates
+  // the AI title/bullets/description using saved SEO keywords, so this just jumps there with the
+  // SKU pre-filled into its search box rather than building a separate "compiled listing" view.
+  const [pendingDraftSkuFilter, setPendingDraftSkuFilter] = useState<string | null>(null);
+
   useEffect(() => {
     mainContentRef.current?.scrollTo({ top: 0 });
   }, [activePage]);
@@ -1290,6 +1296,11 @@ function App() {
 
   function setTechnicalTab(tab: Tab) {
     setActivePage(tab);
+  }
+
+  function openListingDraftsForSku(sku: string) {
+    setPendingDraftSkuFilter(sku);
+    setActivePage("Listing Drafts");
   }
 
   return (
@@ -1321,7 +1332,7 @@ function App() {
           {activePage === "Playbooks" && <PlaybooksPage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
-          {activePage === "Competitor Benchmark Tool" && <CompetitorBenchmarkToolPage />}
+          {activePage === "Competitor Benchmark Tool" && <CompetitorBenchmarkToolPage onOpenListingDraftsForSku={openListingDraftsForSku} />}
           {activePage === "Listing Optimizer" && <ListingOptimizerPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
           {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
@@ -1331,7 +1342,13 @@ function App() {
           {activePage === "Execution Gateway" && <ExecutionGatewayPage />}
           {activePage === "Live Execution" && <LiveExecutionPage />}
           {activePage === "Rollback Center" && <RollbackCenterPage />}
-          {activePage === "Listing Drafts" && <ListingDraftsPage setActiveTab={setTechnicalTab} />}
+          {activePage === "Listing Drafts" && (
+            <ListingDraftsPage
+              setActiveTab={setTechnicalTab}
+              initialSkuFilter={pendingDraftSkuFilter}
+              onConsumeInitialSkuFilter={() => setPendingDraftSkuFilter(null)}
+            />
+          )}
           {activePage === "Image + A+" && <CreativeRecommendationsPage setActiveTab={setTechnicalTab} />}
           {activePage === "Safety Control" && <SafetyControlPage />}
           {activePage === "Launch Gate" && <LaunchGatePage />}
@@ -8915,12 +8932,31 @@ function ExecutionGatewayPage() {
   );
 }
 
-function ListingDraftsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) {
+function ListingDraftsPage({
+  setActiveTab,
+  initialSkuFilter,
+  onConsumeInitialSkuFilter
+}: {
+  setActiveTab: (tab: Tab) => void;
+  initialSkuFilter?: string | null;
+  onConsumeInitialSkuFilter?: () => void;
+}) {
   const summary = useApi<ListingDraftSummary>(() => getJson(`/api/listing-drafts/summary?sellerId=${SELLER_ID}`));
   const drafts = useApi<ApiRows<ListingDraft>>(() => getJson(`/api/listing-drafts?sellerId=${SELLER_ID}&limit=100`));
   const [draftType, setDraftType] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [query, setQuery] = useState("");
+
+  // Arriving here via "Open in Listing Drafts" on the Competitor Benchmark Tool (added 2026-10-15):
+  // pre-fill the search box with that SKU, then tell the parent to clear it so a later, ordinary
+  // sidebar visit to this page doesn't re-apply a stale filter.
+  useEffect(() => {
+    if (initialSkuFilter) {
+      setQuery(initialSkuFilter);
+      onConsumeInitialSkuFilter?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSkuFilter]);
   const [processingId, setProcessingId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -10847,7 +10883,7 @@ function CompetitorBenchmarkCard({
 // Report-only, start to finish: every call this page makes either reads data or writes to
 // this tool's own competitor_benchmark_* tables. None of it ever reaches Amazon's write APIs
 // or this app's live listing data (product_passports, amazon_sp_listings).
-function CompetitorBenchmarkToolPage() {
+function CompetitorBenchmarkToolPage({ onOpenListingDraftsForSku }: { onOpenListingDraftsForSku: (sku: string) => void }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const runsState = useApi<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(() => competitorBenchmarkApi.listRuns(SELLER_ID));
   // Cost & charge calculation inputs and Profitability Readiness (moved 2026-10-12 from the
@@ -10880,6 +10916,11 @@ function CompetitorBenchmarkToolPage() {
   const [keywordSelections, setKeywordSelections] = useState<Record<string, Set<string>>>({});
   const [savingKeywordsForSku, setSavingKeywordsForSku] = useState<string | null>(null);
   const [keywordSaveMessage, setKeywordSaveMessage] = useState<Record<string, string>>({});
+
+  // Stage 2 AI image mockup request state (built 2026-10-15): tracks which SKU currently has a
+  // mockup generation in flight so the button can show "Generating..." -- real OpenAI image
+  // generation calls take noticeably longer than the Stage 1 text-only checklist above.
+  const [requestingMockupForSku, setRequestingMockupForSku] = useState<string | null>(null);
 
   function toggleKeywordSelection(ownSku: string, phrase: string) {
     setKeywordSelections((current) => {
@@ -11000,11 +11041,14 @@ function CompetitorBenchmarkToolPage() {
   async function handleRequestMockup(ownSku: string) {
     if (!activeRun) return;
     setActionError(null);
+    setRequestingMockupForSku(ownSku);
     try {
       await competitorBenchmarkApi.requestImageMockup(SELLER_ID, activeRun.id, { ownSku, imageSlot: 1 });
       await refreshActiveRun(activeRun.id);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Could not request this image mockup.");
+    } finally {
+      setRequestingMockupForSku(null);
     }
   }
 
@@ -11226,12 +11270,30 @@ function CompetitorBenchmarkToolPage() {
                       <li key={index}>{change}</li>
                     ))}
                   </ul>
-                  <Button className="secondary" onClick={() => handleRequestMockup(group.ownSku)}>Request AI image mockup (Stage 2)</Button>
-                  {group.imageMockups.length > 0 ? (
-                    <div className="soft-state" style={{ marginTop: 8 }}>
-                      {group.imageMockups[group.imageMockups.length - 1].note}
-                    </div>
-                  ) : null}
+                  <Button
+                    className="secondary"
+                    onClick={() => handleRequestMockup(group.ownSku)}
+                    disabled={requestingMockupForSku === group.ownSku}
+                  >
+                    {requestingMockupForSku === group.ownSku ? "Generating (this can take up to a minute)..." : "Request AI image mockup (Stage 2)"}
+                  </Button>
+                  {group.imageMockups.length > 0 ? (() => {
+                    const latestMockup = group.imageMockups[group.imageMockups.length - 1];
+                    return (
+                      <div className="soft-state" style={{ marginTop: 8 }}>
+                        {latestMockup.note}
+                        {latestMockup.status === "GENERATED" && latestMockup.mockupUrl ? (
+                          <div style={{ marginTop: 8 }}>
+                            <img
+                              src={latestMockup.mockupUrl}
+                              alt={`AI-generated image mockup for ${group.ownSku}`}
+                              style={{ maxWidth: 320, width: "100%", borderRadius: 6, border: "1px solid #e5e7eb", display: "block" }}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })() : null}
                 </div>
               ) : null}
 
@@ -11248,7 +11310,13 @@ function CompetitorBenchmarkToolPage() {
 
               {(() => {
                 if (fetchedListings.length === 0) return null;
-                const phrases = extractKeywordPhrases(groupCorpusText, groupCorpusText, 20);
+                // Raised from 20 -> 60 (2026-10-15, founder feedback: "there should be all
+                // keywords") -- extractKeywordPhrases already de-duplicates and ranks by real
+                // corpus frequency, so this just stops truncating the list early. The chip CSS
+                // below was also tightened (smaller padding/font, scrollable container) to match
+                // the denser per-card tag style, since showing more phrases at the old chip size
+                // was the "selection tabs very large" complaint.
+                const phrases = extractKeywordPhrases(groupCorpusText, groupCorpusText, 60);
                 if (phrases.length === 0) return null;
                 const selected = keywordSelections[group.ownSku] ?? new Set<string>();
                 return (
@@ -11257,16 +11325,17 @@ function CompetitorBenchmarkToolPage() {
                     <p className="brand-card-note">
                       Mark the phrases worth going after, then save -- they're written to this SKU's SEO keywords. From there, go to Listing Drafts -&gt; Generate Listing Drafts to get an AI title/bullets/description that weaves these in.
                     </p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, maxHeight: 220, overflowY: "auto", padding: 4 }}>
                       {phrases.map((phrase) => (
                         <label
                           key={phrase}
-                          style={{ display: "flex", alignItems: "center", gap: 4, border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 8px" }}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid #e5e7eb", borderRadius: 4, padding: "2px 6px", fontSize: 12, lineHeight: "18px" }}
                         >
                           <input
                             type="checkbox"
                             checked={selected.has(phrase)}
                             onChange={() => toggleKeywordSelection(group.ownSku, phrase)}
+                            style={{ margin: 0 }}
                           />
                           {phrase}
                         </label>
@@ -11286,6 +11355,14 @@ function CompetitorBenchmarkToolPage() {
                   </div>
                 );
               })()}
+
+              <div style={{ marginTop: 16 }}>
+                <strong>New listing draft</strong>
+                <p className="brand-card-note">
+                  Get an AI-written title, bullets, and description for this SKU -- it automatically weaves in any keywords you've saved above (Listing Drafts already does this; no separate "compiled listing" step needed).
+                </p>
+                <Button className="secondary" onClick={() => onOpenListingDraftsForSku(group.ownSku)}>Open in Listing Drafts</Button>
+              </div>
             </Card>
             );
           })}
