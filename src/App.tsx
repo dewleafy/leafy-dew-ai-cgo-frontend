@@ -171,7 +171,10 @@ const technicalTabs = [
   "Listing Optimizer",
   "PPC Guardrail Triage",
   "Social Content Calendar",
-  "Approval Center",
+  // "Approval Center" removed as its own tab 2026-10-16 -- it's now a section rendered inside
+  // "Competitor Benchmark Tool" (see CompetitorBenchmarkToolPage). Every former
+  // setActiveTab("Competitor Benchmark Tool") call elsewhere in this file now targets
+  // "Competitor Benchmark Tool" instead.
   "Listing Drafts",
   "Image + A+",
   "CEO Report",
@@ -1109,7 +1112,11 @@ type NavGroup = { title: string; items: NavItem[] };
 const essentialNavItems: NavItem[] = [
   { label: "Today", page: "Today" },
   { label: "Products", page: "Products" },
-  { label: "Approval Center", page: "Approval Center", note: "Review and decide on pending AI recommendations" },
+  // Approval Center was promoted here (and removed as its own separate nav destination) on
+  // 2026-10-16, per founder request: it's now rendered as a section inside the Competitor
+  // Benchmark Tool page (see CompetitorBenchmarkToolPage's own return, bottom section) rather
+  // than behind a separate tab. This essential-nav slot now points there instead.
+  { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Benchmark competitors, review listing drafts, and decide on pending approvals" },
   { label: "Listing Drafts", page: "Listing Drafts", note: "AI-written title, bullet, and description drafts" },
   { label: "Sales & Ads", page: "Sales & Ads", note: "Real sales and ad performance" },
   { label: "AI Actions", page: "AI Actions" },
@@ -1121,7 +1128,6 @@ const advancedNavGroups: NavGroup[] = [
     { label: "Product Passport", page: "Product Passport", note: "Product truth and cost queue" },
     { label: "Listing Readiness", page: "Listing Readiness", note: "Score, gaps, next action" },
     { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
-    { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Compare your SKUs against real competitor data -- report only, nothing applied to any listing" },
     { label: "Listing Optimizer", page: "Listing Optimizer", note: "Conversion Score, gaps, and priorities -- scoring only, nothing applied to any listing" }
   ] },
   { title: "Growth & Ads", items: [
@@ -1333,13 +1339,12 @@ function App() {
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
           {activePage === "Competitor Benchmark Tool" && (
-            <CompetitorBenchmarkToolPage setActiveTab={setTechnicalTab} onOpenListingDraftsForSku={openListingDraftsForSku} />
+            <CompetitorBenchmarkToolPage onOpenListingDraftsForSku={openListingDraftsForSku} />
           )}
           {activePage === "Listing Optimizer" && <ListingOptimizerPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
           {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
-          {activePage === "Approval Center" && <ApprovalCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
           {activePage === "Execution Gateway" && <ExecutionGatewayPage />}
           {activePage === "Live Execution" && <LiveExecutionPage />}
@@ -2280,7 +2285,7 @@ function ProductDetailPage({ product, navigate }: { product: FounderProduct | nu
                     </article>
                   ))}
                 </div>
-                <button type="button" className="secondary" onClick={() => navigate("Approval Center")}>Review in Approval Center</button>
+                <button type="button" className="secondary" onClick={() => navigate("Competitor Benchmark Tool")}>Review in Approval Center</button>
               </>
             )}
           </div>
@@ -2418,7 +2423,7 @@ function FounderApprovalsPage({ navigate }: { navigate: FounderNavigate }) {
         </div>
       )}
       <div className="button-row">
-        <button type="button" className="secondary" onClick={() => navigate("Approval Center")}>Open Advanced Approval Center</button>
+        <button type="button" className="secondary" onClick={() => navigate("Competitor Benchmark Tool")}>Open Advanced Approval Center</button>
       </div>
     </div>
   );
@@ -3697,7 +3702,9 @@ function MoreToolsPage({ navigate }: { navigate: FounderNavigate }) {
       { label: "Ads Recommendations", page: "PPC Recommendations", note: "Ads ideas" },
       { label: "Listing Drafts", page: "Listing Drafts", note: "Listing improvements" },
       { label: "Image + A+", page: "Image + A+", note: "Creative recommendations" },
-      { label: "Advanced Approval Center", page: "Approval Center", note: "Full approval workflow" }
+      // "Advanced Approval Center" removed 2026-10-16 -- Approval Center now lives inside the
+      // Competitor Benchmark Tool page (reachable from the main sidebar), not its own tab.
+      { label: "Competitor Benchmark Tool (incl. Approvals)", page: "Competitor Benchmark Tool", note: "Competitor data, listing drafts, and the full approval queue" }
     ] }
   ];
 
@@ -3966,7 +3973,7 @@ function DailyAiCgoPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void }) 
 
         <Card title="Quick Links">
           <div className="quick-link-grid">
-            <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
+            <button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>Open Approval Center</button>
             <button type="button" onClick={() => setActiveTab("Engine Command Center")}>Open Engine Command Center</button>
             <button type="button" onClick={() => setActiveTab("Product Passport")}>Open Product Passport Cost Queue</button>
             <button type="button" onClick={() => setActiveTab("CEO Report")}>Open CEO Report</button>
@@ -5480,16 +5487,16 @@ function PpcRecommendationsPage({ setActiveTab }: { setActiveTab: (tab: Tab) => 
       <PageHeader title="PPC Recommendations" subtitle="Shadow-mode ideas only. No Amazon action is executed here." />
       <div className="button-row">
         <button type="button" disabled={saving} onClick={generateAndSave}>{saving ? "Saving..." : "Generate & Save Recommendations"}</button>
-        <button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>
+        <button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>View in Approval Center</button>
       </div>
       {live.loading ? <LoadingBlock /> : live.error ? <ErrorBlock /> : (
         <div className="stack">
-          <RecommendationSection title="Scale Opportunities" rows={scale} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} />
-          <RecommendationSection title="Watchlist Risks" rows={watchlist} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} />
-          <RecommendationSection title="Listing Check Warnings" rows={listingWarnings} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} />
+          <RecommendationSection title="Scale Opportunities" rows={scale} footer={<button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>View in Approval Center</button>} />
+          <RecommendationSection title="Watchlist Risks" rows={watchlist} footer={<button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>View in Approval Center</button>} />
+          <RecommendationSection title="Listing Check Warnings" rows={listingWarnings} footer={<button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>View in Approval Center</button>} />
         </div>
       )}
-      <RecommendationSection title="Pending Saved Recommendations" rows={savedRows as unknown as AnyRecord[]} footer={<button type="button" onClick={() => setActiveTab("Approval Center")}>View in Approval Center</button>} loading={saved.loading} error={saved.error} />
+      <RecommendationSection title="Pending Saved Recommendations" rows={savedRows as unknown as AnyRecord[]} footer={<button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>View in Approval Center</button>} loading={saved.loading} error={saved.error} />
     </div>
   );
 }
@@ -8078,7 +8085,7 @@ function AlertCenterPage({ setActiveTab }: { setActiveTab: (tab: Tab) => void })
                   <div className="button-row compact">
                     {normalizeState(row.status) !== "RESOLVED" ? <button type="button" onClick={() => runAction(row.id, "acknowledge")} disabled={actionState.id === row.id}>Acknowledge</button> : null}
                     {normalizeState(row.status) !== "RESOLVED" ? <button type="button" className="secondary" onClick={() => runAction(row.id, "resolve")} disabled={actionState.id === row.id}>Resolve</button> : null}
-                    {row.actionId ? <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button> : null}
+                    {row.actionId ? <button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>Open Approval Center</button> : null}
                   </div>
                 </article>
               ))}
@@ -9172,7 +9179,7 @@ function ListingDraftsPage({
                   <TextDiffBlock current={row.currentValue} proposed={row.proposedValue} reason={row.reason} />
                   <div className="button-row compact">
                     {row.actionId ? (
-                      <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
+                      <button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>Open Approval Center</button>
                     ) : (
                       <button type="button" onClick={() => createAction(row.id)} disabled={processingId === row.id}>Create Approval Action</button>
                     )}
@@ -9294,7 +9301,7 @@ function CreativeRecommendationsPage({ setActiveTab }: { setActiveTab: (tab: Tab
                   <MetricRow label="Recommended Action" value={formatEmpty(row.recommendedAction)} />
                   <div className="button-row compact">
                     {row.actionId ? (
-                      <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
+                      <button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>Open Approval Center</button>
                     ) : (
                       <button type="button" onClick={() => createAction(row.id)} disabled={processingId === row.id}>Create Approval Action</button>
                     )}
@@ -10886,10 +10893,8 @@ function CompetitorBenchmarkCard({
 // this tool's own competitor_benchmark_* tables. None of it ever reaches Amazon's write APIs
 // or this app's live listing data (product_passports, amazon_sp_listings).
 function CompetitorBenchmarkToolPage({
-  setActiveTab,
   onOpenListingDraftsForSku
 }: {
-  setActiveTab: (tab: Tab) => void;
   onOpenListingDraftsForSku: (sku: string) => void;
 }) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
@@ -11470,8 +11475,11 @@ function CompetitorBenchmarkToolPage({
                             <TextDiffBlock current={draft.currentValue} proposed={draft.proposedValue} reason={draft.reason} />
                             <div className="button-row compact">
                               {draft.actionId ? (
-                                <Button className="secondary" onClick={() => setActiveTab("Approval Center")}>
-                                  Approval action already created -- open Approval Center
+                                <Button
+                                  className="secondary"
+                                  onClick={() => document.getElementById("approval-center-section")?.scrollIntoView({ behavior: "smooth" })}
+                                >
+                                  Approval action already created -- review it in Approvals below
                                 </Button>
                               ) : (
                                 <Button
@@ -11494,6 +11502,14 @@ function CompetitorBenchmarkToolPage({
           })}
         </>
       ) : null}
+
+      {/* Approval Center merged in here 2026-10-16, per founder request, instead of living behind
+          its own nav tab -- everything below is the same ApprovalCenterPage component, covering
+          every action type in the app (PPC, cost data, creative recommendations, passport drafts,
+          listing drafts including the ones created above, etc.), not just this tool's own actions. */}
+      <div id="approval-center-section" style={{ marginTop: 32, borderTop: "2px solid #e5e7eb", paddingTop: 24 }}>
+        <ApprovalCenterPage />
+      </div>
     </div>
   );
 }
@@ -12635,7 +12651,7 @@ function ApprovalExecutionPage({ setActiveTab }: { setActiveTab: (tab: Tab) => v
       <SafetyBanner text="Only approved actions can be previewed or shadow-executed. Live execution is blocked." />
       <div className="stack">
         <div className="button-row">
-          <button type="button" onClick={() => setActiveTab("Approval Center")}>Open Approval Center</button>
+          <button type="button" onClick={() => setActiveTab("Competitor Benchmark Tool")}>Open Approval Center</button>
           <button type="button" className="secondary" onClick={() => { summary.reload(); actions.reload(); }}>Refresh</button>
         </div>
         <div className="summary-strip command-summary">
