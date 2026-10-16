@@ -1332,7 +1332,9 @@ function App() {
           {activePage === "Playbooks" && <PlaybooksPage />}
           {activePage === "Ad Dayparting" && <AdDaypartingPage />}
           {activePage === "Cost Reduction Opportunities" && <CostReductionOpportunitiesPage />}
-          {activePage === "Competitor Benchmark Tool" && <CompetitorBenchmarkToolPage onOpenListingDraftsForSku={openListingDraftsForSku} />}
+          {activePage === "Competitor Benchmark Tool" && (
+            <CompetitorBenchmarkToolPage setActiveTab={setTechnicalTab} onOpenListingDraftsForSku={openListingDraftsForSku} />
+          )}
           {activePage === "Listing Optimizer" && <ListingOptimizerPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
           {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
@@ -10883,7 +10885,13 @@ function CompetitorBenchmarkCard({
 // Report-only, start to finish: every call this page makes either reads data or writes to
 // this tool's own competitor_benchmark_* tables. None of it ever reaches Amazon's write APIs
 // or this app's live listing data (product_passports, amazon_sp_listings).
-function CompetitorBenchmarkToolPage({ onOpenListingDraftsForSku }: { onOpenListingDraftsForSku: (sku: string) => void }) {
+function CompetitorBenchmarkToolPage({
+  setActiveTab,
+  onOpenListingDraftsForSku
+}: {
+  setActiveTab: (tab: Tab) => void;
+  onOpenListingDraftsForSku: (sku: string) => void;
+}) {
   const passports = useApi<ApiRows<ProductPassport>>(() => getJson(`/api/product-passports?sellerId=${SELLER_ID}`));
   const runsState = useApi<{ ok: boolean; rows: CompetitorBenchmarkRun[] }>(() => competitorBenchmarkApi.listRuns(SELLER_ID));
   // Cost & charge calculation inputs and Profitability Readiness (moved 2026-10-12 from the
@@ -10921,6 +10929,66 @@ function CompetitorBenchmarkToolPage({ onOpenListingDraftsForSku }: { onOpenList
   // mockup generation in flight so the button can show "Generating..." -- real OpenAI image
   // generation calls take noticeably longer than the Stage 1 text-only checklist above.
   const [requestingMockupForSku, setRequestingMockupForSku] = useState<string | null>(null);
+
+  // Inline listing-draft panel (built 2026-10-15, per founder feedback: keep listing modification
+  // on this page instead of sending them to Listing Drafts). This intentionally stops at "Create
+  // approval action" -- the real Amazon write still happens afterward in Approval Center ->
+  // Execution Gateway, same safety gate as every other listing-copy change in this app (confirmed
+  // with the founder before building this; see the standing "no Push to Amazon button" rule
+  // documented for Listing Optimizer's own image studio).
+  const [listingDraftsBySku, setListingDraftsBySku] = useState<Record<string, ListingDraft[]>>({});
+  const [loadingDraftsForSku, setLoadingDraftsForSku] = useState<string | null>(null);
+  const [generatingDraftForSku, setGeneratingDraftForSku] = useState<string | null>(null);
+  const [creatingActionForDraftId, setCreatingActionForDraftId] = useState<string | null>(null);
+  const [draftActionMessage, setDraftActionMessage] = useState<Record<string, string>>({});
+
+  async function loadListingDraftsForSku(sku: string) {
+    setLoadingDraftsForSku(sku);
+    try {
+      const result = await getJson<{ ok: boolean; rows?: ListingDraft[] }>(
+        `/api/listing-drafts/by-sku?sellerId=${SELLER_ID}&sku=${encodeURIComponent(sku)}`
+      );
+      setListingDraftsBySku((current) => ({ ...current, [sku]: result.rows ?? [] }));
+    } catch (error) {
+      setDraftActionMessage((current) => ({
+        ...current,
+        [sku]: error instanceof Error ? `Could not load listing drafts: ${error.message}` : "Could not load listing drafts for this SKU."
+      }));
+    } finally {
+      setLoadingDraftsForSku(null);
+    }
+  }
+
+  async function generateListingDraftForSku(sku: string) {
+    setGeneratingDraftForSku(sku);
+    setDraftActionMessage((current) => ({ ...current, [sku]: "" }));
+    try {
+      await postJson(`/api/listing-drafts/generate?sellerId=${SELLER_ID}`, { sku });
+      await loadListingDraftsForSku(sku);
+    } catch (error) {
+      setDraftActionMessage((current) => ({
+        ...current,
+        [sku]: error instanceof Error ? `Could not generate a listing draft: ${error.message}` : "Could not generate a listing draft for this SKU."
+      }));
+    } finally {
+      setGeneratingDraftForSku(null);
+    }
+  }
+
+  async function createActionForSkuDraft(sku: string, draftId: string) {
+    setCreatingActionForDraftId(draftId);
+    try {
+      await postJson(`/api/listing-drafts/${encodeURIComponent(draftId)}/create-action`, {});
+      await loadListingDraftsForSku(sku);
+    } catch (error) {
+      setDraftActionMessage((current) => ({
+        ...current,
+        [sku]: error instanceof Error ? `Could not create an approval action: ${error.message}` : "Could not create an approval action for this draft."
+      }));
+    } finally {
+      setCreatingActionForDraftId(null);
+    }
+  }
 
   function toggleKeywordSelection(ownSku: string, phrase: string) {
     setKeywordSelections((current) => {
@@ -11356,13 +11424,71 @@ function CompetitorBenchmarkToolPage({ onOpenListingDraftsForSku }: { onOpenList
                 );
               })()}
 
-              <div style={{ marginTop: 16 }}>
-                <strong>New listing draft</strong>
-                <p className="brand-card-note">
-                  Get an AI-written title, bullets, and description for this SKU -- it automatically weaves in any keywords you've saved above (Listing Drafts already does this; no separate "compiled listing" step needed).
-                </p>
-                <Button className="secondary" onClick={() => onOpenListingDraftsForSku(group.ownSku)}>Open in Listing Drafts</Button>
-              </div>
+              {(() => {
+                const draftsForSku = listingDraftsBySku[group.ownSku];
+                const relevantDrafts = (draftsForSku ?? []).filter((draft) =>
+                  ["TITLE", "BULLETS", "DESCRIPTION", "BACKEND_KEYWORDS"].includes(String(draft.draftType ?? ""))
+                );
+                return (
+                  <div style={{ marginTop: 16 }}>
+                    <strong>New listing draft</strong>
+                    <p className="brand-card-note">
+                      AI-written title, bullets, and description for this SKU -- automatically weaves in any keywords you've saved above. Review it here, then create an approval action; the actual Amazon update still goes through Approval Center -&gt; Execution Gateway afterward, same as every other listing change in this app.
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <Button
+                        className="secondary"
+                        onClick={() => loadListingDraftsForSku(group.ownSku)}
+                        disabled={loadingDraftsForSku === group.ownSku}
+                      >
+                        {loadingDraftsForSku === group.ownSku ? "Loading..." : draftsForSku ? "Refresh drafts" : "Load existing drafts"}
+                      </Button>
+                      <Button
+                        onClick={() => generateListingDraftForSku(group.ownSku)}
+                        disabled={generatingDraftForSku === group.ownSku}
+                      >
+                        {generatingDraftForSku === group.ownSku ? "Generating (AI call in progress)..." : "Generate listing draft for this SKU"}
+                      </Button>
+                      <Button className="secondary" onClick={() => onOpenListingDraftsForSku(group.ownSku)}>Open full Listing Drafts page</Button>
+                    </div>
+                    {draftActionMessage[group.ownSku] ? (
+                      <div className="soft-state" style={{ marginTop: 8 }}>{draftActionMessage[group.ownSku]}</div>
+                    ) : null}
+                    {draftsForSku && relevantDrafts.length === 0 ? (
+                      <div className="soft-state" style={{ marginTop: 8 }}>
+                        No listing drafts for this SKU yet -- click "Generate listing draft for this SKU" above.
+                      </div>
+                    ) : null}
+                    {relevantDrafts.length > 0 ? (
+                      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+                        {relevantDrafts.map((draft) => (
+                          <div key={draft.id} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 10 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                              <StatusBadge value={draft.draftType} />
+                              <StatusBadge value={draft.status ?? "DRAFTED"} />
+                            </div>
+                            <TextDiffBlock current={draft.currentValue} proposed={draft.proposedValue} reason={draft.reason} />
+                            <div className="button-row compact">
+                              {draft.actionId ? (
+                                <Button className="secondary" onClick={() => setActiveTab("Approval Center")}>
+                                  Approval action already created -- open Approval Center
+                                </Button>
+                              ) : (
+                                <Button
+                                  onClick={() => createActionForSkuDraft(group.ownSku, draft.id)}
+                                  disabled={creatingActionForDraftId === draft.id}
+                                >
+                                  {creatingActionForDraftId === draft.id ? "Creating..." : "Create approval action"}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </Card>
             );
           })}
