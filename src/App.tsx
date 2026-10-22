@@ -1,4 +1,5 @@
 import { ErrorBoundary } from "./ErrorBoundary";
+import { SocialMediaPage } from "./SocialMediaPage";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import "./App.css";
@@ -170,6 +171,7 @@ const technicalTabs = [
   "Competitor Benchmark Tool",
   "Listing Optimizer",
   "PPC Guardrail Triage",
+  "Social Media",
   "Social Content Calendar",
   // "Approval Center" removed as its own tab 2026-10-16 -- it's now a section rendered inside
   // "Competitor Benchmark Tool" (see CompetitorBenchmarkToolPage). Every former
@@ -1119,6 +1121,7 @@ const essentialNavItems: NavItem[] = [
   { label: "Competitor Benchmark Tool", page: "Competitor Benchmark Tool", note: "Benchmark competitors, review listing drafts, and decide on pending approvals" },
   { label: "Listing Drafts", page: "Listing Drafts", note: "AI-written title, bullet, and description drafts" },
   { label: "Sales & Ads", page: "Sales & Ads", note: "Real sales and ad performance" },
+  { label: "Social Media", page: "Social Media", note: "Social media agent crew: plan, create, approve, post, learn" },
   { label: "AI Actions", page: "AI Actions" },
   { label: "Reports", page: "Reports" }
 ];
@@ -1343,6 +1346,12 @@ function App() {
           )}
           {activePage === "Listing Optimizer" && <ListingOptimizerPage />}
           {activePage === "PPC Guardrail Triage" && <PpcGuardrailTriagePage />}
+          {activePage === "Social Media" && (
+            <div className="page">
+              <PageHeader title="Social Media" subtitle="A team of agents that plans, writes, checks and schedules your social posts, and stops to ask you at every important step." />
+              <SocialMediaPage onOpenCalendar={() => setTechnicalTab("Social Content Calendar")} />
+            </div>
+          )}
           {activePage === "Social Content Calendar" && <SocialContentCalendarPage />}
           {activePage === "Engine Command Center" && <EngineCommandCenterPage />}
           {activePage === "Approval Execution" && <ApprovalExecutionPage setActiveTab={setTechnicalTab} />}
