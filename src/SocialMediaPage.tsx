@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import "./social-media.css";
-import { socialContentLogApi } from "./api";
-import type { SocialContentLogRow } from "./types";
+import { socialContentLogApi, socialDraftsApi } from "./api";
+import type { SocialContentLogRow, SocialDraft, SocialDraftStatus } from "./types";
 
 /*
   Social Media tab (preview).
@@ -482,6 +482,14 @@ function prefersReducedMotion(): boolean {
 }
 
 type LogState = { state: "loading" | "error" | "ok"; rows: SocialContentLogRow[] };
+type DraftState = { state: "loading" | "error" | "ok"; rows: SocialDraft[] };
+
+const DRAFT_LABEL: Record<SocialDraftStatus, string> = {
+  DRAFT: "Waiting for you",
+  APPROVED: "Approved",
+  EDIT_REQUESTED: "Needs edits",
+  HELD: "On hold"
+};
 
 export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => void }) {
   const reduce = prefersReducedMotion();
@@ -493,6 +501,9 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
   const [brand, setBrand] = useState<Brand>("Leafy Dew");
   const [decisions, setDecisions] = useState<Record<string, "approved" | "held">>({});
   const [realLog, setRealLog] = useState<LogState>({ state: "loading", rows: [] });
+  const [drafts, setDrafts] = useState<DraftState>({ state: "loading", rows: [] });
+  const [draftBusy, setDraftBusy] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
 
   const { cur, t } = pos;
   const step = steps[cur];
@@ -517,6 +528,29 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
       .catch(() => { if (alive) setRealLog({ state: "error", rows: [] }); });
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    socialDraftsApi
+      .list(SELLER_ID)
+      .then((res) => { if (alive) setDrafts({ state: "ok", rows: Array.isArray(res.rows) ? res.rows : [] }); })
+      .catch(() => { if (alive) setDrafts({ state: "error", rows: [] }); });
+    return () => { alive = false; };
+  }, []);
+
+  // Records the owner's decision only. Nothing is published to any platform from here.
+  async function decideDraft(id: string, status: SocialDraftStatus) {
+    setDraftBusy(id);
+    setDraftError(null);
+    try {
+      const res = await socialDraftsApi.decide(id, { status });
+      setDrafts((d) => ({ ...d, rows: d.rows.map((r) => (r.id === id ? res.row : r)) }));
+    } catch {
+      setDraftError("Could not save your decision. Try again.");
+    } finally {
+      setDraftBusy(null);
+    }
+  }
 
   function goTo(i: number, keepPlaying = false) {
     const next = (i + steps.length) % steps.length;
@@ -722,6 +756,38 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
           </div>
         </aside>
       </div>
+
+      <section className="sm-real sm-drafts">
+        <div className="sm-zh"><h2>Drafts for your OK</h2><span className="sm-pill sm-pill-live">live data</span></div>
+        <p className="sm-zs">Real drafts written for your planned posts. Approve, ask for edits or hold. Approving only records your decision. Nothing is posted from here.</p>
+        {drafts.state === "loading" ? <div className="sm-empty">Loading...</div> : drafts.state === "error" ? (
+          <div className="sm-empty">Could not load the drafts. The backend may still be deploying.</div>
+        ) : drafts.rows.length === 0 ? (
+          <div className="sm-empty">No drafts yet.</div>
+        ) : (
+          <div className="sm-draftlist">
+            {draftError ? <div className="sm-empty">{draftError}</div> : null}
+            {drafts.rows.map((d) => (
+              <article className={`sm-draft sm-draft-${d.status.toLowerCase()}`} key={d.id}>
+                <header>
+                  <b>{d.plannedDate ?? "no date"}{d.slotTime ? ` · ${d.slotTime} IST` : ""}</b>
+                  <span className="sm-pill">{DRAFT_LABEL[d.status]}</span>
+                </header>
+                <small>{[d.occasion, d.format].filter(Boolean).join(" · ")}</small>
+                <p className="sm-draftcap">{d.caption}</p>
+                {d.hashtags ? <p className="sm-drafttags">{d.hashtags}</p> : null}
+                {d.creativeBrief ? <p className="sm-draftmeta"><b>To shoot:</b> {d.creativeBrief}</p> : null}
+                {d.checks ? <p className="sm-draftmeta"><b>Checks:</b> {d.checks}</p> : null}
+                <div className="sm-draftact">
+                  <button type="button" disabled={draftBusy === d.id || d.status === "APPROVED"} onClick={() => decideDraft(d.id, "APPROVED")}>Approve</button>
+                  <button type="button" className="secondary" disabled={draftBusy === d.id || d.status === "EDIT_REQUESTED"} onClick={() => decideDraft(d.id, "EDIT_REQUESTED")}>Needs edits</button>
+                  <button type="button" className="secondary" disabled={draftBusy === d.id || d.status === "HELD"} onClick={() => decideDraft(d.id, "HELD")}>Hold</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="sm-real">
         <div className="sm-zh"><h2>Your real post log</h2><span className="sm-pill sm-pill-live">live data</span></div>

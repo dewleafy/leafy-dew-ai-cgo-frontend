@@ -1430,6 +1430,28 @@ export type DaypartingCheckResult = {
 export type SocialContentPlatform = "INSTAGRAM" | "FACEBOOK" | "YOUTUBE" | "PINTEREST" | "OTHER";
 export type SocialContentStatus = "PLANNED" | "POSTED" | "SKIPPED";
 
+export type SocialDraftStatus = "DRAFT" | "APPROVED" | "EDIT_REQUESTED" | "HELD";
+
+export type SocialDraft = {
+  id: string;
+  sellerId: string;
+  contentLogId: string | null;
+  plannedDate: string | null;
+  slotTime: string | null;
+  platform: SocialContentPlatform;
+  format: string | null;
+  occasion: string | null;
+  caption: string;
+  hashtags: string | null;
+  creativeBrief: string | null;
+  checks: string | null;
+  status: SocialDraftStatus;
+  decisionNote: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SocialContentLogRow = {
   id: string;
   sellerId: string;
