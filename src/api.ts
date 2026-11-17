@@ -39,6 +39,8 @@ import type {
   SecurityAuditEvent,
   SecurityGuardrailSummary,
   SocialContentLogRow,
+  SocialDraft,
+  SocialDraftStatus,
   CompetitorBenchmarkRun,
   ListingOptimizerAnalysis
 } from "./types";
@@ -287,6 +289,13 @@ export const socialContentLogApi = {
   update: (id: string, body: Record<string, unknown>) =>
     patchJson<{ ok: boolean; row: SocialContentLogRow }>(`/api/social-content-log/${encodeURIComponent(id)}`, body),
   remove: (id: string) => deleteJson<{ ok: boolean }>(`/api/social-content-log/${encodeURIComponent(id)}`)
+};
+
+export const socialDraftsApi = {
+  list: (sellerId: string, limit = 100) =>
+    getJson<ApiRows<SocialDraft>>(`/api/social-drafts?sellerId=${sellerId}&limit=${limit}`),
+  decide: (id: string, body: { status: SocialDraftStatus; decisionNote?: string | null }) =>
+    patchJson<{ ok: boolean; row: SocialDraft }>(`/api/social-drafts/${encodeURIComponent(id)}`, body)
 };
 
 export const daypartingApi = {
