@@ -492,6 +492,12 @@ const DRAFT_LABEL: Record<SocialDraftStatus, string> = {
   HELD: "On hold"
 };
 
+const FIRST_POST = {
+  title: "Key holder with test tube planter",
+  imageUrl: "https://app.leafydew.in/ig-post-1.jpg",
+  caption: "Keys on the hooks, a little green by the door. This wall key holder has five hooks and an acrylic test tube where a plant cutting can grow in water.\n\nSmall corner, fresh start to the day. \u{1F33F}\n\n#LeafyDew #KeyHolder #PlantLovers #HomeDecorIndia"
+};
+
 export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => void }) {
   const reduce = prefersReducedMotion();
   const [mode, setMode] = useState<Mode>("weekly");
@@ -505,6 +511,7 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
   const [drafts, setDrafts] = useState<DraftState>({ state: "loading", rows: [] });
   const [draftBusy, setDraftBusy] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [igPost, setIgPost] = useState<{ state: "idle" | "loading" | "ok" | "error"; text?: string }>({ state: "idle" });
   const [igCheck, setIgCheck] = useState<{ state: "idle" | "loading" | "ok" | "error"; data?: InstagramStatusResponse }>({ state: "idle" });
 
   const { cur, t } = pos;
@@ -551,6 +558,18 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
       setDraftError("Could not save your decision. Try again.");
     } finally {
       setDraftBusy(null);
+    }
+  }
+
+  // Publishes ONE photo. Only runs when the owner clicks and confirms. Backend also needs INSTAGRAM_PUBLISH_ENABLED=true.
+  async function publishFirstPost() {
+    if (!window.confirm("Post this photo to @leafy_dew on Instagram right now?")) return;
+    setIgPost({ state: "loading" });
+    try {
+      const res = await instagramApi.publish({ imageUrl: FIRST_POST.imageUrl, caption: FIRST_POST.caption, title: FIRST_POST.title });
+      setIgPost({ state: "ok", text: `Posted.${res.permalink ? ` ${res.permalink}` : ""}` });
+    } catch (e) {
+      setIgPost({ state: "error", text: e instanceof Error && e.message ? e.message : "Could not post. Posting may be switched off." });
     }
   }
 
@@ -806,6 +825,10 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
         <div className="sm-zh"><h2>Instagram connection</h2><span className="sm-pill sm-pill-live">live check</span></div>
         <p className="sm-zs">Checks that the app can reach @leafy_dew. This only looks. It does not post anything.</p>
         <div className="sm-realact"><button type="button" onClick={checkInstagram} disabled={igCheck.state === "loading"}>{igCheck.state === "loading" ? "Checking..." : "Check Instagram"}</button></div>
+        <div className="sm-realact">
+          <button type="button" className="secondary" onClick={publishFirstPost} disabled={igPost.state === "loading"}>{igPost.state === "loading" ? "Posting..." : "Post first photo to Instagram"}</button>
+        </div>
+        {igPost.state === "ok" || igPost.state === "error" ? <div className="sm-empty">{igPost.text}</div> : null}
         {igCheck.state === "error" ? <div className="sm-empty">Could not reach the backend. It may still be deploying. Try again in a minute.</div> : null}
         {igCheck.state === "ok" && igCheck.data ? (
           <div className="sm-empty">
