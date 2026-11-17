@@ -309,7 +309,12 @@ export type InstagramStatusResponse = {
 };
 
 export const instagramApi = {
-  status: () => getJson<InstagramStatusResponse>("/api/instagram/status")
+  status: () => getJson<InstagramStatusResponse>("/api/instagram/status"),
+  publish: (body: { imageUrl: string; caption: string; title?: string }) =>
+    postJson<{ ok: boolean; mediaId?: string; permalink?: string | null; message?: string }>(
+      "/api/instagram/test-post",
+      { ...body, confirm: "POST_NOW" }
+    )
 };
 
 export const daypartingApi = {
