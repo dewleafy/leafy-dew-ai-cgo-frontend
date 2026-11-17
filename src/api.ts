@@ -298,6 +298,20 @@ export const socialDraftsApi = {
     patchJson<{ ok: boolean; row: SocialDraft }>(`/api/social-drafts/${encodeURIComponent(id)}`, body)
 };
 
+export type InstagramStatusResponse = {
+  ok: boolean;
+  configured: boolean;
+  publishEnabled: boolean;
+  hasToken: boolean;
+  hasUserId: boolean;
+  username: string | null;
+  error: string | null;
+};
+
+export const instagramApi = {
+  status: () => getJson<InstagramStatusResponse>("/api/instagram/status")
+};
+
 export const daypartingApi = {
   settings: (sellerId: string) => getJson<DaypartingSettingsResponse>(`/api/amazon-ads/dayparting/settings?sellerId=${sellerId}`),
   saveSettings: (sellerId: string, body: { enabled?: boolean; activeStartHour?: number; activeEndHour?: number }) =>

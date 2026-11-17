@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import "./social-media.css";
-import { socialContentLogApi, socialDraftsApi } from "./api";
+import { instagramApi, socialContentLogApi, socialDraftsApi } from "./api";
+import type { InstagramStatusResponse } from "./api";
 import type { SocialContentLogRow, SocialDraft, SocialDraftStatus } from "./types";
 
 /*
@@ -504,6 +505,7 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
   const [drafts, setDrafts] = useState<DraftState>({ state: "loading", rows: [] });
   const [draftBusy, setDraftBusy] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [igCheck, setIgCheck] = useState<{ state: "idle" | "loading" | "ok" | "error"; data?: InstagramStatusResponse }>({ state: "idle" });
 
   const { cur, t } = pos;
   const step = steps[cur];
@@ -549,6 +551,17 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
       setDraftError("Could not save your decision. Try again.");
     } finally {
       setDraftBusy(null);
+    }
+  }
+
+  // Read-only check. It never posts anything and never shows the token.
+  async function checkInstagram() {
+    setIgCheck({ state: "loading" });
+    try {
+      const data = await instagramApi.status();
+      setIgCheck({ state: "ok", data });
+    } catch {
+      setIgCheck({ state: "error" });
     }
   }
 
@@ -787,6 +800,23 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
             ))}
           </div>
         )}
+      </section>
+
+      <section className="sm-real">
+        <div className="sm-zh"><h2>Instagram connection</h2><span className="sm-pill sm-pill-live">live check</span></div>
+        <p className="sm-zs">Checks that the app can reach @leafy_dew. This only looks. It does not post anything.</p>
+        <div className="sm-realact"><button type="button" onClick={checkInstagram} disabled={igCheck.state === "loading"}>{igCheck.state === "loading" ? "Checking..." : "Check Instagram"}</button></div>
+        {igCheck.state === "error" ? <div className="sm-empty">Could not reach the backend. It may still be deploying. Try again in a minute.</div> : null}
+        {igCheck.state === "ok" && igCheck.data ? (
+          <div className="sm-empty">
+            {!igCheck.data.configured
+              ? "Not set up yet. The token or account ID is missing in Railway."
+              : igCheck.data.error
+                ? `Connection problem: ${igCheck.data.error}`
+                : `Connected to @${igCheck.data.username ?? "unknown"}.`}
+            {" "}Posting is {igCheck.data.publishEnabled ? "ON" : "OFF"}.
+          </div>
+        ) : null}
       </section>
 
       <section className="sm-real">
