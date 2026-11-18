@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { API_BASE } from "./api";
 import "./shop-page.css";
 
+// Leafy Dew Amazon Brand Store (clean link, no visit tracking parts).
+const BRAND_STORE_URL = "https://www.amazon.in/stores/page/88406B56-85D9-419E-A977-71CE99DC4AC0";
+
 type ShopItem = { asin: string; name: string; family: string; imageUrl: string | null; buyerLink: string };
 
 // Public link-in-bio page. No login. Reads only products the owner marked OK.
@@ -65,6 +68,7 @@ export function ShopPage() {
           </section>
         </>
       ) : null}
+      <a className="shop-store" href={BRAND_STORE_URL} target="_blank" rel="noopener noreferrer">See all Leafy Dew products on Amazon</a>
       <footer className="shop-foot">Links open Amazon.in. Leafy Dew</footer>
     </main>
   );
