@@ -1445,6 +1445,8 @@ export type SocialDraft = {
   hashtags: string | null;
   creativeBrief: string | null;
   checks: string | null;
+  productAsin?: string | null;
+  imageUrls?: string[];
   status: SocialDraftStatus;
   decisionNote: string | null;
   decidedAt: string | null;

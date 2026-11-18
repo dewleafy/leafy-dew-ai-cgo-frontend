@@ -298,6 +298,18 @@ export const socialDraftsApi = {
     patchJson<{ ok: boolean; row: SocialDraft }>(`/api/social-drafts/${encodeURIComponent(id)}`, body)
 };
 
+export type WriterResponse = {
+  ok: boolean;
+  created: { draftId: string; date: string | null; product: string; format: string }[];
+  skipped: { date: string | null; reason: string }[];
+  aiBlocked: string | null;
+  message?: string;
+};
+
+export const socialWriterApi = {
+  writeNext: (body: { days?: number; limit?: number }) => postJson<WriterResponse>("/api/social-writer/write-next", body)
+};
+
 export type InstagramStatusResponse = {
   ok: boolean;
   configured: boolean;
