@@ -317,6 +317,28 @@ export const instagramApi = {
     )
 };
 
+export type SocialMediaAsset = {
+  id: string;
+  brand: string;
+  kind: "PHOTO" | "VIDEO";
+  fileName: string;
+  publicUrl: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  note: string | null;
+  linkedDraftId: string | null;
+  createdAt: string;
+};
+
+export const socialMediaApi = {
+  list: () => getJson<{ ok: boolean; rows: SocialMediaAsset[] }>("/api/social-media/assets"),
+  uploadUrl: (body: { fileName: string; mimeType: string; sizeBytes: number; brand?: string }) =>
+    postJson<{ ok: boolean; path: string; signedUrl: string }>("/api/social-media/upload-url", body),
+  register: (body: { path: string; fileName: string; mimeType: string; sizeBytes: number; brand?: string }) =>
+    postJson<{ ok: boolean; row: SocialMediaAsset }>("/api/social-media/assets", body),
+  remove: (id: string) => deleteJson<{ ok: boolean }>(`/api/social-media/assets/${encodeURIComponent(id)}`)
+};
+
 export const daypartingApi = {
   settings: (sellerId: string) => getJson<DaypartingSettingsResponse>(`/api/amazon-ads/dayparting/settings?sellerId=${sellerId}`),
   saveSettings: (sellerId: string, body: { enabled?: boolean; activeStartHour?: number; activeEndHour?: number }) =>
