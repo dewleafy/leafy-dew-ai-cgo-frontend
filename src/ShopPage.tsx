@@ -1,0 +1,58 @@
+import { useEffect, useMemo, useState } from "react";
+import { API_BASE } from "./api";
+import "./shop-page.css";
+
+type ShopItem = { asin: string; name: string; family: string; imageUrl: string | null; buyerLink: string };
+
+// Public link-in-bio page. No login. Reads only products the owner marked OK.
+export function ShopPage() {
+  const [items, setItems] = useState<ShopItem[]>([]);
+  const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  const [family, setFamily] = useState("All");
+
+  useEffect(() => {
+    document.title = "Leafy Dew | Shop on Amazon";
+    let alive = true;
+    fetch(`${API_BASE}/api/public/shop`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("bad response"))))
+      .then((data: { items?: ShopItem[] }) => { if (alive) { setItems(Array.isArray(data.items) ? data.items : []); setState("ok"); } })
+      .catch(() => { if (alive) setState("error"); });
+    return () => { alive = false; };
+  }, []);
+
+  const families = useMemo(() => ["All", ...Array.from(new Set(items.map((item) => item.family))).sort()], [items]);
+  const shown = family === "All" ? items : items.filter((item) => item.family === family);
+
+  return (
+    <main className="shop">
+      <header className="shop-head">
+        <img src="/ld-logo.png" alt="Leafy Dew" width={64} height={64} />
+        <h1>Leafy Dew</h1>
+        <p>Connecting people with nature. Tap a product to see it on Amazon.</p>
+      </header>
+
+      {state === "loading" ? <p className="shop-note">Loading...</p> : null}
+      {state === "error" ? <p className="shop-note">Could not load products. Please try again in a moment.</p> : null}
+
+      {state === "ok" ? (
+        <>
+          <nav className="shop-chips" aria-label="Product types">
+            {families.map((name) => (
+              <button key={name} type="button" className={name === family ? "shop-chip on" : "shop-chip"} onClick={() => setFamily(name)}>{name}</button>
+            ))}
+          </nav>
+          <section className="shop-grid">
+            {shown.map((item) => (
+              <a className="shop-card" key={item.asin} href={item.buyerLink} target="_blank" rel="noopener noreferrer">
+                {item.imageUrl ? <img src={item.imageUrl} alt={item.name} loading="lazy" /> : <div className="shop-noimg" />}
+                <span className="shop-name">{item.name}</span>
+                <span className="shop-btn">Buy on Amazon</span>
+              </a>
+            ))}
+          </section>
+        </>
+      ) : null}
+      <footer className="shop-foot">Links open Amazon.in. Leafy Dew</footer>
+    </main>
+  );
+}
