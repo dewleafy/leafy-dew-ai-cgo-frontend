@@ -9,19 +9,24 @@ export function ShopPage() {
   const [items, setItems] = useState<ShopItem[]>([]);
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [family, setFamily] = useState("All");
+  const [featuredAsin, setFeaturedAsin] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Leafy Dew | Shop on Amazon";
     let alive = true;
     fetch(`${API_BASE}/api/public/shop`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("bad response"))))
-      .then((data: { items?: ShopItem[] }) => { if (alive) { setItems(Array.isArray(data.items) ? data.items : []); setState("ok"); } })
+      .then((data: { items?: ShopItem[]; featuredAsin?: string | null }) => { if (alive) { setItems(Array.isArray(data.items) ? data.items : []); setFeaturedAsin(data.featuredAsin ?? null); setState("ok"); } })
       .catch(() => { if (alive) setState("error"); });
     return () => { alive = false; };
   }, []);
 
   const families = useMemo(() => ["All", ...Array.from(new Set(items.map((item) => item.family))).sort()], [items]);
-  const shown = family === "All" ? items : items.filter((item) => item.family === family);
+  // A post can link straight to its product with /shop?p=ASIN. Otherwise the owner's featured product is used.
+  const wanted = new URLSearchParams(window.location.search).get("p");
+  const featured = items.find((item) => item.asin === wanted) ?? items.find((item) => item.asin === featuredAsin) ?? null;
+  const rest = items.filter((item) => item.asin !== featured?.asin);
+  const shown = family === "All" ? rest : rest.filter((item) => item.family === family);
 
   return (
     <main className="shop">
@@ -36,6 +41,14 @@ export function ShopPage() {
 
       {state === "ok" ? (
         <>
+          {featured ? (
+            <a className="shop-featured" href={featured.buyerLink} target="_blank" rel="noopener noreferrer">
+              <span className="shop-tag">Featured in our latest post</span>
+              {featured.imageUrl ? <img src={featured.imageUrl} alt={featured.name} /> : <div className="shop-noimg" />}
+              <span className="shop-name">{featured.name}</span>
+              <span className="shop-btn">Buy on Amazon</span>
+            </a>
+          ) : null}
           <nav className="shop-chips" aria-label="Product types">
             {families.map((name) => (
               <button key={name} type="button" className={name === family ? "shop-chip on" : "shop-chip"} onClick={() => setFamily(name)}>{name}</button>
