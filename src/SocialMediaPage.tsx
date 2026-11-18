@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import "./social-media.css";
 import { MediaLibrary } from "./MediaLibrary";
+import AutopostControl from "./AutopostControl";
 import { FeaturedProductControl } from "./FeaturedProductControl";
 import { instagramApi, socialContentLogApi, socialDraftsApi, socialWriterApi } from "./api";
 import type { InstagramStatusResponse } from "./api";
@@ -844,6 +845,8 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
           </div>
         )}
       </section>
+
+      <AutopostControl />
 
       <MediaLibrary />
 
