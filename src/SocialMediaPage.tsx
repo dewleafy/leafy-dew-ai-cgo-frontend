@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./social-media.css";
 import { MediaLibrary } from "./MediaLibrary";
 import { FeaturedProductControl } from "./FeaturedProductControl";
-import { instagramApi, socialContentLogApi, socialDraftsApi } from "./api";
+import { instagramApi, socialContentLogApi, socialDraftsApi, socialWriterApi } from "./api";
 import type { InstagramStatusResponse } from "./api";
 import type { SocialContentLogRow, SocialDraft, SocialDraftStatus } from "./types";
 
@@ -513,6 +513,7 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
   const [drafts, setDrafts] = useState<DraftState>({ state: "loading", rows: [] });
   const [draftBusy, setDraftBusy] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [writer, setWriter] = useState<{ state: "idle" | "loading" | "done" | "error"; text?: string }>({ state: "idle" });
   const [igPost, setIgPost] = useState<{ state: "idle" | "loading" | "ok" | "error"; text?: string }>({ state: "idle" });
   const [igCheck, setIgCheck] = useState<{ state: "idle" | "loading" | "ok" | "error"; data?: InstagramStatusResponse }>({ state: "idle" });
 
@@ -550,6 +551,22 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
   }, []);
 
   // Records the owner's decision only. Nothing is published to any platform from here.
+  async function writeNextDrafts() {
+    if (!window.confirm("Write up to 5 new photo-post drafts for the next 14 days? This uses a small amount of paid AI. Nothing is posted.")) return;
+    setWriter({ state: "loading" });
+    try {
+      const res = await socialWriterApi.writeNext({ days: 14, limit: 5 });
+      const parts = [`${res.created.length} new draft${res.created.length === 1 ? "" : "s"} written.`];
+      if (res.skipped.length) parts.push(`Skipped ${res.skipped.length}: ${res.skipped.slice(0, 3).map((x) => `${x.date ?? "?"} (${x.reason})`).join("; ")}.`);
+      if (res.aiBlocked) parts.push(`AI stopped: ${res.aiBlocked}.`);
+      setWriter({ state: "done", text: parts.join(" ") });
+      const fresh = await socialDraftsApi.list(SELLER_ID);
+      setDrafts({ state: "ok", rows: Array.isArray(fresh.rows) ? fresh.rows : [] });
+    } catch {
+      setWriter({ state: "error", text: "Could not write drafts. The backend may still be deploying. Try again in a minute." });
+    }
+  }
+
   async function decideDraft(id: string, status: SocialDraftStatus) {
     setDraftBusy(id);
     setDraftError(null);
@@ -794,6 +811,8 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
       <section className="sm-real sm-drafts">
         <div className="sm-zh"><h2>Drafts for your OK</h2><span className="sm-pill sm-pill-live">live data</span></div>
         <p className="sm-zs">Real drafts written for your planned posts. Approve, ask for edits or hold. Approving only records your decision. Nothing is posted from here.</p>
+        <div className="sm-realact"><button type="button" onClick={writeNextDrafts} disabled={writer.state === "loading"}>{writer.state === "loading" ? "Writing..." : "Write next drafts"}</button></div>
+        {writer.text ? <div className="sm-empty">{writer.text}</div> : null}
         {drafts.state === "loading" ? <div className="sm-empty">Loading...</div> : drafts.state === "error" ? (
           <div className="sm-empty">Could not load the drafts. The backend may still be deploying.</div>
         ) : drafts.rows.length === 0 ? (
@@ -808,6 +827,9 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
                   <span className="sm-pill">{DRAFT_LABEL[d.status]}</span>
                 </header>
                 <small>{[d.occasion, d.format].filter(Boolean).join(" · ")}</small>
+                {d.imageUrls && d.imageUrls.length ? (
+                  <div className="sm-draftimgs">{d.imageUrls.map((u) => <img key={u} src={u} alt="Product photo for this post" loading="lazy" />)}</div>
+                ) : null}
                 <p className="sm-draftcap">{d.caption}</p>
                 {d.hashtags ? <p className="sm-drafttags">{d.hashtags}</p> : null}
                 {d.creativeBrief ? <p className="sm-draftmeta"><b>To shoot:</b> {d.creativeBrief}</p> : null}
