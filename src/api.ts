@@ -339,6 +339,10 @@ export const socialMediaApi = {
   remove: (id: string) => deleteJson<{ ok: boolean }>(`/api/social-media/assets/${encodeURIComponent(id)}`)
 };
 
+export const shopFeatureApi = {
+  set: (asin: string | null) => putJson<{ ok: boolean }>("/api/shop-feature", { asin })
+};
+
 export const daypartingApi = {
   settings: (sellerId: string) => getJson<DaypartingSettingsResponse>(`/api/amazon-ads/dayparting/settings?sellerId=${sellerId}`),
   saveSettings: (sellerId: string, body: { enabled?: boolean; activeStartHour?: number; activeEndHour?: number }) =>

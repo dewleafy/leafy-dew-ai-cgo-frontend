@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import "./social-media.css";
 import { MediaLibrary } from "./MediaLibrary";
+import { FeaturedProductControl } from "./FeaturedProductControl";
 import { instagramApi, socialContentLogApi, socialDraftsApi } from "./api";
 import type { InstagramStatusResponse } from "./api";
 import type { SocialContentLogRow, SocialDraft, SocialDraftStatus } from "./types";
@@ -823,6 +824,8 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
       </section>
 
       <MediaLibrary />
+
+      <FeaturedProductControl />
 
       <section className="sm-real">
         <div className="sm-zh"><h2>Instagram connection</h2><span className="sm-pill sm-pill-live">live check</span></div>
