@@ -310,6 +310,22 @@ export const socialWriterApi = {
   writeNext: (body: { days?: number; limit?: number }) => postJson<WriterResponse>("/api/social-writer/write-next", body)
 };
 
+export type AutopostSettings = {
+  mode: "OFF" | "SHADOW" | "LIVE";
+  shadowStartedAt: string;
+  shadowDays: number;
+  shadowDaysRequired: number;
+  liveAllowed: boolean;
+  publishSwitchOn: boolean;
+};
+export type AutopostLogRow = { id: string; draft_id: string; mode: string; outcome: string; message: string | null; permalink: string | null; created_at: string };
+
+export const socialAutopostApi = {
+  get: () => getJson<{ ok: boolean; settings: AutopostSettings; log: AutopostLogRow[] }>("/api/social-autopost"),
+  setMode: (mode: "OFF" | "SHADOW" | "LIVE") => putJson<{ ok: boolean; settings: AutopostSettings; message?: string }>("/api/social-autopost/mode", { mode }),
+  checkNow: () => postJson<{ ok: boolean; result: string; log: AutopostLogRow[] }>("/api/social-autopost/check-now", {})
+};
+
 export type InstagramStatusResponse = {
   ok: boolean;
   configured: boolean;
