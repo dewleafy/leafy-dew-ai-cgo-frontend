@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import "./social-media.css";
 import { MediaLibrary } from "./MediaLibrary";
 import AutopostControl from "./AutopostControl";
+import WeekSummary from "./WeekSummary";
+import CommentsPanel from "./CommentsPanel";
 import { FeaturedProductControl } from "./FeaturedProductControl";
 import { instagramApi, socialContentLogApi, socialDraftsApi, socialWriterApi } from "./api";
 import type { InstagramStatusResponse } from "./api";
@@ -514,6 +516,7 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
   const [drafts, setDrafts] = useState<DraftState>({ state: "loading", rows: [] });
   const [draftBusy, setDraftBusy] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const [writer, setWriter] = useState<{ state: "idle" | "loading" | "done" | "error"; text?: string }>({ state: "idle" });
   const [igPost, setIgPost] = useState<{ state: "idle" | "loading" | "ok" | "error"; text?: string }>({ state: "idle" });
   const [igCheck, setIgCheck] = useState<{ state: "idle" | "loading" | "ok" | "error"; data?: InstagramStatusResponse }>({ state: "idle" });
@@ -829,7 +832,7 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
                 </header>
                 <small>{[d.occasion, d.format].filter(Boolean).join(" · ")}</small>
                 {d.imageUrls && d.imageUrls.length ? (
-                  <div className="sm-draftimgs">{d.imageUrls.map((u) => <img key={u} src={u} alt="Product photo for this post" loading="lazy" />)}</div>
+                  <div className="sm-draftimgs">{d.imageUrls.map((u) => <img key={u} src={u} alt="Picture for this post. Click to enlarge." loading="lazy" onClick={() => setPreview(u)} style={{ cursor: "zoom-in" }} />)}</div>
                 ) : null}
                 {d.videoUrl ? <video className="sm-draftvideo" src={d.videoUrl} controls preload="metadata" /> : null}
                 {d.mediaNote ? <p className="sm-draftmeta"><b>Picture or video:</b> {d.mediaNote}</p> : null}
@@ -848,7 +851,18 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
         )}
       </section>
 
+      {preview ? (
+        <div className="sm-lightbox" onClick={() => setPreview(null)} role="dialog" aria-label="Picture preview">
+          <img src={preview} alt="Large preview" />
+          <button type="button" className="secondary" onClick={() => setPreview(null)}>Close</button>
+        </div>
+      ) : null}
+
+      <WeekSummary />
+
       <AutopostControl />
+
+      <CommentsPanel />
 
       <MediaLibrary />
 
