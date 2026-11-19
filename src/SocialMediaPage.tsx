@@ -831,6 +831,8 @@ export function SocialMediaPage({ onOpenCalendar }: { onOpenCalendar?: () => voi
                 {d.imageUrls && d.imageUrls.length ? (
                   <div className="sm-draftimgs">{d.imageUrls.map((u) => <img key={u} src={u} alt="Product photo for this post" loading="lazy" />)}</div>
                 ) : null}
+                {d.videoUrl ? <video className="sm-draftvideo" src={d.videoUrl} controls preload="metadata" /> : null}
+                {d.mediaNote ? <p className="sm-draftmeta"><b>Picture or video:</b> {d.mediaNote}</p> : null}
                 <p className="sm-draftcap">{d.caption}</p>
                 {d.hashtags ? <p className="sm-drafttags">{d.hashtags}</p> : null}
                 {d.creativeBrief ? <p className="sm-draftmeta"><b>To shoot:</b> {d.creativeBrief}</p> : null}
