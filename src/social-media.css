@@ -278,3 +278,5 @@
 
 .sm-draftimgs { display: flex; gap: 8px; margin: 8px 0; }
 .sm-draftimgs img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(0,0,0,.1); }
+
+.sm-draftvideo { width: 180px; max-width: 100%; border-radius: 8px; margin: 8px 0; }

@@ -1447,6 +1447,8 @@ export type SocialDraft = {
   checks: string | null;
   productAsin?: string | null;
   imageUrls?: string[];
+  videoUrl?: string | null;
+  mediaNote?: string | null;
   status: SocialDraftStatus;
   decisionNote: string | null;
   decidedAt: string | null;
