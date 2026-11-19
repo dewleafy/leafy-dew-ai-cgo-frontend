@@ -326,6 +326,18 @@ export const socialAutopostApi = {
   checkNow: () => postJson<{ ok: boolean; result: string; log: AutopostLogRow[] }>("/api/social-autopost/check-now", {})
 };
 
+export type SummaryItem = { id: string; date: string | null; time: string | null; format: string | null; occasion: string | null; state: string; note: string };
+export type SocialSummary = { ok: boolean; items: SummaryItem[]; noDraft: { date: string | null; format: string | null; title: string | null }[]; postedLast7Days: number };
+export const socialSummaryApi = { get: () => getJson<SocialSummary>("/api/social-summary") };
+
+export type SocialComment = { id: string; username: string | null; comment_text: string; commented_at: string | null; status: string; suggested_reply: string | null; media_permalink: string | null };
+export const socialCommentsApi = {
+  list: () => getJson<{ ok: boolean; rows: SocialComment[] }>("/api/social-comments"),
+  sync: () => postJson<{ ok: boolean; drafted: number; aiBlocked: string | null; rows: SocialComment[]; message?: string }>("/api/social-comments/sync", {}),
+  ignore: (id: string) => postJson<{ ok: boolean }>(`/api/social-comments/${encodeURIComponent(id)}/ignore`, {}),
+  send: (id: string, reply: string) => postJson<{ ok: boolean; message?: string }>(`/api/social-comments/${encodeURIComponent(id)}/send`, { reply })
+};
+
 export type InstagramStatusResponse = {
   ok: boolean;
   configured: boolean;

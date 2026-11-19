@@ -280,3 +280,7 @@
 .sm-draftimgs img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(0,0,0,.1); }
 
 .sm-draftvideo { width: 180px; max-width: 100%; border-radius: 8px; margin: 8px 0; }
+
+.sm-replybox { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 8px; border-radius: 8px; border: 1px solid rgba(0,0,0,.15); font: inherit; }
+.sm-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
+.sm-lightbox img { max-width: 96vw; max-height: 82vh; border-radius: 10px; background: #fff; }
